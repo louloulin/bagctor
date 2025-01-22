@@ -1,0 +1,19 @@
+{
+  "name": "bactor",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "build": "bun build ./src/main.ts --outdir ./dist",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "fastq": "^1.18.0",
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "bun-types": "latest",
+    "typescript": "^5.0.0"
+  }
+}

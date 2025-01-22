@@ -13,7 +13,7 @@ export class PropsBuilder {
   }
 
   // For function-based actors
-  static fromProducer(producer: () => Actor): PropsBuilder {
+  static fromProducer(producer: (context: ActorContext) => Actor): PropsBuilder {
     const builder = new PropsBuilder();
     builder.props.producer = producer;
     return builder;
@@ -21,7 +21,7 @@ export class PropsBuilder {
 
   // For lambda-style message handlers
   static fromHandler(handler: (msg: Message) => void | Promise<void>): PropsBuilder {
-    return PropsBuilder.fromProducer(() => {
+    return PropsBuilder.fromProducer((context: ActorContext) => {
       class LambdaActor extends Actor {
         protected initializeBehaviors(): void {
           this.addBehavior('default', async (msg: Message) => {
@@ -29,7 +29,7 @@ export class PropsBuilder {
           });
         }
       }
-      return new LambdaActor(undefined as any);
+      return new LambdaActor(context);
     });
   }
 
@@ -38,7 +38,7 @@ export class PropsBuilder {
     initialState: T,
     handler: (state: T, msg: Message, context: ActorContext) => Promise<T> | T
   ): PropsBuilder {
-    return PropsBuilder.fromProducer(() => {
+    return PropsBuilder.fromProducer((context: ActorContext) => {
       class StatefulLambdaActor extends Actor {
         private customState: T = initialState;
 
@@ -48,13 +48,13 @@ export class PropsBuilder {
           });
         }
       }
-      return new StatefulLambdaActor(undefined as any);
+      return new StatefulLambdaActor(context);
     });
   }
 
   // For function-based actors with context
   static fromFunc(func: (context: ActorContext, message: Message) => void): PropsBuilder {
-    return PropsBuilder.fromProducer(() => {
+    return PropsBuilder.fromProducer((context: ActorContext) => {
       class FunctionalActor extends Actor {
         constructor(context: ActorContext) {
           super(context);
@@ -66,7 +66,7 @@ export class PropsBuilder {
           });
         }
       }
-      return new FunctionalActor(undefined as any);
+      return new FunctionalActor(context);
     });
   }
 

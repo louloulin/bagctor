@@ -18,6 +18,10 @@ export class ActorContext implements IActorContext {
     this.supervisorStrategy = supervisorStrategy;
   }
 
+  get self(): PID {
+    return this.pid;
+  }
+
   getPID(): PID {
     return this.pid;
   }

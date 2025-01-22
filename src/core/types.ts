@@ -24,6 +24,10 @@ export interface Message {
   type: string;
   payload?: any;
   sender?: PID;
+  // Additional properties for router messages
+  index?: number;
+  content?: string;
+  routee?: PID;
 }
 
 export interface PID {
@@ -35,7 +39,7 @@ export interface Props {
   // Class-based actor
   actorClass?: new (context: ActorContext) => Actor;
   // Function-based actor
-  producer?: () => Actor;
+  producer?: (context: ActorContext) => Actor;
   // Optional configuration
   mailboxType?: new () => IMailbox;
   supervisorStrategy?: SupervisorStrategy;

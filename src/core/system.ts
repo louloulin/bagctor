@@ -97,7 +97,8 @@ export class ActorSystem {
       }
     } else if (props.producer) {
       // Function-based actor
-      actor = props.producer();
+      this.contexts.set(pid.id, context);
+      actor = await props.producer(context);
       if (actor instanceof Actor) {
         // Set context if actor extends Actor
         Object.defineProperty(actor, 'context', {
@@ -111,10 +112,14 @@ export class ActorSystem {
     }
     
     this.actors.set(pid.id, actor);
-    this.contexts.set(pid.id, context);
+    if (!this.contexts.has(pid.id)) {
+      this.contexts.set(pid.id, context);
+    }
     
     try {
-      await actor.preStart();
+      if (actor.preStart) {
+        await actor.preStart();
+      }
     } catch (error) {
       await this.handlePreStartError(pid, error as Error);
       throw error;

@@ -46,7 +46,6 @@ export abstract class RouterActor extends Actor {
     this.routees = config.routees || [];
     this.router = this.createRouter(config.system);
     console.log(`[RouterActor ${routerId}] Created with ${this.routees.length} routees:`, this.routees.map(r => r.id));
-    this.initialize();
   }
 
   protected abstract createRouter(system: ActorSystem): IRouter;

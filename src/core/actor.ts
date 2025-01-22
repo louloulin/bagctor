@@ -1,7 +1,7 @@
 import { Message, PID, Props, ActorContext, ActorState } from './types';
 
 export abstract class Actor {
-  protected context: ActorContext;
+  public context: ActorContext;
   protected state: ActorState;
   private behaviors: Map<string, (message: Message) => Promise<void>> = new Map();
   
@@ -11,10 +11,16 @@ export abstract class Actor {
       behavior: 'default',
       data: {}
     };
-    this.initializeBehaviors();
+    this.initialize();
   }
 
-  protected abstract initializeBehaviors(): void;
+  protected initializeBehaviors(): void{
+    // To be implemented by child classes
+  }
+
+  protected initialize(): void {
+    this.initializeBehaviors();
+  }
 
   protected addBehavior(name: string, handler: (message: Message) => Promise<void>): void {
     this.behaviors.set(name, handler);

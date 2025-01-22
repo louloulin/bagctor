@@ -78,4 +78,8 @@ export class ActorSystem {
       await context.handleFailure(pid, error);
     }
   }
+
+  getActor(actorId: string): Actor | undefined {
+    return this.actors.get(actorId);
+  }
 } 

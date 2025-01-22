@@ -28,15 +28,19 @@ export interface Message {
 
 export interface PID {
   id: string;
-  address?: string;
+  address?: string;  // Format: "host:port", e.g., "localhost:50051"
 }
 
 export interface Props {
-  actorClass: new (context: ActorContext) => Actor;
+  // Class-based actor
+  actorClass?: new (context: ActorContext) => Actor;
+  // Function-based actor
+  producer?: () => Actor;
+  // Optional configuration
   mailboxType?: new () => IMailbox;
   supervisorStrategy?: SupervisorStrategy;
-  initialBehavior?: string;
   dispatcher?: MessageDispatcher;
+  address?: string;
   actorContext?: any;
 }
 
@@ -48,11 +52,7 @@ export enum SupervisorDirective {
 }
 
 export interface SupervisorStrategy {
-  handleFailure(
-    supervisor: ActorContext,
-    child: PID,
-    error: Error
-  ): SupervisorDirective;
+  handleFailure(supervisor: ActorContext, child: any, error: Error): SupervisorDirective;
 }
 
 // Actor Lifecycle Events
@@ -65,4 +65,4 @@ export interface ActorLifecycleEvent {
 export interface ActorState {
   behavior: string;
   data: any;
-} 
+}

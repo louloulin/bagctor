@@ -3,10 +3,10 @@ import { Message, PID } from '../core/types';
 import { RemoteTransport } from './transport';
 
 export class RemoteActorSystem extends ActorSystem {
-  private remotes: Map<string, RemoteTransport> = new Map();
+  protected remotes: Map<string, RemoteTransport> = new Map();
 
-  constructor(private address: string) {
-    super();
+  constructor(address?: string) {
+    super(address);
   }
 
   async send(pid: PID, message: Message): Promise<void> {

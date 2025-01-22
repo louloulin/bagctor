@@ -5,7 +5,7 @@ package actor;
 // Actor message service
 service ActorService {
   // Send a message to a remote actor
-  rpc SendMessage (MessageRequest) returns (MessageResponse);
+  rpc SendMessage (SendRequest) returns (SendResponse);
   
   // Spawn a remote actor
   rpc SpawnActor (SpawnRequest) returns (SpawnResponse);
@@ -14,62 +14,54 @@ service ActorService {
   rpc StopActor (StopRequest) returns (StopResponse);
   
   // Watch a remote actor's lifecycle
-  rpc WatchActor (WatchRequest) returns (stream WatchEvent);
+  rpc WatchActor (WatchRequest) returns (stream WatchResponse);
 }
 
 // Message to be sent to an actor
-message MessageRequest {
-  string target_id = 1;  // Target actor ID
-  string type = 2;       // Message type
-  bytes payload = 3;     // Serialized payload
-  string sender_id = 4;  // Sender actor ID (optional)
+message SendRequest {
+  string actorId = 1;
+  Message message = 2;
 }
 
-message MessageResponse {
-  bool success = 1;
-  string error = 2;
-}
+message SendResponse {}
 
 // Request to spawn a new actor
 message SpawnRequest {
-  string actor_class = 1;    // Actor class name to spawn
-  bytes init_payload = 2;    // Initialization payload
-  string parent_id = 3;      // Parent actor ID (optional)
-  string mailbox_type = 4;   // Mailbox type (optional)
+  string className = 1;
+  string id = 2;  // Optional, if not provided server will generate
 }
 
 message SpawnResponse {
-  string actor_id = 1;
-  bool success = 2;
-  string error = 3;
+  string id = 1;
+  string address = 2;
 }
 
 // Request to stop an actor
 message StopRequest {
-  string actor_id = 1;
+  string actorId = 1;
 }
 
-message StopResponse {
-  bool success = 1;
-  string error = 2;
-}
+message StopResponse {}
 
 // Request to watch an actor
 message WatchRequest {
-  string actor_id = 1;
-  string watcher_id = 2;
+  string actorId = 1;
+  string watcherId = 2;
 }
 
 // Actor lifecycle events
-message WatchEvent {
-  string actor_id = 1;
-  EventType event_type = 2;
-  string error = 3;
+message WatchResponse {
+  string type = 1;  // 'terminated' or 'restarted'
+  string actorId = 2;
 }
 
-enum EventType {
-  STARTED = 0;
-  STOPPED = 1;
-  RESTARTED = 2;
-  FAILED = 3;
+message Message {
+  string type = 1;
+  bytes payload = 2;
+  PID sender = 3;
+}
+
+message PID {
+  string id = 1;
+  string address = 2;
 } 

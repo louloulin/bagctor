@@ -1,7 +1,6 @@
 import { Actor } from '../core/actor';
 import { Message } from '../core/types';
-import { ActorServer } from '../remote/server';
-import { ActorClient } from '../remote/client';
+import { ActorSystem } from '../core/system';
 
 // Example remote actor
 class CalculatorActor extends Actor {
@@ -24,59 +23,69 @@ class CalculatorActor extends Actor {
   }
 }
 
-// Example of how to use remote actors
+// Example of location transparent actor communication
 async function main() {
-  // Start the server
-  const server = new ActorServer('0.0.0.0:50051');
+  // Start server system
+  const serverSystem = new ActorSystem('0.0.0.0:50051');
   
-  // Register the calculator actor
-  server.registerActor('CalculatorActor', CalculatorActor);
+  // Register the calculator actor on the server
+  await serverSystem.spawn({
+    actorClass: CalculatorActor,
+    actorContext: { isTemplate: true }  // This instance will be used as a template
+  });
   
-  await server.start();
-  console.log('Server started');
+  await serverSystem.start();
+  console.log('Server system started');
 
-  // Connect the client
-  const client = new ActorClient('localhost:50051');
-  await client.connect();
-  console.log('Client connected');
+  // Start client system
+  const clientSystem = new ActorSystem();
+  console.log('Client system started');
 
   try {
     // Spawn a remote calculator actor
-    const calculatorPid = await client.spawnActor('CalculatorActor');
-    console.log('Spawned calculator actor:', calculatorPid.id);
-
-    // Send some calculations
-    await client.sendMessage(calculatorPid.id, {
-      type: 'add',
-      payload: { x: 5, y: 3 }
+    const calculatorPid = await clientSystem.spawn({
+      actorClass: CalculatorActor,
+      address: 'localhost:50051'  // This makes it remote
     });
+    console.log('Spawned calculator actor:', calculatorPid);
 
-    await client.sendMessage(calculatorPid.id, {
-      type: 'add',
-      payload: { x: 10, y: 20 }
+    // Create a local actor that uses the remote calculator
+    class UserActor extends Actor {
+      protected initializeBehaviors(): void {
+        this.addBehavior('default', async (msg: Message) => {
+          if (msg.type === 'calculate') {
+            // Send message to remote actor - looks just like local communication
+            await this.context.send(calculatorPid, {
+              type: 'add',
+              payload: { x: 5, y: 3 }
+            });
+          } else if (msg.type === 'result') {
+            console.log('Received result:', msg.payload.result);
+          }
+        });
+      }
+    }
+
+    // Spawn the local user actor
+    const userPid = await clientSystem.spawn({
+      actorClass: UserActor
     });
+    console.log('Spawned user actor:', userPid);
 
-    // Watch the calculator actor
-    const watcher = client.watchActor(calculatorPid.id, 'watcher1');
-    watcher.on('data', (event: any) => {
-      console.log('Actor event:', event);
-    });
+    // Send a calculation request
+    await clientSystem.send(userPid, { type: 'calculate' });
 
-    // Wait a bit before stopping
+    // Wait a bit to see the results
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Stop the calculator actor
-    await client.stopActor(calculatorPid.id);
-    console.log('Stopped calculator actor');
-
     // Clean up
-    client.close();
-    await server.stop();
-    console.log('Server stopped');
+    await clientSystem.stop();
+    await serverSystem.stop();
+    console.log('Systems stopped');
   } catch (error) {
     console.error('Error:', error);
-    client.close();
-    await server.stop();
+    await clientSystem.stop();
+    await serverSystem.stop();
   }
 }
 

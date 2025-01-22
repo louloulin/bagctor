@@ -7,17 +7,22 @@
     "build": "bun build ./src/main.ts --outdir ./dist",
     "test": "bun test",
     "test:perf": "bun test src/tests/performance.test.ts",
-    "example:remote": "bun run src/examples/remote.ts"
+    "example:remote": "bun run src/examples/remote.ts",
+    "example:fun": "bun run src/examples/functional.ts",
+    "example:lambda": "bun run src/examples/lambda.ts",
+    "check": "bun run scripts/check.ts",
+    "compile": "tsc --noEmit"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.12.5",
-    "@grpc/proto-loader": "^0.7.13",
+    "@grpc/grpc-js": "^1.9.13",
+    "@grpc/proto-loader": "^0.7.10",
     "fastq": "^1.18.0",
-    "uuid": "^11.0.5"
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "@types/uuid": "^10.0.0",
+    "@types/node": "^20.10.5",
+    "@types/uuid": "^9.0.7",
     "bun-types": "latest",
-    "typescript": "^5.0.0"
+    "typescript": "^5.3.3"
   }
 }

@@ -1,143 +1,119 @@
-import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
+import { credentials, loadPackageDefinition } from '@grpc/grpc-js';
+import { loadSync } from '@grpc/proto-loader';
 import { ProtoGrpcType } from './protos/actor';
 import { Message, PID } from '../core/types';
 import path from 'path';
 
 const PROTO_PATH = path.resolve(__dirname, './protos/actor.proto');
+const packageDefinition = loadSync(PROTO_PATH);
+const proto = loadPackageDefinition(packageDefinition) as unknown as ProtoGrpcType;
 
 export class ActorClient {
   private client: any;
+  private watchCallbacks: Map<string, Set<(event: string) => void>> = new Map();
 
-  constructor(private host: string = 'localhost:50051') {}
-
-  async connect(): Promise<void> {
-    const packageDefinition = await protoLoader.load(PROTO_PATH, {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true
-    });
-
-    const proto = grpc.loadPackageDefinition(packageDefinition) as unknown as ProtoGrpcType;
+  constructor(private address: string) {
     this.client = new proto.actor.ActorService(
-      this.host,
-      grpc.credentials.createInsecure()
+      address,
+      credentials.createInsecure()
     );
   }
 
-  async sendMessage(targetId: string, message: Message): Promise<void> {
+  async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      try {
-        const payload = message.payload ? 
-          Buffer.from(JSON.stringify(message.payload), 'utf-8') : 
-          undefined;
-
-        const request = {
-          target_id: targetId,
-          type: message.type,
-          payload,
-          sender_id: message.sender?.id
-        };
-
-        this.client.sendMessage(request, (error: any, response: any) => {
-          if (error) {
-            console.error('gRPC error:', error);
-            reject(error);
-            return;
-          }
-          if (!response?.success) {
-            const err = new Error(response?.error || 'Unknown error');
-            console.error('Send message failed:', err);
-            reject(err);
-            return;
-          }
+      this.client.waitForReady(Date.now() + 5000, (error?: Error) => {
+        if (error) {
+          reject(error);
+        } else {
           resolve();
-        });
-      } catch (error) {
-        console.error('Send message error:', error);
-        reject(error);
-      }
+        }
+      });
     });
   }
 
-  async spawnActor(
-    actorClass: string,
-    initPayload?: any,
-    mailboxType?: string
-  ): Promise<PID> {
+  async spawnActor(className: string): Promise<PID> {
     return new Promise((resolve, reject) => {
-      try {
-        const request = {
-          actor_class: actorClass,
-          init_payload: undefined,
-          mailbox_type: mailboxType
-        };
+      this.client.spawnActor({ className }, (error: Error | null, response: any) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve({
+            id: response.id,
+            address: response.address || this.address
+          });
+        }
+      });
+    });
+  }
 
-        this.client.spawnActor(request, (error: any, response: any) => {
+  async sendMessage(actorId: string, message: Message): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.client.sendMessage(
+        {
+          actorId,
+          message: {
+            ...message,
+            sender: message.sender ? {
+              ...message.sender,
+              address: message.sender.address
+            } : undefined
+          }
+        },
+        (error: Error | null) => {
           if (error) {
-            console.error('gRPC error:', error);
             reject(error);
-            return;
+          } else {
+            resolve();
           }
-          if (!response?.success) {
-            const err = new Error(response?.error || 'Unknown error');
-            console.error('Spawn actor failed:', err);
-            reject(err);
-            return;
-          }
-          resolve({ id: response.actor_id });
-        });
-      } catch (error) {
-        console.error('Spawn actor error:', error);
-        reject(error);
-      }
+        }
+      );
     });
   }
 
   async stopActor(actorId: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      try {
-        this.client.stopActor({ actor_id: actorId }, (error: any, response: any) => {
-          if (error) {
-            console.error('gRPC error:', error);
-            reject(error);
-            return;
-          }
-          if (!response?.success) {
-            const err = new Error(response?.error || 'Unknown error');
-            console.error('Stop actor failed:', err);
-            reject(err);
-            return;
-          }
+      this.client.stopActor({ actorId }, (error: Error | null) => {
+        if (error) {
+          reject(error);
+        } else {
           resolve();
-        });
-      } catch (error) {
-        console.error('Stop actor error:', error);
-        reject(error);
-      }
+        }
+      });
     });
   }
 
-  watchActor(actorId: string, watcherId: string): grpc.ClientReadableStream<any> {
-    const request = {
-      actor_id: actorId,
-      watcher_id: watcherId
-    };
+  watchActor(actorId: string, watcherId: string): void {
+    const call = this.client.watchActor({ actorId, watcherId });
 
-    const stream = this.client.watchActor(request);
-    
-    stream.on('error', (error: Error) => {
-      console.error(`Watch error for actor ${actorId}:`, error);
+    // Set up monitoring callbacks
+    if (!this.watchCallbacks.has(actorId)) {
+      this.watchCallbacks.set(actorId, new Set());
+    }
+
+    const callbacks = this.watchCallbacks.get(actorId)!;
+
+    call.on('data', (event: any) => {
+      callbacks.forEach(callback => callback(event.type));
     });
 
-    return stream;
+    call.on('end', () => {
+      this.watchCallbacks.delete(actorId);
+    });
+
+    call.on('error', (error: Error) => {
+      console.error(`Watch error for actor ${actorId}:`, error);
+      this.watchCallbacks.delete(actorId);
+    });
+  }
+
+  onActorEvent(actorId: string, callback: (event: string) => void): void {
+    if (!this.watchCallbacks.has(actorId)) {
+      this.watchCallbacks.set(actorId, new Set());
+    }
+    this.watchCallbacks.get(actorId)!.add(callback);
   }
 
   close(): void {
-    if (this.client) {
-      grpc.closeClient(this.client);
-    }
+    this.client.close();
   }
 } 

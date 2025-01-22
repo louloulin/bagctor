@@ -66,7 +66,6 @@ async function runBenchmark(
       }
     },
     mailboxType,
-    initialBehavior: 'default',
     actorContext: { ...context, onComplete: resolvePromise }
   });
 
@@ -117,7 +116,6 @@ test("Benchmark PriorityMailbox with mixed priorities", async () => {
       }
     },
     mailboxType: PriorityMailbox,
-    initialBehavior: 'default',
     actorContext: { expectedMessages: numMessages, onComplete: resolvePromise }
   });
 
@@ -158,7 +156,6 @@ test("Benchmark concurrent message sending", async () => {
           this.onComplete = resolvePromise;
         }
       },
-      initialBehavior: 'default',
       actorContext: { expectedMessages: messagesPerActor, onComplete: resolvePromise }
     });
     pids.push(pid);

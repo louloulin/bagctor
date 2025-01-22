@@ -97,20 +97,20 @@ await system.send(pid, {
 
 ### Remote Communication
 
-The framework supports distributed actor systems using gRPC for remote communication:
+The framework supports distributed actor systems with location transparency:
 
 ```typescript
-import { ActorServer } from './src/remote/server';
-import { ActorClient } from './src/remote/client';
+import { ActorSystem } from './src/core/system';
+import { Actor } from './src/core/actor';
+import { Message } from './src/core/types';
 
-// Server-side
+// Define an actor that can run locally or remotely
 class CalculatorActor extends Actor {
   protected initializeBehaviors(): void {
     this.addBehavior('default', async (msg: Message) => {
       if (msg.type === 'add') {
         const { x, y } = msg.payload;
         const result = x + y;
-        console.log(`Calculator: ${x} + ${y} = ${result}`);
         
         if (msg.sender) {
           await this.context.send(msg.sender, {
@@ -123,30 +123,46 @@ class CalculatorActor extends Actor {
   }
 }
 
-// Start server
-const server = new ActorServer('0.0.0.0:50051');
-server.registerActor('CalculatorActor', CalculatorActor);
-await server.start();
+// Start server system
+const serverSystem = new ActorSystem('0.0.0.0:50051');
+await serverSystem.start();
 
-// Client-side
-const client = new ActorClient('localhost:50051');
-await client.connect();
+// Start client system
+const clientSystem = new ActorSystem();
 
-// Spawn remote actor
-const calculatorPid = await client.spawnActor('CalculatorActor');
-
-// Send message to remote actor
-await client.sendMessage(calculatorPid.id, {
-  type: 'add',
-  payload: { x: 5, y: 3 }
+// Spawn a remote calculator actor
+const calculatorPid = await clientSystem.spawn({
+  actorClass: CalculatorActor,
+  address: 'localhost:50051'  // This makes it remote
 });
 
-// Watch remote actor lifecycle
-const watcher = client.watchActor(calculatorPid.id, 'watcher1');
-watcher.on('data', (event) => {
-  console.log('Actor event:', event);
+// Create a local actor that uses the remote calculator
+class UserActor extends Actor {
+  protected initializeBehaviors(): void {
+    this.addBehavior('default', async (msg: Message) => {
+      if (msg.type === 'calculate') {
+        // Send message to remote actor - looks just like local communication
+        await this.context.send(calculatorPid, {
+          type: 'add',
+          payload: { x: 5, y: 3 }
+        });
+      } else if (msg.type === 'result') {
+        console.log('Received result:', msg.payload.result);
+      }
+    });
+  }
+}
+
+// Spawn the local user actor
+const userPid = await clientSystem.spawn({
+  actorClass: UserActor
 });
+
+// Send a calculation request - the user actor will communicate with the remote calculator
+await clientSystem.send(userPid, { type: 'calculate' });
 ```
+
+The example above demonstrates location transparency - the code looks the same whether actors are local or remote. The only difference is the addition of an `address` property when spawning remote actors.
 
 ### Using Priority Mailbox
 

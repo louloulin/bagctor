@@ -1,215 +1,193 @@
-import * as grpc from '@grpc/grpc-js';
-import * as protoLoader from '@grpc/proto-loader';
+import { Server, ServerCredentials } from '@grpc/grpc-js';
+import { loadPackageDefinition } from '@grpc/grpc-js';
+import { loadSync } from '@grpc/proto-loader';
 import { ProtoGrpcType } from './protos/actor';
-import { ActorSystem } from '../core/system';
-import { Message, PID } from '../core/types';
-import { DefaultMailbox, PriorityMailbox } from '../core/mailbox';
+import { Actor, Message, PID } from '../core/types';
+import { ActorContext } from '../core/context';
+import { DefaultMailbox } from '../core/mailbox';
 import path from 'path';
 
 const PROTO_PATH = path.resolve(__dirname, './protos/actor.proto');
-
-// Actor class registry
-const actorRegistry = new Map<string, any>();
+const packageDefinition = loadSync(PROTO_PATH);
+const proto = loadPackageDefinition(packageDefinition) as unknown as ProtoGrpcType;
 
 export class ActorServer {
-  private server: grpc.Server;
-  private actorSystem: ActorSystem;
-  private watchedActors: Map<string, Set<string>> = new Map(); // actorId -> Set of watcherIds
-  private watchStreams: Map<string, grpc.ServerWritableStream<any, any>> = new Map(); // watcherId -> stream
+  private server: Server;
+  private actorClasses: Map<string, new (context: ActorContext) => Actor> = new Map();
+  private actors: Map<string, Actor> = new Map();
+  private contexts: Map<string, ActorContext> = new Map();
+  private watchCallbacks: Map<string, Set<(event: string) => void>> = new Map();
 
-  constructor(private host: string = '0.0.0.0:50051') {
-    this.server = new grpc.Server();
-    this.actorSystem = new ActorSystem();
-  }
-
-  // Register an actor class
-  registerActor(name: string, actorClass: any) {
-    actorRegistry.set(name, actorClass);
-  }
-
-  async start(): Promise<void> {
-    const packageDefinition = await protoLoader.load(PROTO_PATH, {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true
-    });
-
-    const proto = grpc.loadPackageDefinition(packageDefinition) as unknown as ProtoGrpcType;
-
+  constructor(private address: string) {
+    this.server = new Server();
     this.server.addService(proto.actor.ActorService.service, {
-      sendMessage: this.handleSendMessage.bind(this),
       spawnActor: this.handleSpawnActor.bind(this),
+      sendMessage: this.handleSendMessage.bind(this),
       stopActor: this.handleStopActor.bind(this),
       watchActor: this.handleWatchActor.bind(this)
     });
+  }
 
+  registerActor(name: string, actorClass: new (context: ActorContext) => Actor): void {
+    this.actorClasses.set(name, actorClass);
+  }
+
+  async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server.bindAsync(
-        this.host,
-        grpc.ServerCredentials.createInsecure(),
-        (error, port) => {
+        this.address,
+        ServerCredentials.createInsecure(),
+        (error) => {
           if (error) {
             reject(error);
-            return;
+          } else {
+            this.server.start();
+            resolve();
           }
-          console.log(`Actor server running at ${this.host}`);
-          resolve();
         }
       );
     });
   }
 
-  private async handleSendMessage(
-    call: grpc.ServerUnaryCall<any, any>,
-    callback: grpc.sendUnaryData<any>
-  ) {
-    try {
-      const { target_id, type, payload, sender_id } = call.request;
-      const message: Message = {
-        type,
-        payload: payload ? JSON.parse(payload.toString('utf-8')) : undefined,
-        sender: sender_id ? { id: sender_id } : undefined
-      };
-
-      await this.actorSystem.send({ id: target_id }, message);
-      callback(null, { success: true });
-    } catch (error: any) {
-      console.error('Send message error:', error);
-      callback(null, { success: false, error: error.message || 'Unknown error' });
-    }
-  }
-
-  private async handleSpawnActor(
-    call: grpc.ServerUnaryCall<any, any>,
-    callback: grpc.sendUnaryData<any>
-  ) {
-    try {
-      const { actor_class, init_payload, parent_id, mailbox_type } = call.request;
-      
-      const ActorClass = this.getActorClass(actor_class);
-      if (!ActorClass) {
-        throw new Error(`Actor class ${actor_class} not found`);
-      }
-
-      const pid = await this.actorSystem.spawn({
-        actorClass: ActorClass,
-        mailboxType: mailbox_type ? this.getMailboxType(mailbox_type) : undefined,
-        actorContext: undefined
-      });
-
-      // Notify watchers
-      this.notifyWatchers(pid.id, 'STARTED');
-
-      callback(null, { success: true, actor_id: pid.id });
-    } catch (error: any) {
-      console.error('Spawn actor error:', error);
-      callback(null, { success: false, error: error.message || 'Unknown error' });
-    }
-  }
-
-  private async handleStopActor(
-    call: grpc.ServerUnaryCall<any, any>,
-    callback: grpc.sendUnaryData<any>
-  ) {
-    try {
-      const { actor_id } = call.request;
-      await this.actorSystem.stop({ id: actor_id });
-      
-      // Notify watchers
-      this.notifyWatchers(actor_id, 'STOPPED');
-      
-      callback(null, { success: true });
-    } catch (error: any) {
-      console.error('Stop actor error:', error);
-      callback(null, { success: false, error: error.message || 'Unknown error' });
-    }
-  }
-
-  private handleWatchActor(call: grpc.ServerWritableStream<any, any>) {
-    const { actor_id, watcher_id } = call.request;
-    
-    // Add watcher
-    if (!this.watchedActors.has(actor_id)) {
-      this.watchedActors.set(actor_id, new Set());
-    }
-    this.watchedActors.get(actor_id)!.add(watcher_id);
-
-    // Store the stream
-    this.watchStreams.set(watcher_id, call);
-
-    // Send initial status
-    const actor = this.actorSystem.getActor(actor_id);
-    if (actor) {
-      call.write({
-        actor_id,
-        event_type: 'STARTED',
-        error: null
-      });
-    }
-
-    // Handle call end
-    call.on('cancelled', () => {
-      const watchers = this.watchedActors.get(actor_id);
-      if (watchers) {
-        watchers.delete(watcher_id);
-        if (watchers.size === 0) {
-          this.watchedActors.delete(actor_id);
-        }
-      }
-      this.watchStreams.delete(watcher_id);
-    });
-  }
-
-  private notifyWatchers(actorId: string, eventType: string, error?: string) {
-    const watchers = this.watchedActors.get(actorId);
-    if (watchers) {
-      const event = {
-        actor_id: actorId,
-        event_type: eventType,
-        error: error || null
-      };
-
-      watchers.forEach(watcherId => {
-        const stream = this.watchStreams.get(watcherId);
-        if (stream) {
-          stream.write(event);
-        }
-      });
-    }
-  }
-
-  private getActorClass(className: string): any {
-    return actorRegistry.get(className);
-  }
-
-  private getMailboxType(typeName: string): any {
-    switch (typeName.toLowerCase()) {
-      case 'priority':
-        return PriorityMailbox;
-      case 'default':
-      default:
-        return DefaultMailbox;
-    }
-  }
-
-  stop(): Promise<void> {
+  async stop(): Promise<void> {
     return new Promise((resolve) => {
-      // Clean up all watch streams
-      this.watchStreams.forEach(stream => {
-        try {
-          stream.end();
-        } catch (error) {
-          console.error('Error closing watch stream:', error);
-        }
-      });
-      this.watchStreams.clear();
-      this.watchedActors.clear();
-
       this.server.tryShutdown(() => {
         resolve();
       });
     });
+  }
+
+  private async handleSpawnActor(call: any, callback: any): Promise<void> {
+    try {
+      const { className } = call.request;
+      const actorClass = this.actorClasses.get(className);
+
+      if (!actorClass) {
+        callback(new Error(`Actor class ${className} not found`));
+        return;
+      }
+
+      const pid: PID = { id: call.request.id || crypto.randomUUID(), address: this.address };
+      const context = new ActorContext(pid, this as any, DefaultMailbox);
+      const actor = new actorClass(context);
+
+      this.actors.set(pid.id, actor);
+      this.contexts.set(pid.id, context);
+
+      try {
+        await actor.preStart();
+        callback(null, { id: pid.id, address: pid.address });
+      } catch (error) {
+        callback(error);
+      }
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  private async handleSendMessage(call: any, callback: any): Promise<void> {
+    try {
+      const { actorId, message } = call.request;
+      const actor = this.actors.get(actorId);
+
+      if (!actor) {
+        callback(new Error(`Actor ${actorId} not found`));
+        return;
+      }
+
+      const deserializedMessage: Message = {
+        ...message,
+        sender: message.sender ? {
+          ...message.sender,
+          address: message.sender.address
+        } : undefined
+      };
+
+      try {
+        await actor.receive(deserializedMessage);
+        callback(null, {});
+      } catch (error) {
+        callback(error);
+      }
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  private async handleStopActor(call: any, callback: any): Promise<void> {
+    try {
+      const { actorId } = call.request;
+      const actor = this.actors.get(actorId);
+      const context = this.contexts.get(actorId);
+
+      if (!actor || !context) {
+        callback(new Error(`Actor ${actorId} not found`));
+        return;
+      }
+
+      try {
+        await context.stopAll(); // Stop all children first
+        await actor.postStop();
+        this.actors.delete(actorId);
+        this.contexts.delete(actorId);
+        callback(null, {});
+      } catch (error) {
+        callback(error);
+      }
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  private handleWatchActor(call: any): void {
+    const { actorId, watcherId } = call.request;
+    const actor = this.actors.get(actorId);
+    const context = this.contexts.get(actorId);
+
+    if (!actor || !context) {
+      call.write({ type: 'terminated', actorId });
+      call.end();
+      return;
+    }
+
+    // Set up monitoring callbacks
+    if (!this.watchCallbacks.has(actorId)) {
+      this.watchCallbacks.set(actorId, new Set());
+    }
+
+    const callbacks = this.watchCallbacks.get(actorId)!;
+    const terminatedCallback = () => {
+      call.write({ type: 'terminated', actorId });
+      call.end();
+      callbacks.delete(terminatedCallback);
+      callbacks.delete(restartedCallback);
+    };
+
+    const restartedCallback = () => {
+      call.write({ type: 'restarted', actorId });
+    };
+
+    callbacks.add(terminatedCallback);
+    callbacks.add(restartedCallback);
+
+    // Clean up on stream end
+    call.on('end', () => {
+      callbacks.delete(terminatedCallback);
+      callbacks.delete(restartedCallback);
+    });
+  }
+
+  notifyActorTerminated(actorId: string): void {
+    const callbacks = this.watchCallbacks.get(actorId);
+    if (callbacks) {
+      callbacks.forEach(callback => callback('terminated'));
+    }
+  }
+
+  notifyActorRestarted(actorId: string): void {
+    const callbacks = this.watchCallbacks.get(actorId);
+    if (callbacks) {
+      callbacks.forEach(callback => callback('restarted'));
+    }
   }
 } 

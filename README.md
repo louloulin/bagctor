@@ -1,13 +1,25 @@
-# Bactor
+# Bagctor
 
-Bactor is a distributed systems framework based on the Actor model, focused on building scalable and reactive applications. It includes a core Actor system implementation and a MetaGPT-style intelligent agent system.
+Bagctor (Bactor + AI Agent) is a hybrid framework that combines the Actor model with AI Agent capabilities, designed for building intelligent, distributed systems. It seamlessly integrates traditional actor-based concurrency with modern AI agent architectures, enabling the development of scalable, reactive, and intelligent applications.
 
 [中文文档](README-zh.md)
+
+## Overview
+
+Bagctor provides two main components:
+1. A robust Actor system for handling concurrency and distribution
+2. An AI Agent framework that leverages the Actor model for coordinating intelligent agents
+
+This unique combination allows you to:
+- Build distributed systems with actor-based message passing
+- Create AI agent networks that can collaborate and communicate
+- Develop hybrid applications that mix traditional actors with AI capabilities
+- Scale from single-machine deployments to distributed clusters
 
 ## Project Structure
 
 ```
-bactor/
+bagctor/
 ├── packages/
 │   ├── core/           # Core actor system implementation
 │   │   ├── src/
@@ -16,9 +28,9 @@ bactor/
 │   │   │   └── examples/ # Example code
 │   │   └── package.json
 │   │
-│   └── agent/          # MetaGPT-style agent system
+│   └── agent/          # AI Agent framework
 │       ├── src/
-│       │   ├── agents/   # Specific agent implementations
+│       │   ├── agents/   # AI Agent implementations
 │       │   └── types.ts  # Agent system types
 │       └── package.json
 ├── package.json        # Workspace management
@@ -27,7 +39,7 @@ bactor/
 
 ## Core Features
 
-### @bactor/core
+### @bagctor/core
 
 The core Actor system provides:
 
@@ -58,26 +70,27 @@ The core Actor system provides:
    - Remote Actor Creation and Management
    - Location Transparency
 
-### @bactor/agent
+### @bagctor/agent
 
-The intelligent agent system provides:
+The AI Agent framework provides:
 
 1. Agent Abstraction Layer
-   - Base Agent Class
-   - Message Processing Framework
+   - Base Agent Class with Actor Model Integration
+   - AI-focused Message Processing Framework
    - Memory Management (Short-term/Long-term)
+   - Model Integration Interface
 
-2. Specialized Agents
-   - Planner Agent
+2. Specialized AI Agents
+   - Planner Agent with LLM Support
    - Executor Agent (planned)
    - Reviewer Agent (planned)
    - Critic Agent (planned)
 
 3. Agent Coordination
    - Task Decomposition and Assignment
-   - Result Aggregation
+   - Result Aggregation with AI Processing
    - Error Handling and Recovery
-   - Feedback Processing
+   - Feedback Processing and Learning
 
 ## Quick Start
 
@@ -115,7 +128,7 @@ bun run test:agent
 ### Creating a Simple Actor
 
 ```typescript
-import { Actor, PropsBuilder, ActorSystem } from '@bactor/core';
+import { Actor, PropsBuilder, ActorSystem } from '@bagctor/core';
 
 // Create an Actor system
 const system = new ActorSystem();
@@ -137,30 +150,44 @@ const pid = await system.spawn(props);
 await system.send(pid, { type: 'greet', payload: 'World' });
 ```
 
-### Using Intelligent Agents
+### Using AI Agents
 
 ```typescript
-import { AgentSystem, PlannerAgent } from '@bactor/agent';
+import { AgentSystem, PlannerAgent } from '@bagctor/agent';
 
 // Create an agent system
 const system = new AgentSystem();
 
-// Create a planner agent
+// Create a planner agent with AI capabilities
 const plannerConfig = {
   role: 'planner',
-  capabilities: ['task_planning', 'coordination']
+  capabilities: ['task_planning', 'coordination'],
+  model: 'gpt-4',
+  parameters: {
+    temperature: 0.7,
+    maxTokens: 2000
+  }
 };
 
 const plannerId = await system.createAgent(PlannerAgent, plannerConfig);
 
-// Assign a task
+// Assign a complex task
 const task = {
   type: 'TASK',
   sender: { id: 'user' },
   timestamp: Date.now(),
   payload: {
-    description: 'Complete project documentation',
-    requirements: ['Architecture overview', 'API documentation', 'Deployment guide']
+    description: 'Design a microservices architecture',
+    requirements: [
+      'Service decomposition',
+      'API design',
+      'Data consistency patterns',
+      'Deployment strategy'
+    ],
+    context: {
+      constraints: ['cloud-native', 'high-availability'],
+      preferences: ['event-driven', 'domain-driven-design']
+    }
   }
 };
 
@@ -179,29 +206,31 @@ await system.send(plannerId, task);
    - UUID >= 9.0.0
 
 3. Performance Metrics
-   - Message Processing Latency < 1ms
-   - Message Throughput > 100K/s
-   - Memory Footprint < 100MB
+   - Actor Message Processing Latency < 1ms
+   - Actor Message Throughput > 100K/s
+   - AI Agent Response Time: Configurable based on model
+   - Memory Footprint < 100MB (excluding AI models)
 
 ## Future Roadmap
 
 1. Core Enhancements
-   - [ ] Cluster Support
-   - [ ] Persistence
-   - [ ] Performance Monitoring
-   - [ ] Failover
+   - [ ] Cluster Support with AI-powered Load Balancing
+   - [ ] Intelligent Persistence Strategies
+   - [ ] AI-enhanced Performance Monitoring
+   - [ ] Smart Failover Mechanisms
 
-2. Agent System Extensions
-   - [ ] Additional Specialized Agents
+2. AI Agent System Extensions
+   - [ ] Additional Specialized AI Agents
    - [ ] Knowledge Graph Integration
-   - [ ] Learning Capabilities
-   - [ ] Multi-model Support
+   - [ ] Multi-model Support with Model Switching
+   - [ ] Federated Learning Capabilities
+   - [ ] Agent Memory Optimization
 
 3. Tools and Ecosystem
-   - [ ] CLI Tools
-   - [ ] Visualization Dashboard
-   - [ ] Example Applications
-   - [ ] Plugin System
+   - [ ] AI-powered CLI Tools
+   - [ ] Smart Visualization Dashboard
+   - [ ] Example Applications with AI Integration
+   - [ ] Plugin System for Custom AI Models
 
 ## Contributing
 
@@ -217,5 +246,5 @@ MIT
 
 ## Contact
 
-- Project Homepage: [GitHub](https://github.com/yourusername/bactor)
-- Issue Tracker: [Issues](https://github.com/yourusername/bactor/issues)
+- Project Homepage: [GitHub](https://github.com/yourusername/bagctor)
+- Issue Tracker: [Issues](https://github.com/yourusername/bagctor/issues)

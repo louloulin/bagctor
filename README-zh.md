@@ -1,11 +1,23 @@
-# Bactor
+# Bagctor
 
-Bactor 是一个基于 Actor 模型的分布式系统框架，专注于构建可扩展的、响应式的应用程序。它包含了核心的 Actor 系统实现和基于 MetaGPT 风格的智能代理系统。
+Bagctor (Bactor + AI Agent) 是一个混合框架，将 Actor 模型与 AI Agent 能力相结合，用于构建智能分布式系统。它无缝集成了传统的基于 Actor 的并发模型和现代 AI 代理架构，使开发者能够构建可扩展的、响应式的、智能化的应用程序。
+
+## 概述
+
+Bagctor 提供两个主要组件：
+1. 用于处理并发和分布式的强大 Actor 系统
+2. 基于 Actor 模型的 AI Agent 框架，用于协调智能代理
+
+这种独特的组合允许你：
+- 使用基于 Actor 的消息传递构建分布式系统
+- 创建可以协作和通信的 AI 代理网络
+- 开发混合应用程序，将传统 Actor 与 AI 能力相结合
+- 从单机部署扩展到分布式集群
 
 ## 项目结构
 
 ```
-bactor/
+bagctor/
 ├── packages/
 │   ├── core/           # 核心 Actor 系统实现
 │   │   ├── src/
@@ -14,9 +26,9 @@ bactor/
 │   │   │   └── examples/ # 示例代码
 │   │   └── package.json
 │   │
-│   └── agent/          # MetaGPT 风格的代理系统
+│   └── agent/          # AI Agent 框架
 │       ├── src/
-│       │   ├── agents/   # 具体代理实现
+│       │   ├── agents/   # AI Agent 实现
 │       │   └── types.ts  # 代理系统类型定义
 │       └── package.json
 ├── package.json        # 工作区管理配置
@@ -25,7 +37,7 @@ bactor/
 
 ## 核心功能
 
-### @bactor/core
+### @bagctor/core
 
 核心 Actor 系统提供以下功能：
 
@@ -56,26 +68,27 @@ bactor/
    - 远程 Actor 创建和管理
    - 透明的位置抽象
 
-### @bactor/agent
+### @bagctor/agent
 
-智能代理系统提供以下功能：
+AI Agent 框架提供以下功能：
 
 1. 代理抽象层
-   - 基础代理类（BaseAgent）
-   - 消息处理框架
+   - 集成 Actor 模型的基础代理类
+   - AI 导向的消息处理框架
    - 内存管理（短期/长期）
+   - 模型集成接口
 
-2. 专业代理实现
-   - 规划代理（PlannerAgent）
+2. 专业 AI 代理实现
+   - 支持 LLM 的规划代理
    - 执行代理（计划中）
    - 审查代理（计划中）
    - 评论代理（计划中）
 
 3. 代理协调
    - 任务分解和分配
-   - 结果聚合
+   - 带 AI 处理的结果聚合
    - 错误处理和恢复
-   - 反馈处理
+   - 反馈处理和学习
 
 ## 快速开始
 
@@ -113,7 +126,7 @@ bun run test:agent
 ### 创建简单的 Actor
 
 ```typescript
-import { Actor, PropsBuilder, ActorSystem } from '@bactor/core';
+import { Actor, PropsBuilder, ActorSystem } from '@bagctor/core';
 
 // 创建 Actor 系统
 const system = new ActorSystem();
@@ -135,30 +148,44 @@ const pid = await system.spawn(props);
 await system.send(pid, { type: 'greet', payload: 'World' });
 ```
 
-### 使用智能代理
+### 使用 AI 代理
 
 ```typescript
-import { AgentSystem, PlannerAgent } from '@bactor/agent';
+import { AgentSystem, PlannerAgent } from '@bagctor/agent';
 
 // 创建代理系统
 const system = new AgentSystem();
 
-// 创建规划代理
+// 创建具有 AI 能力的规划代理
 const plannerConfig = {
   role: 'planner',
-  capabilities: ['task_planning', 'coordination']
+  capabilities: ['task_planning', 'coordination'],
+  model: 'gpt-4',
+  parameters: {
+    temperature: 0.7,
+    maxTokens: 2000
+  }
 };
 
 const plannerId = await system.createAgent(PlannerAgent, plannerConfig);
 
-// 分配任务
+// 分配复杂任务
 const task = {
   type: 'TASK',
   sender: { id: 'user' },
   timestamp: Date.now(),
   payload: {
-    description: '完成项目文档',
-    requirements: ['架构说明', '接口文档', '部署指南']
+    description: '设计微服务架构',
+    requirements: [
+      '服务拆分',
+      'API 设计',
+      '数据一致性模式',
+      '部署策略'
+    ],
+    context: {
+      constraints: ['云原生', '高可用'],
+      preferences: ['事件驱动', '领域驱动设计']
+    }
   }
 };
 
@@ -177,29 +204,31 @@ await system.send(plannerId, task);
    - UUID >= 9.0.0
 
 3. 性能指标
-   - 消息处理延迟 < 1ms
-   - 每秒消息处理量 > 100K
-   - 内存占用 < 100MB
+   - Actor 消息处理延迟 < 1ms
+   - Actor 消息吞吐量 > 100K/s
+   - AI 代理响应时间：根据模型可配置
+   - 内存占用 < 100MB（不包括 AI 模型）
 
 ## 未来规划
 
 1. 核心功能增强
-   - [ ] 集群支持
-   - [ ] 持久化存储
-   - [ ] 性能监控
-   - [ ] 故障转移
+   - [ ] 具有 AI 负载均衡的集群支持
+   - [ ] 智能持久化策略
+   - [ ] AI 增强的性能监控
+   - [ ] 智能故障转移机制
 
-2. 代理系统扩展
-   - [ ] 更多专业代理
+2. AI 代理系统扩展
+   - [ ] 更多专业 AI 代理
    - [ ] 知识图谱集成
-   - [ ] 学习能力
-   - [ ] 多模型支持
+   - [ ] 支持多模型切换
+   - [ ] 联邦学习能力
+   - [ ] 代理内存优化
 
 3. 工具和生态
-   - [ ] CLI 工具
-   - [ ] 可视化监控
-   - [ ] 示例应用
-   - [ ] 插件系统
+   - [ ] AI 驱动的 CLI 工具
+   - [ ] 智能可视化仪表板
+   - [ ] 集成 AI 的示例应用
+   - [ ] 自定义 AI 模型的插件系统
 
 ## 贡献指南
 
@@ -215,5 +244,5 @@ MIT
 
 ## 联系方式
 
-- 项目主页：[GitHub](https://github.com/yourusername/bactor)
-- 问题反馈：[Issues](https://github.com/yourusername/bactor/issues) 
+- 项目主页：[GitHub](https://github.com/yourusername/bagctor)
+- 问题反馈：[Issues](https://github.com/yourusername/bagctor/issues) 

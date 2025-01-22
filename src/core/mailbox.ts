@@ -10,19 +10,45 @@ interface QueuedMessage extends Message {
 
 type MessageProcessor = (message: QueuedMessage) => Promise<void>;
 
+class MessageQueue {
+  private messages: QueuedMessage[] = [];
+
+  push(message: QueuedMessage): void {
+    this.messages.push(message);
+  }
+
+  shift(): QueuedMessage | undefined {
+    return this.messages.shift();
+  }
+
+  clear(): void {
+    this.messages = [];
+  }
+
+  length(): number {
+    return this.messages.length;
+  }
+
+  isEmpty(): boolean {
+    return this.messages.length === 0;
+  }
+}
+
 export class DefaultMailbox implements IMailbox {
-  private systemMailbox: queueAsPromised<QueuedMessage, void>;
-  private userMailbox: queueAsPromised<QueuedMessage, void>;
+  private systemMailbox: MessageQueue;
+  private userMailbox: MessageQueue;
   private currentMessage?: Message;
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
   private dispatcher?: MessageDispatcher;
   private processing: boolean = false;
   private scheduledProcessing?: Promise<void>;
+  private started: boolean = true; // Default mailbox starts processing immediately
+  private error: boolean = false;
 
   constructor() {
-    this.systemMailbox = fastq.promise(this.processMessage.bind(this), 1);
-    this.userMailbox = fastq.promise(this.processMessage.bind(this), 1);
+    this.systemMailbox = new MessageQueue();
+    this.userMailbox = new MessageQueue();
   }
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
@@ -32,12 +58,22 @@ export class DefaultMailbox implements IMailbox {
 
   postSystemMessage(message: Message): void {
     const queuedMessage = { ...message, isSystem: true };
-    this.systemMailbox.push(queuedMessage);
-    this.scheduleProcessing();
+    if (message.type === 'error') {
+      // Clear all queues except the current message
+      this.systemMailbox.clear();
+      this.userMailbox.clear();
+      this.error = true;
+      this.suspended = true;
+    } else if (!this.error) {
+      this.systemMailbox.push(queuedMessage);
+      if (!this.suspended) {
+        this.scheduleProcessing();
+      }
+    }
   }
 
   postUserMessage(message: Message): void {
-    if (!this.suspended) {
+    if (!this.suspended && !this.error) {
       const queuedMessage = { ...message, isSystem: false };
       this.userMailbox.push(queuedMessage);
       this.scheduleProcessing();
@@ -45,7 +81,7 @@ export class DefaultMailbox implements IMailbox {
   }
 
   private scheduleProcessing(): void {
-    if (!this.processing && this.dispatcher && !this.scheduledProcessing) {
+    if (!this.processing && this.dispatcher && !this.scheduledProcessing && !this.suspended && !this.error) {
       this.processing = true;
       this.scheduledProcessing = new Promise<void>((resolve) => {
         this.dispatcher!.schedule(async () => {
@@ -55,6 +91,10 @@ export class DefaultMailbox implements IMailbox {
             this.processing = false;
             this.scheduledProcessing = undefined;
             resolve();
+            // Schedule next processing if there are more messages
+            if (!this.systemMailbox.isEmpty() || !this.userMailbox.isEmpty()) {
+              this.scheduleProcessing();
+            }
           }
         });
       });
@@ -62,32 +102,73 @@ export class DefaultMailbox implements IMailbox {
   }
 
   private async processMessages(): Promise<void> {
+    if (this.suspended || this.error) return;
+
     try {
       // Process system messages first
-      while (this.systemMailbox.length() > 0 && !this.suspended) {
-        await this.systemMailbox.drain();
+      if (!this.systemMailbox.isEmpty()) {
+        const message = this.systemMailbox.shift();
+        if (message) {
+          try {
+            await this.processMessage(message);
+          } catch (error) {
+            console.error('Error processing message:', error);
+            this.error = true;
+            this.suspended = true;
+            // Clear all remaining messages
+            this.systemMailbox.clear();
+            this.userMailbox.clear();
+            return;
+          }
+        }
       }
 
       // Then process user messages
-      if (!this.suspended) {
-        while (this.userMailbox.length() > 0) {
-          await this.userMailbox.drain();
+      if (!this.suspended && !this.error && !this.userMailbox.isEmpty()) {
+        const message = this.userMailbox.shift();
+        if (message) {
+          try {
+            await this.processMessage(message);
+          } catch (error) {
+            console.error('Error processing message:', error);
+            this.error = true;
+            this.suspended = true;
+            // Clear all remaining messages
+            this.systemMailbox.clear();
+            this.userMailbox.clear();
+            return;
+          }
         }
       }
     } catch (error) {
-      console.error('Error processing messages:', error);
+      console.error('Error in message processing loop:', error);
+      this.error = true;
+      this.suspended = true;
+      // Clear all remaining messages
+      this.systemMailbox.clear();
+      this.userMailbox.clear();
     }
   }
 
   private async processMessage(message: QueuedMessage): Promise<void> {
-    if (!this.invoker || !this.dispatcher || (this.suspended && !message.isSystem)) {
+    if (!this.invoker || !this.dispatcher || this.suspended || this.error) {
       return;
     }
 
     try {
       this.currentMessage = message;
       const { isSystem, ...cleanMessage } = message;
-      if (message.isSystem) {
+      
+      if (cleanMessage.type === 'error') {
+        this.error = true;
+        this.suspended = true;
+        // Clear all remaining messages
+        this.systemMailbox.clear();
+        this.userMailbox.clear();
+        throw new Error('System error message received');
+      }
+
+      if (isSystem) {
         await this.invoker.invokeSystemMessage(cleanMessage);
       } else {
         await this.invoker.invokeUserMessage(cleanMessage);
@@ -98,6 +179,8 @@ export class DefaultMailbox implements IMailbox {
   }
 
   start(): void {
+    this.suspended = false;
+    this.error = false;
     this.scheduleProcessing();
   }
   
@@ -106,15 +189,17 @@ export class DefaultMailbox implements IMailbox {
   }
   
   resume(): void { 
-    this.suspended = false;
-    this.scheduleProcessing();
+    if (!this.error) {
+      this.suspended = false;
+      this.scheduleProcessing();
+    }
   }
   
   isSuspended(): boolean { return this.suspended; }
   getCurrentMessage(): Message | undefined { return this.currentMessage; }
 
   async hasMessages(): Promise<boolean> {
-    return this.systemMailbox.length() > 0 || this.userMailbox.length() > 0;
+    return !this.systemMailbox.isEmpty() || !this.userMailbox.isEmpty();
   }
 
   async getQueueSizes(): Promise<{ system: number; high: number; normal: number; low: number; }> {
@@ -128,22 +213,24 @@ export class DefaultMailbox implements IMailbox {
 }
 
 export class PriorityMailbox implements IMailbox {
-  private systemMailbox: queueAsPromised<QueuedMessage, void>;
-  private highPriorityMailbox: queueAsPromised<QueuedMessage, void>;
-  private normalPriorityMailbox: queueAsPromised<QueuedMessage, void>;
-  private lowPriorityMailbox: queueAsPromised<QueuedMessage, void>;
+  private systemMailbox: MessageQueue;
+  private highPriorityMailbox: MessageQueue;
+  private normalPriorityMailbox: MessageQueue;
+  private lowPriorityMailbox: MessageQueue;
   private currentMessage?: Message;
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
   private dispatcher?: MessageDispatcher;
   private processing: boolean = false;
   private scheduledProcessing?: Promise<void>;
+  private started: boolean = false;
+  private error: boolean = false;
 
   constructor() {
-    this.systemMailbox = fastq.promise(this.processMessage.bind(this), 1);
-    this.highPriorityMailbox = fastq.promise(this.processMessage.bind(this), 1);
-    this.normalPriorityMailbox = fastq.promise(this.processMessage.bind(this), 1);
-    this.lowPriorityMailbox = fastq.promise(this.processMessage.bind(this), 1);
+    this.systemMailbox = new MessageQueue();
+    this.highPriorityMailbox = new MessageQueue();
+    this.normalPriorityMailbox = new MessageQueue();
+    this.lowPriorityMailbox = new MessageQueue();
   }
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
@@ -153,12 +240,24 @@ export class PriorityMailbox implements IMailbox {
 
   postSystemMessage(message: Message): void {
     const queuedMessage = { ...message, isSystem: true };
-    this.systemMailbox.push(queuedMessage);
-    this.scheduleProcessing();
+    if (message.type === 'error') {
+      // Clear all queues except the current message
+      this.systemMailbox.clear();
+      this.highPriorityMailbox.clear();
+      this.normalPriorityMailbox.clear();
+      this.lowPriorityMailbox.clear();
+      this.error = true;
+      this.suspended = true;
+    } else if (!this.error) {
+      this.systemMailbox.push(queuedMessage);
+      if (this.started && !this.suspended) {
+        this.scheduleProcessing();
+      }
+    }
   }
 
   postUserMessage(message: Message): void {
-    if (!this.suspended) {
+    if (!this.suspended && !this.error) {
       const queuedMessage = { ...message, isSystem: false };
       if (message.type.startsWith('$priority.high')) {
         this.highPriorityMailbox.push(queuedMessage);
@@ -167,12 +266,14 @@ export class PriorityMailbox implements IMailbox {
       } else {
         this.normalPriorityMailbox.push(queuedMessage);
       }
-      this.scheduleProcessing();
+      if (this.started) {
+        this.scheduleProcessing();
+      }
     }
   }
 
   private scheduleProcessing(): void {
-    if (!this.processing && this.dispatcher && !this.scheduledProcessing) {
+    if (!this.processing && this.dispatcher && !this.scheduledProcessing && !this.suspended && !this.error) {
       this.processing = true;
       this.scheduledProcessing = new Promise<void>((resolve) => {
         this.dispatcher!.schedule(async () => {
@@ -182,6 +283,13 @@ export class PriorityMailbox implements IMailbox {
             this.processing = false;
             this.scheduledProcessing = undefined;
             resolve();
+            // Schedule next processing if there are more messages
+            if (!this.systemMailbox.isEmpty() || 
+                !this.highPriorityMailbox.isEmpty() || 
+                !this.normalPriorityMailbox.isEmpty() || 
+                !this.lowPriorityMailbox.isEmpty()) {
+              this.scheduleProcessing();
+            }
           }
         });
       });
@@ -189,42 +297,69 @@ export class PriorityMailbox implements IMailbox {
   }
 
   private async processMessages(): Promise<void> {
+    if (this.suspended || this.error) return;
+
     try {
-      // Process system messages first
-      while (this.systemMailbox.length() > 0 && !this.suspended) {
-        await this.systemMailbox.drain();
-      }
+      // Process messages in priority order
+      const queues = [
+        this.systemMailbox,
+        this.highPriorityMailbox,
+        this.normalPriorityMailbox,
+        this.lowPriorityMailbox
+      ];
 
-      if (!this.suspended) {
-        // Process high priority messages
-        while (this.highPriorityMailbox.length() > 0) {
-          await this.highPriorityMailbox.drain();
-        }
-
-        // Process normal priority messages
-        while (this.normalPriorityMailbox.length() > 0) {
-          await this.normalPriorityMailbox.drain();
-        }
-
-        // Process low priority messages
-        while (this.lowPriorityMailbox.length() > 0) {
-          await this.lowPriorityMailbox.drain();
+      for (const queue of queues) {
+        // Process all messages in current priority level before moving to next
+        while (!queue.isEmpty() && !this.suspended && !this.error) {
+          const message = queue.shift();
+          if (message) {
+            try {
+              await this.processMessage(message);
+            } catch (error) {
+              console.error('Error processing message:', error);
+              this.error = true;
+              this.suspended = true;
+              // Clear all remaining messages
+              this.clearAllQueues();
+              return;
+            }
+          }
         }
       }
     } catch (error) {
-      console.error('Error processing messages:', error);
+      console.error('Error in message processing loop:', error);
+      this.error = true;
+      this.suspended = true;
+      // Clear all remaining messages
+      this.clearAllQueues();
     }
   }
 
+  private clearAllQueues(): void {
+    this.systemMailbox.clear();
+    this.highPriorityMailbox.clear();
+    this.normalPriorityMailbox.clear();
+    this.lowPriorityMailbox.clear();
+  }
+
   private async processMessage(message: QueuedMessage): Promise<void> {
-    if (!this.invoker || !this.dispatcher || (this.suspended && !message.isSystem)) {
+    if (!this.invoker || !this.dispatcher || this.suspended || this.error) {
       return;
     }
 
     try {
       this.currentMessage = message;
       const { isSystem, ...cleanMessage } = message;
-      if (message.isSystem) {
+      
+      if (cleanMessage.type === 'error') {
+        this.error = true;
+        this.suspended = true;
+        // Clear all remaining messages
+        this.clearAllQueues();
+        throw new Error('System error message received');
+      }
+
+      if (isSystem) {
         await this.invoker.invokeSystemMessage(cleanMessage);
       } else {
         await this.invoker.invokeUserMessage(cleanMessage);
@@ -235,6 +370,9 @@ export class PriorityMailbox implements IMailbox {
   }
 
   start(): void {
+    this.started = true;
+    this.suspended = false;
+    this.error = false;
     this.scheduleProcessing();
   }
   
@@ -243,20 +381,22 @@ export class PriorityMailbox implements IMailbox {
   }
   
   resume(): void { 
-    this.suspended = false;
-    this.scheduleProcessing();
+    if (!this.error) {
+      this.suspended = false;
+      if (this.started) {
+        this.scheduleProcessing();
+      }
+    }
   }
   
   isSuspended(): boolean { return this.suspended; }
   getCurrentMessage(): Message | undefined { return this.currentMessage; }
 
   async hasMessages(): Promise<boolean> {
-    return (
-      this.systemMailbox.length() > 0 ||
-      this.highPriorityMailbox.length() > 0 ||
-      this.normalPriorityMailbox.length() > 0 ||
-      this.lowPriorityMailbox.length() > 0
-    );
+    return !this.systemMailbox.isEmpty() || 
+           !this.highPriorityMailbox.isEmpty() || 
+           !this.normalPriorityMailbox.isEmpty() || 
+           !this.lowPriorityMailbox.isEmpty();
   }
 
   async getQueueSizes(): Promise<{ system: number; high: number; normal: number; low: number; }> {

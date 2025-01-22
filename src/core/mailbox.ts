@@ -8,14 +8,17 @@ interface QueuedMessage extends Message {
   isSystem?: boolean;
 }
 
+type MessageProcessor = (message: QueuedMessage) => Promise<void>;
+
 export class DefaultMailbox implements IMailbox {
-  private systemMailbox: queueAsPromised<QueuedMessage>;
-  private userMailbox: queueAsPromised<QueuedMessage>;
+  private systemMailbox: queueAsPromised<QueuedMessage, void>;
+  private userMailbox: queueAsPromised<QueuedMessage, void>;
   private currentMessage?: Message;
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
   private dispatcher?: MessageDispatcher;
   private processing: boolean = false;
+  private scheduledProcessing?: Promise<void>;
 
   constructor() {
     this.systemMailbox = fastq.promise(this.processMessage.bind(this), 1);
@@ -25,7 +28,6 @@ export class DefaultMailbox implements IMailbox {
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
     this.invoker = invoker;
     this.dispatcher = dispatcher;
-    this.scheduleProcessing();
   }
 
   postSystemMessage(message: Message): void {
@@ -43,29 +45,37 @@ export class DefaultMailbox implements IMailbox {
   }
 
   private scheduleProcessing(): void {
-    if (!this.processing && this.dispatcher) {
+    if (!this.processing && this.dispatcher && !this.scheduledProcessing) {
       this.processing = true;
-      this.dispatcher.schedule(async () => {
-        try {
-          // Process all system messages first
-          if (this.systemMailbox.length() > 0) {
-            await this.systemMailbox.drain();
+      this.scheduledProcessing = new Promise<void>((resolve) => {
+        this.dispatcher!.schedule(async () => {
+          try {
+            await this.processMessages();
+          } finally {
+            this.processing = false;
+            this.scheduledProcessing = undefined;
+            resolve();
           }
-
-          // Then process user messages if not suspended
-          if (!this.suspended) {
-            if (this.userMailbox.length() > 0) {
-              await this.userMailbox.drain();
-            }
-          }
-        } finally {
-          this.processing = false;
-          // Schedule next processing if there are more messages
-          if (await this.hasMessages()) {
-            this.scheduleProcessing();
-          }
-        }
+        });
       });
+    }
+  }
+
+  private async processMessages(): Promise<void> {
+    try {
+      // Process system messages first
+      while (this.systemMailbox.length() > 0 && !this.suspended) {
+        await this.systemMailbox.drain();
+      }
+
+      // Then process user messages
+      if (!this.suspended) {
+        while (this.userMailbox.length() > 0) {
+          await this.userMailbox.drain();
+        }
+      }
+    } catch (error) {
+      console.error('Error processing messages:', error);
     }
   }
 
@@ -118,15 +128,16 @@ export class DefaultMailbox implements IMailbox {
 }
 
 export class PriorityMailbox implements IMailbox {
-  private systemMailbox: queueAsPromised<QueuedMessage>;
-  private highPriorityMailbox: queueAsPromised<QueuedMessage>;
-  private normalPriorityMailbox: queueAsPromised<QueuedMessage>;
-  private lowPriorityMailbox: queueAsPromised<QueuedMessage>;
+  private systemMailbox: queueAsPromised<QueuedMessage, void>;
+  private highPriorityMailbox: queueAsPromised<QueuedMessage, void>;
+  private normalPriorityMailbox: queueAsPromised<QueuedMessage, void>;
+  private lowPriorityMailbox: queueAsPromised<QueuedMessage, void>;
   private currentMessage?: Message;
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
   private dispatcher?: MessageDispatcher;
   private processing: boolean = false;
+  private scheduledProcessing?: Promise<void>;
 
   constructor() {
     this.systemMailbox = fastq.promise(this.processMessage.bind(this), 1);
@@ -138,7 +149,6 @@ export class PriorityMailbox implements IMailbox {
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
     this.invoker = invoker;
     this.dispatcher = dispatcher;
-    this.scheduleProcessing();
   }
 
   postSystemMessage(message: Message): void {
@@ -162,35 +172,47 @@ export class PriorityMailbox implements IMailbox {
   }
 
   private scheduleProcessing(): void {
-    if (!this.processing && this.dispatcher) {
+    if (!this.processing && this.dispatcher && !this.scheduledProcessing) {
       this.processing = true;
-      this.dispatcher.schedule(async () => {
-        try {
-          // Process all system messages first
-          if (this.systemMailbox.length() > 0) {
-            await this.systemMailbox.drain();
+      this.scheduledProcessing = new Promise<void>((resolve) => {
+        this.dispatcher!.schedule(async () => {
+          try {
+            await this.processMessages();
+          } finally {
+            this.processing = false;
+            this.scheduledProcessing = undefined;
+            resolve();
           }
-
-          // Then process user messages if not suspended
-          if (!this.suspended) {
-            if (this.highPriorityMailbox.length() > 0) {
-              await this.highPriorityMailbox.drain();
-            }
-            if (this.normalPriorityMailbox.length() > 0) {
-              await this.normalPriorityMailbox.drain();
-            }
-            if (this.lowPriorityMailbox.length() > 0) {
-              await this.lowPriorityMailbox.drain();
-            }
-          }
-        } finally {
-          this.processing = false;
-          // Schedule next processing if there are more messages
-          if (await this.hasMessages()) {
-            this.scheduleProcessing();
-          }
-        }
+        });
       });
+    }
+  }
+
+  private async processMessages(): Promise<void> {
+    try {
+      // Process system messages first
+      while (this.systemMailbox.length() > 0 && !this.suspended) {
+        await this.systemMailbox.drain();
+      }
+
+      if (!this.suspended) {
+        // Process high priority messages
+        while (this.highPriorityMailbox.length() > 0) {
+          await this.highPriorityMailbox.drain();
+        }
+
+        // Process normal priority messages
+        while (this.normalPriorityMailbox.length() > 0) {
+          await this.normalPriorityMailbox.drain();
+        }
+
+        // Process low priority messages
+        while (this.lowPriorityMailbox.length() > 0) {
+          await this.lowPriorityMailbox.drain();
+        }
+      }
+    } catch (error) {
+      console.error('Error processing messages:', error);
     }
   }
 

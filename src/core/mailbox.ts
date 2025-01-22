@@ -10,7 +10,18 @@ interface QueuedMessage extends Message {
 
 type MessageProcessor = (message: QueuedMessage) => Promise<void>;
 
-class MessageQueue {
+interface IMessageQueue {
+  push(message: QueuedMessage): boolean;
+  shift(): QueuedMessage | undefined;
+  clear(): void;
+  length(): number;
+  isEmpty(): boolean;
+  isFull(): boolean;
+  toArray(): QueuedMessage[];
+}
+
+// Circular buffer implementation
+class CircularBufferQueue implements IMessageQueue {
   private messages: QueuedMessage[];
   private head: number = 0;
   private tail: number = 0;
@@ -64,7 +75,6 @@ class MessageQueue {
     return this.size === this.capacity;
   }
 
-  // For testing and debugging
   toArray(): QueuedMessage[] {
     const result: QueuedMessage[] = [];
     let current = this.head;
@@ -82,9 +92,75 @@ class MessageQueue {
   }
 }
 
+// Fastq implementation
+class FastQueue implements IMessageQueue {
+  private queue: queueAsPromised<QueuedMessage>;
+  private messages: QueuedMessage[] = [];
+  private capacity: number;
+  private processing: boolean = false;
+
+  constructor(capacity: number = 10000) {
+    this.capacity = capacity;
+    this.queue = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
+  }
+
+  private async processMessage(message: QueuedMessage): Promise<void> {
+    this.messages.push(message);
+    if (this.messages.length > this.capacity) {
+      this.messages.shift();
+    }
+  }
+
+  push(message: QueuedMessage): boolean {
+    if (this.messages.length >= this.capacity) {
+      return false;
+    }
+    this.queue.push(message).catch(error => {
+      console.error('Error processing message:', error);
+    });
+    return true;
+  }
+
+  shift(): QueuedMessage | undefined {
+    return this.messages.shift();
+  }
+
+  clear(): void {
+    this.messages = [];
+    this.queue.drain();
+  }
+
+  length(): number {
+    return this.messages.length;
+  }
+
+  isEmpty(): boolean {
+    return this.messages.length === 0;
+  }
+
+  isFull(): boolean {
+    return this.messages.length >= this.capacity;
+  }
+
+  toArray(): QueuedMessage[] {
+    return [...this.messages];
+  }
+}
+
+// Factory function to create queue instances
+export function createMessageQueue(type: 'circular' | 'fastq' = 'circular', capacity?: number): IMessageQueue {
+  switch (type) {
+    case 'fastq':
+      return new FastQueue(capacity);
+    case 'circular':
+    default:
+      return new CircularBufferQueue(capacity);
+  }
+}
+
 export class DefaultMailbox implements IMailbox {
-  private systemMailbox: MessageQueue;
-  private userMailbox: MessageQueue;
+  private systemMailbox: IMessageQueue;
+  private userMailbox: IMessageQueue;
   private currentMessage?: Message;
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
@@ -95,8 +171,8 @@ export class DefaultMailbox implements IMailbox {
   private error: boolean = false;
 
   constructor() {
-    this.systemMailbox = new MessageQueue();
-    this.userMailbox = new MessageQueue();
+    this.systemMailbox = createMessageQueue();
+    this.userMailbox = createMessageQueue();
   }
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
@@ -261,10 +337,10 @@ export class DefaultMailbox implements IMailbox {
 }
 
 export class PriorityMailbox implements IMailbox {
-  private systemMailbox: MessageQueue;
-  private highPriorityMailbox: MessageQueue;
-  private normalPriorityMailbox: MessageQueue;
-  private lowPriorityMailbox: MessageQueue;
+  private systemMailbox: IMessageQueue;
+  private highPriorityMailbox: IMessageQueue;
+  private normalPriorityMailbox: IMessageQueue;
+  private lowPriorityMailbox: IMessageQueue;
   private currentMessage?: Message;
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
@@ -275,10 +351,10 @@ export class PriorityMailbox implements IMailbox {
   private error: boolean = false;
 
   constructor() {
-    this.systemMailbox = new MessageQueue();
-    this.highPriorityMailbox = new MessageQueue();
-    this.normalPriorityMailbox = new MessageQueue();
-    this.lowPriorityMailbox = new MessageQueue();
+    this.systemMailbox = createMessageQueue();
+    this.highPriorityMailbox = createMessageQueue();
+    this.normalPriorityMailbox = createMessageQueue();
+    this.lowPriorityMailbox = createMessageQueue();
   }
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {

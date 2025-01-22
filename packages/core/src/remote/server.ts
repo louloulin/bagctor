@@ -41,7 +41,6 @@ export class ActorServer {
           if (error) {
             reject(error);
           } else {
-            this.server.start();
             resolve();
           }
         }

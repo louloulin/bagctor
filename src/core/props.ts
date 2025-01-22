@@ -40,11 +40,11 @@ export class PropsBuilder {
   ): PropsBuilder {
     return PropsBuilder.fromProducer(() => {
       class StatefulLambdaActor extends Actor {
-        private state: T = initialState;
+        private customState: T = initialState;
 
         protected initializeBehaviors(): void {
           this.addBehavior('default', async (msg: Message) => {
-            this.state = await Promise.resolve(handler(this.state, msg, this.context));
+            this.customState = await Promise.resolve(handler(this.customState, msg, this.context));
           });
         }
       }

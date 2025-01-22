@@ -11,26 +11,74 @@ interface QueuedMessage extends Message {
 type MessageProcessor = (message: QueuedMessage) => Promise<void>;
 
 class MessageQueue {
-  private messages: QueuedMessage[] = [];
+  private messages: QueuedMessage[];
+  private head: number = 0;
+  private tail: number = 0;
+  private size: number = 0;
+  private readonly capacity: number;
+  
+  constructor(capacity: number = 10000) {
+    this.capacity = capacity;
+    this.messages = new Array(capacity);
+  }
 
-  push(message: QueuedMessage): void {
-    this.messages.push(message);
+  push(message: QueuedMessage): boolean {
+    if (this.size === this.capacity) {
+      return false; // Queue is full
+    }
+
+    this.messages[this.tail] = message;
+    this.tail = (this.tail + 1) % this.capacity;
+    this.size++;
+    return true;
   }
 
   shift(): QueuedMessage | undefined {
-    return this.messages.shift();
+    if (this.size === 0) {
+      return undefined;
+    }
+
+    const message = this.messages[this.head];
+    this.messages[this.head] = undefined as any; // Help GC
+    this.head = (this.head + 1) % this.capacity;
+    this.size--;
+    return message;
   }
 
   clear(): void {
-    this.messages = [];
+    this.messages = new Array(this.capacity);
+    this.head = 0;
+    this.tail = 0;
+    this.size = 0;
   }
 
   length(): number {
-    return this.messages.length;
+    return this.size;
   }
 
   isEmpty(): boolean {
-    return this.messages.length === 0;
+    return this.size === 0;
+  }
+
+  isFull(): boolean {
+    return this.size === this.capacity;
+  }
+
+  // For testing and debugging
+  toArray(): QueuedMessage[] {
+    const result: QueuedMessage[] = [];
+    let current = this.head;
+    let count = this.size;
+    
+    while (count > 0) {
+      if (this.messages[current] !== undefined) {
+        result.push(this.messages[current]);
+      }
+      current = (current + 1) % this.capacity;
+      count--;
+    }
+    
+    return result;
   }
 }
 

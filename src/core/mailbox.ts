@@ -15,26 +15,49 @@ export class DefaultMailbox implements IMailbox {
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
   private dispatcher?: MessageDispatcher;
+  private processing: boolean = false;
 
   constructor() {
-    this.systemMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
+    this.systemMailbox = fastq.promise(this.processMessage.bind(this), 1);
     this.userMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
   }
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
     this.invoker = invoker;
     this.dispatcher = dispatcher;
+    this.scheduleProcessing();
   }
 
   postSystemMessage(message: Message): void {
     const queuedMessage = { ...message, isSystem: true };
     this.systemMailbox.push(queuedMessage);
+    this.scheduleProcessing();
   }
 
   postUserMessage(message: Message): void {
     if (!this.suspended) {
       const queuedMessage = { ...message, isSystem: false };
       this.userMailbox.push(queuedMessage);
+      this.scheduleProcessing();
+    }
+  }
+
+  private scheduleProcessing(): void {
+    if (!this.processing && this.dispatcher) {
+      this.processing = true;
+      this.dispatcher.schedule(async () => {
+        try {
+          while (await this.hasMessages()) {
+            if (this.systemMailbox.length() > 0) {
+              await this.systemMailbox.drain();
+            } else if (!this.suspended && this.userMailbox.length() > 0) {
+              await this.userMailbox.drain();
+            }
+          }
+        } finally {
+          this.processing = false;
+        }
+      });
     }
   }
 
@@ -55,9 +78,19 @@ export class DefaultMailbox implements IMailbox {
     }
   }
 
-  start(): void {}
-  suspend(): void { this.suspended = true; }
-  resume(): void { this.suspended = false; }
+  start(): void {
+    this.scheduleProcessing();
+  }
+  
+  suspend(): void { 
+    this.suspended = true; 
+  }
+  
+  resume(): void { 
+    this.suspended = false;
+    this.scheduleProcessing();
+  }
+  
   isSuspended(): boolean { return this.suspended; }
   getCurrentMessage(): Message | undefined { return this.currentMessage; }
 
@@ -84,9 +117,10 @@ export class PriorityMailbox implements IMailbox {
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
   private dispatcher?: MessageDispatcher;
+  private processing: boolean = false;
 
   constructor() {
-    this.systemMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
+    this.systemMailbox = fastq.promise(this.processMessage.bind(this), 1);
     this.highPriorityMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
     this.normalPriorityMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
     this.lowPriorityMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
@@ -95,11 +129,13 @@ export class PriorityMailbox implements IMailbox {
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
     this.invoker = invoker;
     this.dispatcher = dispatcher;
+    this.scheduleProcessing();
   }
 
   postSystemMessage(message: Message): void {
     const queuedMessage = { ...message, isSystem: true };
     this.systemMailbox.push(queuedMessage);
+    this.scheduleProcessing();
   }
 
   postUserMessage(message: Message): void {
@@ -112,6 +148,32 @@ export class PriorityMailbox implements IMailbox {
       } else {
         this.normalPriorityMailbox.push(queuedMessage);
       }
+      this.scheduleProcessing();
+    }
+  }
+
+  private scheduleProcessing(): void {
+    if (!this.processing && this.dispatcher) {
+      this.processing = true;
+      this.dispatcher.schedule(async () => {
+        try {
+          while (await this.hasMessages()) {
+            if (this.systemMailbox.length() > 0) {
+              await this.systemMailbox.drain();
+            } else if (!this.suspended) {
+              if (this.highPriorityMailbox.length() > 0) {
+                await this.highPriorityMailbox.drain();
+              } else if (this.normalPriorityMailbox.length() > 0) {
+                await this.normalPriorityMailbox.drain();
+              } else if (this.lowPriorityMailbox.length() > 0) {
+                await this.lowPriorityMailbox.drain();
+              }
+            }
+          }
+        } finally {
+          this.processing = false;
+        }
+      });
     }
   }
 
@@ -132,9 +194,19 @@ export class PriorityMailbox implements IMailbox {
     }
   }
 
-  start(): void {}
-  suspend(): void { this.suspended = true; }
-  resume(): void { this.suspended = false; }
+  start(): void {
+    this.scheduleProcessing();
+  }
+  
+  suspend(): void { 
+    this.suspended = true; 
+  }
+  
+  resume(): void { 
+    this.suspended = false;
+    this.scheduleProcessing();
+  }
+  
   isSuspended(): boolean { return this.suspended; }
   getCurrentMessage(): Message | undefined { return this.currentMessage; }
 

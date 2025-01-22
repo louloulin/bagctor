@@ -2,7 +2,7 @@ import { Message, IMailbox, MessageInvoker, MessageDispatcher } from './types';
 import fastq from 'fastq';
 import type { queueAsPromised } from 'fastq';
 
-const CONCURRENCY = 4; // Number of concurrent workers per queue
+const CONCURRENCY = 1; // Set to 1 to ensure strict message ordering
 
 interface QueuedMessage extends Message {
   isSystem?: boolean;
@@ -19,7 +19,7 @@ export class DefaultMailbox implements IMailbox {
 
   constructor() {
     this.systemMailbox = fastq.promise(this.processMessage.bind(this), 1);
-    this.userMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
+    this.userMailbox = fastq.promise(this.processMessage.bind(this), 1);
   }
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
@@ -47,15 +47,23 @@ export class DefaultMailbox implements IMailbox {
       this.processing = true;
       this.dispatcher.schedule(async () => {
         try {
-          while (await this.hasMessages()) {
-            if (this.systemMailbox.length() > 0) {
-              await this.systemMailbox.drain();
-            } else if (!this.suspended && this.userMailbox.length() > 0) {
+          // Process all system messages first
+          if (this.systemMailbox.length() > 0) {
+            await this.systemMailbox.drain();
+          }
+
+          // Then process user messages if not suspended
+          if (!this.suspended) {
+            if (this.userMailbox.length() > 0) {
               await this.userMailbox.drain();
             }
           }
         } finally {
           this.processing = false;
+          // Schedule next processing if there are more messages
+          if (await this.hasMessages()) {
+            this.scheduleProcessing();
+          }
         }
       });
     }
@@ -68,10 +76,11 @@ export class DefaultMailbox implements IMailbox {
 
     try {
       this.currentMessage = message;
+      const { isSystem, ...cleanMessage } = message;
       if (message.isSystem) {
-        await this.invoker.invokeSystemMessage(message);
+        await this.invoker.invokeSystemMessage(cleanMessage);
       } else {
-        await this.invoker.invokeUserMessage(message);
+        await this.invoker.invokeUserMessage(cleanMessage);
       }
     } finally {
       this.currentMessage = undefined;
@@ -121,9 +130,9 @@ export class PriorityMailbox implements IMailbox {
 
   constructor() {
     this.systemMailbox = fastq.promise(this.processMessage.bind(this), 1);
-    this.highPriorityMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
-    this.normalPriorityMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
-    this.lowPriorityMailbox = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
+    this.highPriorityMailbox = fastq.promise(this.processMessage.bind(this), 1);
+    this.normalPriorityMailbox = fastq.promise(this.processMessage.bind(this), 1);
+    this.lowPriorityMailbox = fastq.promise(this.processMessage.bind(this), 1);
   }
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
@@ -157,21 +166,29 @@ export class PriorityMailbox implements IMailbox {
       this.processing = true;
       this.dispatcher.schedule(async () => {
         try {
-          while (await this.hasMessages()) {
-            if (this.systemMailbox.length() > 0) {
-              await this.systemMailbox.drain();
-            } else if (!this.suspended) {
-              if (this.highPriorityMailbox.length() > 0) {
-                await this.highPriorityMailbox.drain();
-              } else if (this.normalPriorityMailbox.length() > 0) {
-                await this.normalPriorityMailbox.drain();
-              } else if (this.lowPriorityMailbox.length() > 0) {
-                await this.lowPriorityMailbox.drain();
-              }
+          // Process all system messages first
+          if (this.systemMailbox.length() > 0) {
+            await this.systemMailbox.drain();
+          }
+
+          // Then process user messages if not suspended
+          if (!this.suspended) {
+            if (this.highPriorityMailbox.length() > 0) {
+              await this.highPriorityMailbox.drain();
+            }
+            if (this.normalPriorityMailbox.length() > 0) {
+              await this.normalPriorityMailbox.drain();
+            }
+            if (this.lowPriorityMailbox.length() > 0) {
+              await this.lowPriorityMailbox.drain();
             }
           }
         } finally {
           this.processing = false;
+          // Schedule next processing if there are more messages
+          if (await this.hasMessages()) {
+            this.scheduleProcessing();
+          }
         }
       });
     }
@@ -184,10 +201,11 @@ export class PriorityMailbox implements IMailbox {
 
     try {
       this.currentMessage = message;
+      const { isSystem, ...cleanMessage } = message;
       if (message.isSystem) {
-        await this.invoker.invokeSystemMessage(message);
+        await this.invoker.invokeSystemMessage(cleanMessage);
       } else {
-        await this.invoker.invokeUserMessage(message);
+        await this.invoker.invokeUserMessage(cleanMessage);
       }
     } finally {
       this.currentMessage = undefined;

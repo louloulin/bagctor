@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "bun run src/main.ts",
     "build": "bun build ./src/main.ts --outdir ./dist",
-    "test": "bun test"
+    "test": "bun test",
+    "test:perf": "bun test src/tests/performance.test.ts"
   },
   "dependencies": {
     "fastq": "^1.18.0",

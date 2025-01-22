@@ -37,6 +37,7 @@ export interface Props {
   supervisorStrategy?: SupervisorStrategy;
   initialBehavior?: string;
   dispatcher?: MessageDispatcher;
+  actorContext?: any;
 }
 
 export enum SupervisorDirective {

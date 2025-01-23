@@ -8,6 +8,7 @@ export interface LoggerConfig {
   prettyPrint?: boolean;
   traceId?: string;
   context?: Record<string, unknown>;
+  transport?: pino.TransportSingleOptions | pino.TransportMultiOptions;
   formatters?: {
     level?: (label: string, number: number) => Record<string, unknown>;
     bindings?: (bindings: pino.Bindings) => Record<string, unknown>;

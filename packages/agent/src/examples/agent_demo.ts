@@ -1,4 +1,4 @@
-import { ActorContext, ActorSystem } from '@bactor/core';
+import { ActorContext, ActorSystem, Message, PID } from '@bactor/core';
 import { AgentConfig } from '../types';
 import { AssistantAgent, AssistantConfig } from '../agents/assistant_agent';
 import { ProductManager } from '../agents/product_manager';
@@ -8,6 +8,7 @@ import { ProductManagerConfig, ArchitectConfig } from '../interfaces/action_type
 async function main() {
   // Initialize actor system
   const system = new ActorSystem();
+  await system.start();  // 确保系统启动
 
   // Create agents
   const productManagerConfig: ProductManagerConfig = {
@@ -51,23 +52,21 @@ async function main() {
   };
 
   // Create actors
-  const productManager = await system.actorOf('product_manager', {
+  const productManager = await system.spawn({
     producer: (props: ActorContext) => new ProductManager(props, productManagerConfig)
   });
 
-  const architect = await system.actorOf('architect', {
+  const architect = await system.spawn({
     producer: (props: ActorContext) => new Architect(props, architectConfig)
   });
 
-  const assistant = await system.actorOf('assistant', {
+  const assistant = await system.spawn({
     producer: (props: ActorContext) => new AssistantAgent(props, assistantConfig)
   });
 
   // Example interaction
-  await productManager.tell({
+  const message: Message = {
     type: 'TASK',
-    sender: system.deadLetters,
-    timestamp: Date.now(),
     payload: {
       type: 'TASK',
       action: {
@@ -90,14 +89,17 @@ async function main() {
           createdAt: new Date()
         }
       }
-    }
-  });
+    },
+    sender: productManager
+  };
+  
+  await system.send(productManager, message);
 
   // Wait for some time to see the results
   await new Promise(resolve => setTimeout(resolve, 2000));
 
   // Cleanup
-  await system.terminate();
+  await system.stop();
 }
 
 main().catch(console.error); 

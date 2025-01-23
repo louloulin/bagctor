@@ -43,9 +43,14 @@ describe('Architect Agent', () => {
       }
     };
 
-    const pid = await system.spawn({
-      producer: () => new Architect(context, mockConfig)
+    // 先创建一个临时 actor 来获取 context
+    const tempActor = await system.spawn({
+      producer: (ctx: ActorContext) => {
+        context = ctx;
+        return new Architect(ctx, mockConfig);
+      }
     });
+
     architect = new Architect(context, mockConfig);
   });
 

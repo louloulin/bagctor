@@ -1,0 +1,33 @@
+{
+  "name": "@bactor/match-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "bun test",
+    "example:simple": "bun run src/examples/simple_match.ts",
+    "example:advanced": "bun run src/examples/advanced_match.ts",
+    "build:simple": "bun build src/examples/simple_match.ts --compile --outfile dist/examples/simple_match",
+    "check": "bun run scripts/check.ts",
+    "compile": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@bactor/core": "workspace:*",
+    "decimal.js": "^10.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "bun-types": "latest",
+    "typescript": "^5.3.3"
+  }
+} 

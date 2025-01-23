@@ -85,6 +85,7 @@ export class ActorSystem {
     };
     
     const context = new ActorContext(pid, this, props.mailboxType, props.supervisorStrategy);
+    this.contexts.set(pid.id, context);  // 先设置 context
     
     let actor: Actor;
     if (props.actorClass) {
@@ -97,7 +98,6 @@ export class ActorSystem {
       }
     } else if (props.producer) {
       // Function-based actor
-      this.contexts.set(pid.id, context);
       actor = await props.producer(context);
       if (actor instanceof Actor) {
         // Set context if actor extends Actor
@@ -112,9 +112,6 @@ export class ActorSystem {
     }
     
     this.actors.set(pid.id, actor);
-    if (!this.contexts.has(pid.id)) {
-      this.contexts.set(pid.id, context);
-    }
     
     try {
       if (actor.preStart) {

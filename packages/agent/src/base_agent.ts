@@ -47,7 +47,7 @@ export abstract class BaseAgent extends Actor {
   }
 
   protected async tell(recipient: PID, message: AgentMessage): Promise<void> {
-    await this.context.tell(recipient, message);
+    await this.send(recipient, message);
   }
 
   protected async handleError(error: unknown): Promise<void> {

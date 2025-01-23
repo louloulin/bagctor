@@ -1,6 +1,7 @@
 import { Message, PID } from './types';
 import { ActorSystem } from './system';
 import { Actor } from './actor';
+import { log } from '../utils/logger';
 
 // Router interface
 export interface IRouter {
@@ -45,27 +46,27 @@ export abstract class RouterActor extends Actor {
     super(context);
     this.routees = config.routees || [];
     this.router = this.createRouter(config.system);
-    console.log(`[RouterActor ${routerId}] Created with ${this.routees.length} routees:`, this.routees.map(r => r.id));
+    log.info(`[RouterActor ${routerId}] Created with ${this.routees.length} routees:`, this.routees.map(r => r.id));
   }
 
   protected abstract createRouter(system: ActorSystem): IRouter;
 
   protected behaviors(): void {
     this.addBehavior('default', async (message: Message) => {
-      console.log(`[RouterActor] Received message for routing:`, message);
+      log.info(`[RouterActor] Received message for routing:`, message);
       
       if (this.isRouterManagementMessage(message)) {
-        console.log(`[RouterActor] Processing management message:`, message.type);
+        log.info(`[RouterActor] Processing management message:`, message.type);
         await this.handleRouterManagement(message as RouterManagementMessage);
         return;
       }
 
       if (this.routees.length === 0) {
-        console.log(`[RouterActor] No routees available, message will be dropped:`, message);
+        log.info(`[RouterActor] No routees available, message will be dropped:`, message);
         return;
       }
 
-      console.log(`[RouterActor] Adding message to queue, current queue size: ${this.messageQueue.length}`);
+      log.info(`[RouterActor] Adding message to queue, current queue size: ${this.messageQueue.length}`);
       this.messageQueue.push(message);
       await this.processMessageQueue();
     });
@@ -73,24 +74,24 @@ export abstract class RouterActor extends Actor {
 
   private async processMessageQueue(): Promise<void> {
     if (this.routingInProgress || this.messageQueue.length === 0) {
-      console.log(`[RouterActor] Queue processing skipped - inProgress: ${this.routingInProgress}, queueSize: ${this.messageQueue.length}`);
+      log.info(`[RouterActor] Queue processing skipped - inProgress: ${this.routingInProgress}, queueSize: ${this.messageQueue.length}`);
       return;
     }
 
-    console.log(`[RouterActor] Starting to process message queue of size: ${this.messageQueue.length}`);
+    log.info(`[RouterActor] Starting to process message queue of size: ${this.messageQueue.length}`);
     this.routingInProgress = true;
     const startTime = Date.now();
     
     try {
       while (this.messageQueue.length > 0) {
         const message = this.messageQueue.shift()!;
-        console.log(`[RouterActor] Routing message:`, message);
+        log.info(`[RouterActor] Routing message:`, message);
         await this.router.route(message, [...this.routees]);
       }
     } finally {
       this.routingInProgress = false;
       const duration = Date.now() - startTime;
-      console.log(`[RouterActor] Finished processing message queue in ${duration}ms`);
+      log.info(`[RouterActor] Finished processing message queue in ${duration}ms`);
     }
   }
 
@@ -99,24 +100,24 @@ export abstract class RouterActor extends Actor {
   }
 
   private async handleRouterManagement(message: RouterManagementMessage): Promise<void> {
-    console.log(`[RouterActor] Handling management message:`, message);
+    log.info(`[RouterActor] Handling management message:`, message);
     switch (message.type) {
       case 'router.add-routee':
         if (message.routee && !this.routees.find(r => r.id === message.routee!.id)) {
           this.routees.push(message.routee);
-          console.log(`[RouterActor] Added routee ${message.routee.id}, total routees: ${this.routees.length}`);
+          log.info(`[RouterActor] Added routee ${message.routee.id}, total routees: ${this.routees.length}`);
         }
         break;
       case 'router.remove-routee':
         if (message.routee) {
           const initialLength = this.routees.length;
           this.routees = this.routees.filter(r => r.id !== message.routee!.id);
-          console.log(`[RouterActor] Removed routee ${message.routee.id}, routees changed from ${initialLength} to ${this.routees.length}`);
+          log.info(`[RouterActor] Removed routee ${message.routee.id}, routees changed from ${initialLength} to ${this.routees.length}`);
         }
         break;
       case 'router.get-routees':
         if (message.sender) {
-          console.log(`[RouterActor] Sending routee list to ${message.sender.id}`);
+          log.info(`[RouterActor] Sending routee list to ${message.sender.id}`);
           await this.context.system.send(message.sender, { 
             type: 'routees', 
             routees: [...this.routees] 
@@ -137,7 +138,7 @@ export class RoundRobinRouter implements IRouter {
   async route(message: Message, routees: PID[]): Promise<void> {
     if (routees.length === 0) return;
     
-    console.log(`[RoundRobinRouter] Routing message to routee ${routees[this.current].id} (index: ${this.current})`);
+    log.info(`[RoundRobinRouter] Routing message to routee ${routees[this.current].id} (index: ${this.current})`);
     const startTime = Date.now();
     
     const routee = routees[this.current];
@@ -148,7 +149,7 @@ export class RoundRobinRouter implements IRouter {
     this.current = nextIndex;
     
     const duration = Date.now() - startTime;
-    console.log(`[RoundRobinRouter] Message routed in ${duration}ms, next index: ${this.current}`);
+    log.info(`[RoundRobinRouter] Message routed in ${duration}ms, next index: ${this.current}`);
   }
 }
 
@@ -165,12 +166,12 @@ export class RandomRouter implements IRouter {
     
     const startTime = Date.now();
     const index = Math.floor(this.rng() * routees.length);
-    console.log(`[RandomRouter] Selected routee ${routees[index].id} at index ${index}`);
+    log.info(`[RandomRouter] Selected routee ${routees[index].id} at index ${index}`);
     
     await this.system.send(routees[index], message);
     
     const duration = Date.now() - startTime;
-    console.log(`[RandomRouter] Message routed in ${duration}ms`);
+    log.info(`[RandomRouter] Message routed in ${duration}ms`);
   }
 }
 
@@ -184,17 +185,17 @@ export class BroadcastRouter implements IRouter {
     if (routees.length === 0) return;
 
     const startTime = Date.now();
-    console.log(`[BroadcastRouter] Broadcasting message to ${routees.length} routees`);
+    log.info(`[BroadcastRouter] Broadcasting message to ${routees.length} routees`);
 
     // Process in batches for better performance
     for (let i = 0; i < routees.length; i += this.batchSize) {
       const batch = routees.slice(i, i + this.batchSize);
-      console.log(`[BroadcastRouter] Processing batch ${i / this.batchSize + 1}, size: ${batch.length}`);
+      log.debug(`[BroadcastRouter] Processing batch ${i / this.batchSize + 1}, size: ${batch.length}`);
       await Promise.all(batch.map(routee => this.system.send(routee, message)));
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[BroadcastRouter] Broadcast completed in ${duration}ms`);
+    log.info(`[BroadcastRouter] Broadcast completed in ${duration}ms`);
   }
 }
 
@@ -208,7 +209,7 @@ export class ConsistentHashRouter implements IRouter {
     this.virtualNodes = virtualNodes;
     this.hashRing = new Map();
     this.hashCache = new Map();
-    console.log(`[ConsistentHashRouter] Created with ${virtualNodes} virtual nodes`);
+    log.info(`[ConsistentHashRouter] Created with ${virtualNodes} virtual nodes`);
   }
 
   private getHash(key: string): number {
@@ -229,7 +230,7 @@ export class ConsistentHashRouter implements IRouter {
   }
 
   private updateHashRing(routees: PID[]): void {
-    console.log(`[ConsistentHashRouter] Updating hash ring with ${routees.length} routees and ${this.virtualNodes} virtual nodes`);
+    log.info(`[ConsistentHashRouter] Updating hash ring with ${routees.length} routees and ${this.virtualNodes} virtual nodes`);
     const startTime = Date.now();
     
     this.hashRing.clear();
@@ -243,18 +244,18 @@ export class ConsistentHashRouter implements IRouter {
     }
 
     const duration = Date.now() - startTime;
-    console.log(`[ConsistentHashRouter] Hash ring updated in ${duration}ms, total nodes: ${this.hashRing.size}`);
+    log.info(`[ConsistentHashRouter] Hash ring updated in ${duration}ms, total nodes: ${this.hashRing.size}`);
   }
 
   async route(message: Message, routees: PID[]): Promise<void> {
     if (routees.length === 0) return;
     
     const startTime = Date.now();
-    console.log(`[ConsistentHashRouter] Starting message routing`);
+    log.info(`[ConsistentHashRouter] Starting message routing`);
     
     this.updateHashRing(routees);
     const messageHash = this.getHash(JSON.stringify(message));
-    console.log(`[ConsistentHashRouter] Message hash: ${messageHash}`);
+    log.debug(`[ConsistentHashRouter] Message hash: ${messageHash}`);
     
     // Binary search for the closest hash
     const hashes = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
@@ -272,12 +273,12 @@ export class ConsistentHashRouter implements IRouter {
     
     const selectedHash = hashes[left] || hashes[0];
     const selectedRoutee = this.hashRing.get(selectedHash)!;
-    console.log(`[ConsistentHashRouter] Selected routee ${selectedRoutee.id} for hash ${selectedHash}`);
+    log.debug(`[ConsistentHashRouter] Selected routee ${selectedRoutee.id} for hash ${selectedHash}`);
     
     await this.system.send(selectedRoutee, message);
     
     const duration = Date.now() - startTime;
-    console.log(`[ConsistentHashRouter] Message routed in ${duration}ms`);
+    log.info(`[ConsistentHashRouter] Message routed in ${duration}ms`);
   }
 }
 

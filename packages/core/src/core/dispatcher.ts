@@ -1,10 +1,11 @@
 import { MessageDispatcher } from './types';
+import { log } from '../utils/logger';
 
 export class DefaultDispatcher implements MessageDispatcher {
   schedule(runner: () => Promise<void>): void {
     // Execute immediately in the same thread
     runner().catch(error => {
-      console.error('Error in message processing:', error);
+      log.error('Error in message processing:', error);
     });
   }
 }

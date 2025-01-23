@@ -11,6 +11,11 @@ export { PropsBuilder } from './core/props';
 export { DefaultMailbox, PriorityMailbox } from './core/mailbox';
 export { DefaultDispatcher, ThreadPoolDispatcher, ThroughputDispatcher } from './core/dispatcher';
 
+// Router functionality
+export { createRouter } from './core/router';
+export type { RouterConfig, RouterType, IRouter } from './core/router';
+export { BroadcastRouter, RoundRobinRouter, RandomRouter } from './core/router';
+
 // Remote functionality
 export { ActorClient } from './remote/client';
 export { ActorServer } from './remote/server';

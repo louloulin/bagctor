@@ -58,7 +58,8 @@ export type MatchingEngineMessageType =
   | 'cancel_order'
   | 'order_book_update'
   | 'trade_executed'
-  | 'order_status_update';
+  | 'order_status_update'
+  | 'order_book_snapshot';
 
 export interface PlaceOrderPayload {
   order: Order;
@@ -112,10 +113,18 @@ export interface OrderStatusUpdateMessage extends BaseMatchingEngineMessage {
   payload: OrderStatusUpdatePayload;
 }
 
+export interface OrderBookSnapshotMessage extends BaseMatchingEngineMessage {
+  type: 'order_book_snapshot';
+  payload: {
+    symbol: string;
+  };
+}
+
 // 聚合的消息类型
 export type MatchingEngineMessage = 
   | PlaceOrderMessage 
   | CancelOrderMessage 
   | OrderBookUpdateMessage 
   | TradeExecutedMessage 
-  | OrderStatusUpdateMessage; 
+  | OrderStatusUpdateMessage
+  | OrderBookSnapshotMessage; 

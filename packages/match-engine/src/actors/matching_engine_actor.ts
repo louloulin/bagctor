@@ -1,4 +1,4 @@
-import { Actor, ActorContext, Message } from '@bactor/core';
+import { Actor, ActorContext, Message, PID } from '@bactor/core';
 import { OrderBook } from '../core/order_book';
 import { 
   MatchingEngineMessage, 
@@ -13,10 +13,14 @@ import {
 
 export class MatchingEngineActor extends Actor {
   private orderBook: OrderBook;
+  private routerPid: PID;
+  private symbol: string;
 
-  constructor(context: ActorContext, symbol: string) {
+  constructor(context: ActorContext, symbol: string, routerPid: PID) {
     super(context);
+    this.symbol = symbol;
     this.orderBook = new OrderBook(symbol);
+    this.routerPid = routerPid;
   }
 
   protected behaviors(): void {
@@ -29,6 +33,9 @@ export class MatchingEngineActor extends Actor {
           break;
         case 'cancel_order':
           await this.handleCancelOrder(msg as CancelOrderMessage);
+          break;
+        case 'order_book_snapshot':
+          await this.handleOrderBookSnapshot();
           break;
       }
     });
@@ -47,7 +54,7 @@ export class MatchingEngineActor extends Actor {
         type: 'trade_executed',
         payload: { trade }
       };
-      await this.context.broadcast(tradeMessage);
+      await this.context.send(this.routerPid, tradeMessage);
       
       // 更新maker订单状态
       const makerOrder = this.orderBook.getOrder(trade.makerOrderId);
@@ -60,7 +67,7 @@ export class MatchingEngineActor extends Actor {
             filledQuantity: makerOrder.filledQuantity
           }
         };
-        await this.context.broadcast(statusMessage);
+        await this.context.send(this.routerPid, statusMessage);
       }
     }
     
@@ -78,7 +85,7 @@ export class MatchingEngineActor extends Actor {
         filledQuantity: order.filledQuantity
       }
     };
-    await this.context.broadcast(statusMessage);
+    await this.context.send(this.routerPid, statusMessage);
     
     // 发送订单簿更新
     const snapshot = this.orderBook.getSnapshot();
@@ -90,7 +97,7 @@ export class MatchingEngineActor extends Actor {
         asks: snapshot.asks
       }
     };
-    await this.context.broadcast(bookMessage);
+    await this.context.send(this.routerPid, bookMessage);
   }
 
   // 处理撤单请求
@@ -111,7 +118,7 @@ export class MatchingEngineActor extends Actor {
           filledQuantity: order.filledQuantity
         }
       };
-      await this.context.broadcast(statusMessage);
+      await this.context.send(this.routerPid, statusMessage);
       
       // 发送订单簿更新
       const snapshot = this.orderBook.getSnapshot();
@@ -123,7 +130,33 @@ export class MatchingEngineActor extends Actor {
           asks: snapshot.asks
         }
       };
-      await this.context.broadcast(bookMessage);
+      await this.context.send(this.routerPid, bookMessage);
     }
+  }
+
+  // 处理订单簿快照请求
+  private async handleOrderBookSnapshot() {
+    const snapshot = this.orderBook.getSnapshot();
+    const bookMessage: OrderBookUpdateMessage = {
+      type: 'order_book_update',
+      payload: {
+        symbol: this.symbol,
+        bids: snapshot.bids,
+        asks: snapshot.asks
+      }
+    };
+    await this.context.send(this.routerPid, bookMessage);
+
+    // 打印汇总信息
+    console.log('\n=== Final Order Book Status ===');
+    console.log('Symbol:', this.symbol);
+    console.log('\nBids:');
+    snapshot.bids.forEach(([price, quantity]) => {
+      console.log(`  ${quantity} BTC @ ${price} USDT`);
+    });
+    console.log('\nAsks:');
+    snapshot.asks.forEach(([price, quantity]) => {
+      console.log(`  ${quantity} BTC @ ${price} USDT`);
+    });
   }
 } 

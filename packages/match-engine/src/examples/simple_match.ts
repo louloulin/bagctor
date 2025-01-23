@@ -1,5 +1,6 @@
 import { ActorSystem } from '@bactor/core';
 import { Message } from '@bactor/core';
+import { createRouter, RouterConfig, Actor, ActorContext } from '@bactor/core';
 import Decimal from 'decimal.js';
 import { MatchingEngineActor } from '../actors/matching_engine_actor';
 import { 
@@ -14,14 +15,49 @@ import {
   MatchingEngineMessage
 } from '../models/types';
 
+// 消息处理Actor
+class MessageHandlerActor extends Actor {
+  protected behaviors(): void {
+    this.addBehavior('default', async (message: Message) => {
+      const msg = message as MatchingEngineMessage;
+      switch (msg.type) {
+        case 'trade_executed':
+          console.log('Trade executed:', (msg as TradeExecutedMessage).payload);
+          break;
+        case 'order_status_update':
+          console.log('Order status update:', (msg as OrderStatusUpdateMessage).payload);
+          break;
+        case 'order_book_update':
+          console.log('Order book update:', (msg as OrderBookUpdateMessage).payload);
+          break;
+      }
+    });
+  }
+
+  async preStart(): Promise<void> {
+    console.log('MessageHandler started');
+  }
+
+  async postStop(): Promise<void> {
+    console.log('MessageHandler stopped');
+  }
+}
+
 async function main() {
   // 创建Actor系统
   const system = new ActorSystem();
   await system.start();
 
+  // 创建广播路由器
+  const routerConfig: RouterConfig = { system };
+  const broadcastRouter = createRouter('broadcast', routerConfig);
+  const routerPid = await system.spawn({
+    producer: () => broadcastRouter
+  });
+
   // 创建撮合引擎Actor
   const matchingEngine = await system.spawn({
-    producer: (context) => new MatchingEngineActor(context, 'BTC-USDT')
+    producer: (context) => new MatchingEngineActor(context, 'BTC-USDT', routerPid)
   });
 
   // 创建一些测试订单
@@ -66,24 +102,16 @@ async function main() {
     }
   ];
 
-  // 设置消息处理器
-  const messageHandler = async (message: Message) => {
-    const msg = message as MatchingEngineMessage;
-    switch (msg.type) {
-      case 'trade_executed':
-        console.log('Trade executed:', (msg as TradeExecutedMessage).payload);
-        break;
-      case 'order_status_update':
-        console.log('Order status update:', (msg as OrderStatusUpdateMessage).payload);
-        break;
-      case 'order_book_update':
-        console.log('Order book update:', (msg as OrderBookUpdateMessage).payload);
-        break;
-    }
-  };
+  // 创建消息处理Actor
+  const handlerPid = await system.spawn({
+    producer: (context) => new MessageHandlerActor(context)
+  });
 
-  // 注册消息处理器
-  system.addMessageHandler(messageHandler);
+  // 添加处理器到路由器
+  await system.send(routerPid, {
+    type: 'router.add-routee',
+    routee: handlerPid
+  });
 
   // 发送订单
   console.log('=== Starting Trading Simulation ===');
@@ -103,8 +131,20 @@ async function main() {
 
   console.log('\n=== Simulation Complete ===');
 
-  // 移除消息处理器
-  system.removeMessageHandler(messageHandler);
+  // 获取最终的订单簿状态
+  await system.send(matchingEngine, {
+    type: 'order_book_snapshot',
+    payload: { symbol: 'BTC-USDT' }
+  });
+
+  // 等待一下让最后的消息处理完
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // 移除处理器
+  await system.send(routerPid, {
+    type: 'router.remove-routee',
+    routee: handlerPid
+  });
 
   // 关闭系统
   await system.stop();

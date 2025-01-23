@@ -15,8 +15,11 @@
     "build": "tsc -p tsconfig.json",
     "test": "bun test",
     "example:simple": "bun run src/examples/simple_match.ts",
+    "example:benchmark": "bun run src/examples/benchmark_match.ts",
     "example:advanced": "bun run src/examples/advanced_match.ts",
     "build:simple": "bun build src/examples/simple_match.ts --compile --outfile dist/examples/simple_match",
+    "build:benchmark": "bun build src/examples/benchmark_match.ts --compile --outfile dist/examples/benchmark_match --target bun --external decimal.js --external @bactor/core",
+    "benchmark": "bun run build:benchmark && ./dist/examples/benchmark_match",
     "check": "bun run scripts/check.ts",
     "compile": "tsc --noEmit",
     "clean": "rimraf dist"

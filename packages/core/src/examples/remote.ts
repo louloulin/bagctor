@@ -4,7 +4,7 @@ import { ActorSystem } from '../core/system';
 
 // Example remote actor
 class CalculatorActor extends Actor {
-  protected initializeBehaviors(): void {
+  protected behaviors(): void {
     this.addBehavior('default', async (msg: Message) => {
       if (msg.type === 'add') {
         const { x, y } = msg.payload;
@@ -51,7 +51,7 @@ async function main() {
 
     // Create a local actor that uses the remote calculator
     class UserActor extends Actor {
-      protected initializeBehaviors(): void {
+      protected behaviors(): void {
         this.addBehavior('default', async (msg: Message) => {
           if (msg.type === 'calculate') {
             // Send message to remote actor - looks just like local communication

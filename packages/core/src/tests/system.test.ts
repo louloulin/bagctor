@@ -7,7 +7,7 @@ import { Message, ActorContext, Props, SupervisorStrategy, SupervisorDirective }
 class TestActor extends Actor {
   public messages: Message[] = [];
   
-  protected initializeBehaviors(): void {
+  protected behaviors(): void {
     this.addBehavior('default', async (msg: Message) => {
       this.messages.push(msg);
       if (msg.type === 'throw') {

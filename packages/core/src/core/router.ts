@@ -50,7 +50,7 @@ export abstract class RouterActor extends Actor {
 
   protected abstract createRouter(system: ActorSystem): IRouter;
 
-  protected initializeBehaviors(): void {
+  protected behaviors(): void {
     this.addBehavior('default', async (message: Message) => {
       console.log(`[RouterActor] Received message for routing:`, message);
       

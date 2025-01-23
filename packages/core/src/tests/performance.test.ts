@@ -17,7 +17,7 @@ class BenchmarkActor extends Actor {
     this.onComplete = context?.onComplete || (() => {});
   }
 
-  protected initializeBehaviors(): void {
+  protected behaviors(): void {
     this.addBehavior('default', async (msg: Message) => {
       if (msg.type === 'start') {
         this.startTime = performance.now();

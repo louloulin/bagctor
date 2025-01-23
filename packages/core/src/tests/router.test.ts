@@ -12,7 +12,7 @@
 //     this.initialize();
 //   }
 
-//   protected initializeBehaviors(): void {
+//   protected behaviors(): void {
 //     this.addBehavior('default', async (message: Message) => {
 //       console.log(`[TestActor ${this.context.self.id}] Received message:`, message);
 //       if (message.type === 'get-messages') {
@@ -49,7 +49,7 @@
 //     this.initialize();
 //   }
 
-//   protected initializeBehaviors(): void {
+//   protected behaviors(): void {
 //     this.addBehavior('default', async (message: Message) => {
 //       if (this.resolve && message.type === 'messages') {
 //         if (this.timeout) {

@@ -3,7 +3,7 @@ import { Message, PID, Props, ActorContext, ActorState } from './types';
 export abstract class Actor {
   public context: ActorContext;
   protected state: ActorState;
-  private behaviors: Map<string, (message: Message) => Promise<void>> = new Map();
+  private behaviorMap: Map<string, (message: Message) => Promise<void>> = new Map();
   
   constructor(context: ActorContext) {
     this.context = context;
@@ -14,20 +14,18 @@ export abstract class Actor {
     this.initialize();
   }
 
-  protected initializeBehaviors(): void{
-    // To be implemented by child classes
-  }
+  protected abstract behaviors(): void
 
   protected initialize(): void {
-    this.initializeBehaviors();
+    this.behaviors();
   }
 
   protected addBehavior(name: string, handler: (message: Message) => Promise<void>): void {
-    this.behaviors.set(name, handler);
+    this.behaviorMap.set(name, handler);
   }
 
   protected become(behavior: string): void {
-    if (this.behaviors.has(behavior)) {
+    if (this.behaviorMap.has(behavior)) {
       this.state.behavior = behavior;
     } else {
       throw new Error(`Behavior ${behavior} not found`);
@@ -35,7 +33,7 @@ export abstract class Actor {
   }
 
   async receive(message: Message): Promise<void> {
-    const behavior = this.behaviors.get(this.state.behavior);
+    const behavior = this.behaviorMap.get(this.state.behavior);
     if (behavior) {
       await behavior.call(this, message);
     } else {

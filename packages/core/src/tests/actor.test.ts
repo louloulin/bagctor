@@ -7,7 +7,7 @@ class TestActor extends Actor {
   public messageLog: Message[] = [];
   public currentBehavior: string = 'default';
 
-  protected initializeBehaviors(): void {
+  protected behaviors(): void {
     this.addBehavior('default', async (msg: Message) => {
       this.messageLog.push(msg);
       if (msg.type === 'change_behavior') {

@@ -23,7 +23,7 @@ export class PropsBuilder {
   static fromHandler(handler: (msg: Message) => void | Promise<void>): PropsBuilder {
     return PropsBuilder.fromProducer((context: ActorContext) => {
       class LambdaActor extends Actor {
-        protected initializeBehaviors(): void {
+        protected behaviors(): void {
           this.addBehavior('default', async (msg: Message) => {
             await Promise.resolve(handler(msg));
           });
@@ -42,7 +42,7 @@ export class PropsBuilder {
       class StatefulLambdaActor extends Actor {
         private customState: T = initialState;
 
-        protected initializeBehaviors(): void {
+        protected behaviors(): void {
           this.addBehavior('default', async (msg: Message) => {
             this.customState = await Promise.resolve(handler(this.customState, msg, this.context));
           });
@@ -60,7 +60,7 @@ export class PropsBuilder {
           super(context);
         }
 
-        protected initializeBehaviors(): void {
+        protected behaviors(): void {
           this.addBehavior('default', async (msg: Message) => {
             func(this.context, msg);
           });

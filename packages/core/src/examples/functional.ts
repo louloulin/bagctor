@@ -9,7 +9,7 @@ function createCounterActor() {
   let count = 0;
   
   return new class extends Actor {
-    protected initializeBehaviors(): void {
+    protected behaviors(): void {
       this.addBehavior('default', async (msg: Message) => {
         switch (msg.type) {
           case 'increment':
@@ -63,7 +63,7 @@ async function main() {
     class TestActor extends Actor {
       private results: any[] = [];
 
-      protected initializeBehaviors(): void {
+      protected behaviors(): void {
         this.addBehavior('default', async (msg: Message) => {
           if (msg.type === 'start') {
             // Test counter actor

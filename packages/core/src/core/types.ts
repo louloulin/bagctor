@@ -55,9 +55,7 @@ export enum SupervisorDirective {
   Escalate
 }
 
-export interface SupervisorStrategy {
-  handleFailure(supervisor: ActorContext, child: any, error: Error): SupervisorDirective;
-}
+export type SupervisorStrategy = any;
 
 // Actor Lifecycle Events
 export interface ActorLifecycleEvent {

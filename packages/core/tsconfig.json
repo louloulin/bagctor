@@ -6,13 +6,14 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
-    "module": "ES2020",
+    "module": "ESNext",
     "moduleResolution": "node",
     "target": "ES2020",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "types": ["bun-types"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

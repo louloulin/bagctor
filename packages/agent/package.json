@@ -4,20 +4,20 @@
   "description": "MetaGPT-style multi-agent system implementation using Bactor",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "type": "module",
   "scripts": {
     "build": "tsc",
-    "test": "jest",
-    "clean": "rimraf dist"
+    "test": "bun test",
+    "clean": "rimraf dist",
+    "example:agent": "bun run src/examples/agent_demo.ts"
   },
   "dependencies": {
     "@bactor/core": "workspace:*"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
-    "jest": "^29.5.0",
+    "bun-types": "latest",
     "rimraf": "^5.0.0",
-    "ts-jest": "^29.1.0",
     "typescript": "^5.0.0"
   }
 } 

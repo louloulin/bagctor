@@ -1,4 +1,11 @@
 import { Message, PID } from '@bactor/core';
+import { 
+  ArchitectureDesignAction,
+  APIDesignAction,
+  RequirementAnalysisAction,
+  UserStoryCreationAction,
+  Action
+} from './interfaces/action_types';
 
 export interface AgentConfig {
   role: string;
@@ -29,42 +36,81 @@ export interface AgentMessage extends Message {
   type: MessageType;
   sender: PID;
   timestamp: number;
-  payload: any;
+  payload: AgentPayload;
+}
+
+export type AgentPayload = 
+  | TaskPayload
+  | ResultPayload
+  | FeedbackPayload
+  | CoordinationPayload
+  | ErrorPayload;
+
+export interface TaskPayload {
+  type: 'TASK';
+  action: ArchitectureDesignAction | APIDesignAction | RequirementAnalysisAction | UserStoryCreationAction;
+}
+
+export interface ResultPayload {
+  actionId: string;
+  result: any;
+  metadata?: Record<string, any>;
+}
+
+export interface FeedbackPayload {
+  targetId: string;
+  feedback: string;
+  suggestions?: string[];
+  score?: number;
+}
+
+export interface CoordinationPayload {
+  action: string;
+  data: any;
+}
+
+export interface ErrorPayload {
+  actionId: string;
+  error: Error;
 }
 
 export interface TaskMessage extends AgentMessage {
   type: 'TASK';
-  payload: {
-    description: string;
-    requirements: string[];
-    context?: any;
-    deadline?: number;
-  };
+  payload: TaskPayload;
 }
 
 export interface ResultMessage extends AgentMessage {
   type: 'RESULT';
-  payload: {
-    taskId: string;
-    result: any;
-    metadata?: Record<string, any>;
-  };
+  payload: ResultPayload;
 }
 
 export interface FeedbackMessage extends AgentMessage {
   type: 'FEEDBACK';
-  payload: {
-    targetId: string;
-    feedback: string;
-    suggestions?: string[];
-    score?: number;
-  };
+  payload: FeedbackPayload;
 }
 
 export interface CoordinationMessage extends AgentMessage {
   type: 'COORDINATION';
-  payload: {
-    action: string;
-    data: any;
-  };
+  payload: CoordinationPayload;
+}
+
+// Type guards
+export function isTaskPayload(payload: AgentPayload): payload is TaskPayload {
+  return 'type' in payload && payload.type === 'TASK' && 'action' in payload;
+}
+
+export function isResultPayload(payload: AgentPayload): payload is ResultPayload {
+  return 'actionId' in payload && 'result' in payload;
+}
+
+export function isFeedbackPayload(payload: AgentPayload): payload is FeedbackPayload {
+  return 'targetId' in payload && 'feedback' in payload;
+}
+
+export function isCoordinationPayload(payload: AgentPayload): payload is CoordinationPayload {
+  return 'action' in payload && 'data' in payload;
+}
+
+export function isErrorPayload(payload: AgentPayload): payload is ErrorPayload {
+  return 'actionId' in payload && 'error' in payload;
 } 

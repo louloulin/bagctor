@@ -10,6 +10,7 @@ export class GrpcTransport implements RemoteTransport {
 
   async send(target: PID, message: Message): Promise<void> {
     // Implement gRPC send
+    throw new Error("Not implemented");
   }
 
   async *receive(): AsyncIterator<Message> {

@@ -1,4 +1,4 @@
-import pino from 'pino';
+import pino, { Logger, TransportSingleOptions, TransportMultiOptions, LoggerOptions, DestinationStream } from 'pino';
 import { randomUUID } from 'crypto';
 
 // Logger configuration interface
@@ -8,7 +8,7 @@ export interface LoggerConfig {
   prettyPrint?: boolean;
   traceId?: string;
   context?: Record<string, unknown>;
-  transport?: pino.TransportSingleOptions | pino.TransportMultiOptions;
+  transport?: TransportSingleOptions | TransportMultiOptions | DestinationStream;
   formatters?: {
     level?: (label: string, number: number) => Record<string, unknown>;
     bindings?: (bindings: pino.Bindings) => Record<string, unknown>;
@@ -60,7 +60,8 @@ export class TraceContext {
 export class LoggerManager {
   private static instance: LoggerManager;
   private config: LoggerConfig;
-  private loggers: Map<string, pino.Logger> = new Map();
+  private loggers: Map<string, Logger> = new Map();
+  private baseLogger?: Logger;
 
   private constructor() {
     this.config = this.getDefaultConfig();
@@ -85,11 +86,33 @@ export class LoggerManager {
         warn: 40,
         error: 50,
         fatal: 60
-      },
-      formatters: {
-        level: (label: string): Record<string, unknown> => ({ level: label }),
-        bindings: (bindings: pino.Bindings): Record<string, unknown> => ({}),
-        log: (obj: Record<string, unknown>): Record<string, unknown> => {
+      }
+    };
+  }
+
+  updateConfig(newConfig: Partial<LoggerConfig>): void {
+    this.config = { ...this.config, ...newConfig };
+    
+    // Clear existing loggers
+    this.loggers.clear();
+    this.baseLogger = undefined;
+  }
+
+  private createBaseLogger(): Logger {
+    if (this.baseLogger) {
+      return this.baseLogger;
+    }
+
+    const options: LoggerOptions = {
+      level: this.config.level,
+      enabled: this.config.enabled,
+      customLevels: this.config.customLevels,
+      redact: this.config.redact,
+      base: undefined,
+      formatters: this.config.formatters || {
+        level: (label) => ({ level: label.toUpperCase() }),
+        bindings: (bindings) => bindings,
+        log: (obj) => {
           const traceContext = TraceContext.getInstance();
           return {
             ...obj,
@@ -99,46 +122,40 @@ export class LoggerManager {
         }
       }
     };
+
+    if (this.config.transport) {
+      if ('write' in this.config.transport) {
+        this.baseLogger = pino(options, this.config.transport);
+      } else {
+        options.transport = this.config.transport;
+        this.baseLogger = pino(options);
+      }
+    } else if (this.config.prettyPrint) {
+      options.transport = {
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          translateTime: 'SYS:standard',
+          ignore: 'pid,hostname',
+        },
+      };
+      this.baseLogger = pino(options);
+    } else {
+      this.baseLogger = pino(options);
+    }
+
+    return this.baseLogger;
   }
 
-  updateConfig(newConfig: Partial<LoggerConfig>): void {
-    this.config = { ...this.config, ...newConfig };
-    // Recreate all loggers with new config
-    this.loggers.clear();
-    this.createBaseLogger();
-  }
-
-  private createBaseLogger(): pino.Logger {
-    const transport = this.config.prettyPrint
-      ? {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            translateTime: 'SYS:standard',
-            ignore: 'pid,hostname',
-          },
-        }
-      : undefined;
-
-    return pino({
-      level: this.config.level,
-      enabled: this.config.enabled,
-      formatters: this.config.formatters as pino.LoggerOptions['formatters'],
-      customLevels: this.config.customLevels,
-      redact: this.config.redact,
-      transport,
-      base: undefined,
-    });
-  }
-
-  getLogger(context?: string): pino.Logger {
+  getLogger(context?: string): Logger {
     if (!context) {
       return this.createBaseLogger();
     }
 
     let logger = this.loggers.get(context);
     if (!logger) {
-      logger = this.createBaseLogger().child({ context });
+      const baseLogger = this.createBaseLogger();
+      logger = baseLogger.child({ context });
       this.loggers.set(context, logger);
     }
     return logger;

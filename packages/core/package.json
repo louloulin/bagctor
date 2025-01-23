@@ -20,6 +20,7 @@
     "example:remote": "bun run src/examples/remote.ts",
     "example:fun": "bun run src/examples/functional.ts",
     "example:lambda": "bun run src/examples/lambda.ts",
+    "example:logger": "bun run src/examples/logger_example.ts",
     "check": "bun run scripts/check.ts",
     "compile": "tsc --noEmit",
     "clean": "rimraf dist"

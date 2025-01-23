@@ -21,6 +21,8 @@
     "example:fun": "bun run src/examples/functional.ts",
     "example:lambda": "bun run src/examples/lambda.ts",
     "example:logger": "bun run src/examples/logger_example.ts",
+    "build:hello": "bun build src/examples/helloworld.ts --compile --outfile dist/examples/helloworld --external @grpc/* --external pino --external fastq",
+    "build:mood": "bun build src/examples/multibehaviors.ts --compile --outfile dist/examples/mood --external @grpc/* --external pino --external fastq",
     "check": "bun run scripts/check.ts",
     "compile": "tsc --noEmit",
     "clean": "rimraf dist"

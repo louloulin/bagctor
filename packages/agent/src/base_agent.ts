@@ -16,8 +16,7 @@ export abstract class BaseAgent extends Actor {
     };
   }
 
-  protected behaviors(): void {
-    // Add base behaviors
+  protected behaviors(): void { 
     this.addBehavior('task', async (message: Message) => {
       const agentMessage = message as AgentMessage;
       if (agentMessage.type === 'TASK') {

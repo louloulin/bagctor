@@ -1,6 +1,7 @@
 // Core types and interfaces
-export * from './core/types';
-export * from './core/router';
+export type { Props } from './core/types';
+export type { PID } from './core/types';
+export type { Message } from './core/types';
 
 // Core implementations
 export { Actor } from './core/actor';

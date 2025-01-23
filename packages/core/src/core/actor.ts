@@ -1,9 +1,9 @@
 import { Message, PID, Props, ActorContext, ActorState } from './types';
 
 export abstract class Actor {
-  public context: ActorContext;
+  protected context: ActorContext;
   protected state: ActorState;
-  private behaviorMap: Map<string, (message: Message) => Promise<void>> = new Map();
+  protected behaviorMap: Map<string, (message: Message) => Promise<void>> = new Map();
   
   constructor(context: ActorContext) {
     this.context = context;

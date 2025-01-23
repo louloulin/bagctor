@@ -1,4 +1,4 @@
-import { Actor, ActorContext } from '@bactor/core';
+import { Actor, ActorContext, Message } from '@bactor/core';
 import { OrderBook } from '../core/order_book';
 import { 
   MatchingEngineMessage, 
@@ -21,13 +21,14 @@ export class MatchingEngineActor extends Actor {
 
   protected behaviors(): void {
     // 处理下单请求
-    this.addBehavior('default', async (message: MatchingEngineMessage) => {
-      switch (message.type) {
+    this.addBehavior('default', async (message: Message) => {
+      const msg = message as MatchingEngineMessage;
+      switch (msg.type) {
         case 'place_order':
-          await this.handlePlaceOrder(message);
+          await this.handlePlaceOrder(msg as PlaceOrderMessage);
           break;
         case 'cancel_order':
-          await this.handleCancelOrder(message);
+          await this.handleCancelOrder(msg as CancelOrderMessage);
           break;
       }
     });

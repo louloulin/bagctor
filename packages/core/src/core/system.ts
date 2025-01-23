@@ -12,6 +12,7 @@ export class ActorSystem {
   private remoteClients: Map<string, ActorClient> = new Map();
   private server?: ActorServer;
   private actorClasses: Map<string, new (context: ActorContext) => Actor> = new Map();
+  private messageHandlers: Set<(message: Message) => Promise<void>> = new Set();
 
   constructor(protected address?: string) {
     if (address) {
@@ -202,6 +203,23 @@ export class ActorSystem {
       if (client) {
         client.watchActor(pid.id, watcherId);
       }
+    }
+  }
+
+  // 添加消息处理器
+  addMessageHandler(handler: (message: Message) => Promise<void>): void {
+    this.messageHandlers.add(handler);
+  }
+
+  // 移除消息处理器
+  removeMessageHandler(handler: (message: Message) => Promise<void>): void {
+    this.messageHandlers.delete(handler);
+  }
+
+  // 广播消息给所有处理器
+  async broadcast(message: Message): Promise<void> {
+    for (const handler of this.messageHandlers) {
+      await handler(message);
     }
   }
 } 

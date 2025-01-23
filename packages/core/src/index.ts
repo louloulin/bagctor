@@ -14,5 +14,5 @@ export { DefaultDispatcher, ThreadPoolDispatcher, ThroughputDispatcher } from '.
 // Remote functionality
 export { ActorClient } from './remote/client';
 export { ActorServer } from './remote/server';
-export { RemoteTransport, GrpcTransport } from './remote/transport';
+export type { RemoteTransport } from './remote/transport';
 export { RemoteActorSystem } from './remote/remote_actor_system'; 

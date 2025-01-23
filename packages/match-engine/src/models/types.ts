@@ -48,45 +48,68 @@ export interface Trade {
 }
 
 // Actor 消息类型
-export interface PlaceOrderMessage extends Message {
+export interface BaseMatchingEngineMessage extends Message {
+  type: MatchingEngineMessageType;
+  payload: any;
+}
+
+export type MatchingEngineMessageType = 
+  | 'place_order'
+  | 'cancel_order'
+  | 'order_book_update'
+  | 'trade_executed'
+  | 'order_status_update';
+
+export interface PlaceOrderPayload {
+  order: Order;
+}
+
+export interface CancelOrderPayload {
+  orderId: string;
+  symbol: string;
+  userId: string;
+}
+
+export interface OrderBookUpdatePayload {
+  symbol: string;
+  bids: Array<[Decimal, Decimal]>; // [price, quantity]
+  asks: Array<[Decimal, Decimal]>; // [price, quantity]
+}
+
+export interface TradeExecutedPayload {
+  trade: Trade;
+}
+
+export interface OrderStatusUpdatePayload {
+  orderId: string;
+  status: OrderStatus;
+  filledQuantity: Decimal;
+}
+
+// 具体消息类型
+export interface PlaceOrderMessage extends BaseMatchingEngineMessage {
   type: 'place_order';
-  payload: {
-    order: Order;
-  };
+  payload: PlaceOrderPayload;
 }
 
-export interface CancelOrderMessage extends Message {
+export interface CancelOrderMessage extends BaseMatchingEngineMessage {
   type: 'cancel_order';
-  payload: {
-    orderId: string;
-    symbol: string;
-    userId: string;
-  };
+  payload: CancelOrderPayload;
 }
 
-export interface OrderBookUpdateMessage extends Message {
+export interface OrderBookUpdateMessage extends BaseMatchingEngineMessage {
   type: 'order_book_update';
-  payload: {
-    symbol: string;
-    bids: Array<[Decimal, Decimal]>; // [price, quantity]
-    asks: Array<[Decimal, Decimal]>; // [price, quantity]
-  };
+  payload: OrderBookUpdatePayload;
 }
 
-export interface TradeExecutedMessage extends Message {
+export interface TradeExecutedMessage extends BaseMatchingEngineMessage {
   type: 'trade_executed';
-  payload: {
-    trade: Trade;
-  };
+  payload: TradeExecutedPayload;
 }
 
-export interface OrderStatusUpdateMessage extends Message {
+export interface OrderStatusUpdateMessage extends BaseMatchingEngineMessage {
   type: 'order_status_update';
-  payload: {
-    orderId: string;
-    status: OrderStatus;
-    filledQuantity: Decimal;
-  };
+  payload: OrderStatusUpdatePayload;
 }
 
 // 聚合的消息类型

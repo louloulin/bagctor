@@ -1,7 +1,18 @@
 import { ActorSystem } from '@bactor/core';
+import { Message } from '@bactor/core';
 import Decimal from 'decimal.js';
 import { MatchingEngineActor } from '../actors/matching_engine_actor';
-import { Order, OrderSide, OrderStatus, OrderType, PlaceOrderMessage } from '../models/types';
+import { 
+  Order, 
+  OrderSide, 
+  OrderStatus, 
+  OrderType, 
+  PlaceOrderMessage,
+  TradeExecutedMessage,
+  OrderStatusUpdateMessage,
+  OrderBookUpdateMessage,
+  MatchingEngineMessage
+} from '../models/types';
 
 async function main() {
   // 创建Actor系统
@@ -55,18 +66,24 @@ async function main() {
     }
   ];
 
-  // 订阅消息
-  system.subscribe('trade_executed', async (message) => {
-    console.log('Trade executed:', message.payload);
-  });
+  // 设置消息处理器
+  const messageHandler = async (message: Message) => {
+    const msg = message as MatchingEngineMessage;
+    switch (msg.type) {
+      case 'trade_executed':
+        console.log('Trade executed:', (msg as TradeExecutedMessage).payload);
+        break;
+      case 'order_status_update':
+        console.log('Order status update:', (msg as OrderStatusUpdateMessage).payload);
+        break;
+      case 'order_book_update':
+        console.log('Order book update:', (msg as OrderBookUpdateMessage).payload);
+        break;
+    }
+  };
 
-  system.subscribe('order_status_update', async (message) => {
-    console.log('Order status update:', message.payload);
-  });
-
-  system.subscribe('order_book_update', async (message) => {
-    console.log('Order book update:', message.payload);
-  });
+  // 注册消息处理器
+  system.addMessageHandler(messageHandler);
 
   // 发送订单
   console.log('=== Starting Trading Simulation ===');
@@ -86,11 +103,12 @@ async function main() {
 
   console.log('\n=== Simulation Complete ===');
 
+  // 移除消息处理器
+  system.removeMessageHandler(messageHandler);
+
   // 关闭系统
   await system.stop();
 }
 
 // 如果直接运行此文件，则执行main函数
-if (require.main === module) {
-  main().catch(console.error);
-} 
+main().catch(console.error); 

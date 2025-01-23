@@ -16,6 +16,10 @@ export { createRouter } from './core/router';
 export type { RouterConfig, RouterType, IRouter } from './core/router';
 export { BroadcastRouter, RoundRobinRouter, RandomRouter } from './core/router';
 
+// Logger functionality
+export { configureLogger, createLogger, log, trace } from './utils/logger';
+export type { LoggerConfig } from './utils/logger';
+
 // Remote functionality
 export { ActorClient } from './remote/client';
 export { ActorServer } from './remote/server';

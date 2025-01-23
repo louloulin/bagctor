@@ -1,6 +1,7 @@
 import { ActorSystem } from '@bactor/core';
 import { Message } from '@bactor/core';
 import { createRouter, RouterConfig, Actor, ActorContext } from '@bactor/core';
+import { configureLogger } from '@bactor/core';
 import Decimal from 'decimal.js';
 import { MatchingEngineActor } from '../actors/matching_engine_actor';
 import { 
@@ -44,6 +45,12 @@ class MessageHandlerActor extends Actor {
 }
 
 async function main() {
+  // 配置日志级别
+  configureLogger({
+    level: 'debug',
+    prettyPrint: true
+  });
+
   // 创建Actor系统
   const system = new ActorSystem();
   await system.start();

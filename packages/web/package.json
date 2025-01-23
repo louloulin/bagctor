@@ -15,7 +15,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "bun test",
     "example:basic": "bun run src/examples/basic_server.ts",
-    "example:router": "bun run src/examples/router_example.ts",
+    "example:middleware": "bun run src/examples/middleware_server.ts",
     "clean": "rimraf dist"
   },
   "dependencies": {

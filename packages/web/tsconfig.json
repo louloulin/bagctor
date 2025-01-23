@@ -7,7 +7,10 @@
     "target": "esnext",
     "types": ["bun-types"]
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*",
+    "src/middleware/**/*"
+  ],
   "references": [
     { "path": "../core" }
   ]

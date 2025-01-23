@@ -21,6 +21,7 @@ export interface HttpContext extends ActorContext {
   request: HttpRequest;
   params: RouteParams;
   query: URLSearchParams;
+  state: Map<string, any>;
 }
 
 export type HttpHandler = (c: HttpContext) => Promise<HttpResponse> | HttpResponse;

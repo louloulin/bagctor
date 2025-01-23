@@ -156,7 +156,7 @@ async function main() {
   });
 
   // 生成测试订单
-  const orderCount = 10000; // 生成1万个订单
+  const orderCount = 100000; // 生成100万个订单
   const orders = generateTestOrders(orderCount);
 
   // 发送订单

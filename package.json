@@ -26,7 +26,8 @@
     "clean:web": "bun run --cwd packages/web clean",
     "example:match": "bun run --cwd packages/match-engine example:simple",
     "benchmark:match": "bun run --cwd packages/match-engine benchmark",
-    "example:web": "bun run --cwd packages/web example:basic"
+    "example:web": "bun run --cwd packages/web example:basic",
+    "example:web:middleware": "bun run --cwd packages/web example:middleware"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

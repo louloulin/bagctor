@@ -85,7 +85,8 @@ export class Router extends Actor {
         ...this.context,
         request,
         params,
-        query: url.searchParams
+        query: url.searchParams,
+        state: new Map()
       };
 
       try {

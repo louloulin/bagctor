@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "shell",
+      "command": "bun",
+      "args": [
+        "run",
+        "dev:vscode-chat"
+      ],
+      "label": "bun: watch:vscode-chat",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^.*$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*"
+        }
+      },
+      "presentation": {
+        "reveal": "never",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "type": "shell",
+      "command": "bun",
+      "args": [
+        "run",
+        "--cwd",
+        "packages/vscode-chat",
+        "test-compile"
+      ],
+      "label": "bun: test-compile:vscode-chat",
+      "group": "build",
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
+      "type": "shell",
+      "command": "bun",
+      "args": [
+        "run",
+        "build:vscode-chat"
+      ],
+      "label": "bun: build:vscode-chat",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    }
+  ]
+}

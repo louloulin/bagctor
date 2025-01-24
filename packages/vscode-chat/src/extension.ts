@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Actor, Message, ActorSystem, Props } from '@bactor/core';
+import { ChatWebview } from './webview/ChatWebview';
 
 interface ChatMessage extends Message {
   type: 'chat' | 'response' | 'connect' | 'disconnect';
@@ -80,47 +81,19 @@ export async function activate(context: vscode.ExtensionContext) {
     actorClass: ChatActor
   } as Props);
 
-  // Create and show webview
-  const panel = vscode.window.createWebviewPanel(
-    'bactorChat',
-    'Bactor Chat',
-    vscode.ViewColumn.Two,
-    {
-      enableScripts: true
-    }
-  );
-
-  // Set webview content
-  panel.webview.html = getWebviewContent();
-
-  // Handle messages from webview
-  panel.webview.onDidReceiveMessage(
-    async (message: ChatMessage) => {
-      const actor = system.getActor(chatActor.id);
-      if (actor) {
-        await actor.receive({
-          ...message,
-          username
-        } as ChatMessage);
-      }
-    },
-    undefined,
-    context.subscriptions
-  );
-
   // Register command to connect to another peer
-  const connectDisposable = vscode.commands.registerCommand('vscode-bactor-chat.connect', async () => {
-    const address = await vscode.window.showInputBox({
+  const connectDisposable = vscode.commands.registerCommand('vscode-bactor-chat.connect', async (address?: string) => {
+    const peerAddress = address || await vscode.window.showInputBox({
       prompt: 'Enter peer address (e.g., localhost:3000)',
       placeHolder: 'host:port'
     });
 
-    if (address) {
+    if (peerAddress) {
       const actor = system.getActor(chatActor.id);
       if (actor) {
         await actor.receive({
           type: 'connect',
-          peerAddress: address,
+          peerAddress,
           username
         } as ChatMessage);
       }
@@ -131,6 +104,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Register command to start chat
   const startDisposable = vscode.commands.registerCommand('vscode-bactor-chat.startChat', () => {
+    ChatWebview.render(context.extensionUri);
     vscode.window.showInformationMessage(`Bactor Chat is now active at ${systemAddress}!`);
   });
 

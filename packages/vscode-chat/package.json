@@ -5,7 +5,7 @@
   "version": "0.0.1",
   "publisher": "bactor",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.96.4"
   },
   "type": "commonjs",
   "categories": [
@@ -49,9 +49,15 @@
   "scripts": {
     "clean": "rimraf dist out *.vsix",
     "prebuild": "bun run clean && cd ../core && bun run build && cd ../web && bun run build",
-    "build": "tsc -p ./ && bun build ./src/extension.ts --outdir ./dist --target node --external vscode",
-    "watch": "tsc -p ./ -w",
-    "lint": "eslint src --ext ts",
+    "build": "bun run build:extension && bun run build:webview && bun run build:css",
+    "build:extension": "tsc -p ./ && bun build ./src/extension.ts --outdir ./dist --target node --external vscode",
+    "build:webview": "bun build ./src/webview/index.tsx --outdir ./dist --target browser --minify",
+    "build:css": "npx tailwindcss -i ./src/styles/globals.css -o ./dist/style.css",
+    "watch": "bun run watch:extension & bun run watch:webview & bun run watch:css",
+    "watch:extension": "tsc -p ./ -w",
+    "watch:webview": "bun build ./src/webview/index.tsx --outdir ./dist --target browser --watch",
+    "watch:css": "npx tailwindcss -i ./src/styles/globals.css -o ./dist/style.css --watch",
+    "lint": "eslint src --ext ts,tsx",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
     "vscode:prepublish": "bun run build",
@@ -59,17 +65,14 @@
     "pretest": "bun run compile && bun run lint",
     "test": "node ./out/test/runTest.js",
     "test-compile": "tsc -p ./",
-    "dev": "bun run watch",
-    "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
-    "esbuild": "bun run esbuild-base --sourcemap",
-    "esbuild-watch": "bun run esbuild-base --sourcemap --watch",
-    "test-watch": "tsc -p ./ -w",
-    "test-compile-watch": "tsc -p ./ -w"
+    "dev": "bun run watch"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "18.x",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
@@ -80,11 +83,23 @@
     "glob": "^11.0.1",
     "mocha": "^11.1.0",
     "rimraf": "^5.0.5",
+    "tailwindcss-cli": "^0.1.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   },
   "dependencies": {
     "@bactor/core": "workspace:*",
-    "@bactor/web": "workspace:*"
+    "@bactor/web": "workspace:*",
+    "@shadcn/ui": "^0.0.4",
+    "autoprefixer": "^10.4.20",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.474.0",
+    "postcss": "^8.5.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss": "3.4.1",
+    "tailwindcss-animate": "^1.0.7"
   }
 }

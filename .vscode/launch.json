@@ -1,0 +1,46 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run VSCode Chat Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-chat"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode-chat/dist/**/*.js"
+      ],
+      "preLaunchTask": "bun: watch:vscode-chat"
+    },
+    {
+      "name": "VSCode Chat Extension Tests",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-chat",
+        "--extensionTestsPath=${workspaceFolder}/packages/vscode-chat/out/test/suite/index"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode-chat/out/**/*.js"
+      ],
+      "preLaunchTask": "bun: test-compile:vscode-chat"
+    },
+    {
+      "type": "chrome",
+      "request": "attach",
+      "name": "Attach to VSCode Chat Webview",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}/packages/vscode-chat/src/webview"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "VSCode Chat Extension + Webview",
+      "configurations": [
+        "Run VSCode Chat Extension",
+        "Attach to VSCode Chat Webview"
+      ]
+    }
+  ]
+}

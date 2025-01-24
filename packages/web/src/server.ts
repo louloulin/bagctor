@@ -52,47 +52,74 @@ export class HttpServer extends Actor {
       port,
       hostname,
       fetch: async (request: Request) => {
+        console.log(`[Server] Received ${request.method} request to ${request.url}`);
+        
         const httpRequest: HttpRequest = {
           method: request.method,
-          url: request.url,
+          url: new URL(request.url).pathname,
           headers: request.headers,
-          body: request.body
+          body: request.body,
+          state: new Map()
         };
 
         try {
+          console.log('[Server] Processing middleware...');
           // Process middleware
-          await this.context.send(this.middlewareManagerPid, {
-            type: 'middleware.process',
-            payload: httpRequest,
-            sender: this.context.self
-          });
-
-          // Wait for middleware result
           const middlewareResponse = await new Promise<HttpResponse | null>((resolve) => {
-            this.addBehavior('await_middleware', async (msg) => {
+            const behaviorId = 'await_middleware';
+            console.log('[Server] Adding await_middleware behavior');
+            
+            this.addBehavior(behaviorId, async (msg) => {
+              console.log('[Server] Received message in await_middleware:', msg.type);
               if (msg.type === 'middleware.complete') {
+                console.log('[Server] Middleware complete, payload:', msg.payload);
                 this.become('default');
                 resolve(msg.payload as HttpResponse | null);
               }
             });
-            this.become('await_middleware');
+            
+            this.become(behaviorId);
+            console.log('[Server] Sending middleware.process message');
+            
+            this.context.send(this.middlewareManagerPid, {
+              type: 'middleware.process',
+              payload: httpRequest,
+              sender: this.context.self
+            });
           });
+
+          console.log('[Server] Middleware response:', middlewareResponse);
 
           // If middleware handled the request, return its response
           if (middlewareResponse) {
+            console.log('[Server] Returning middleware response');
             return new Response(middlewareResponse.body, {
               status: middlewareResponse.status,
               headers: middlewareResponse.headers
             });
           }
 
+          console.log('[Server] Processing route handler');
           // Process route handler
-          const response: HttpResponse = await this.router.handleRequest(httpRequest);
+          const response = await this.router.handleRequest(httpRequest);
+          
+          // Add any CORS headers from middleware state
+          if (response && response.headers) {
+            const corsHeaders = httpRequest.state?.get('cors');
+            if (corsHeaders) {
+              Object.entries(corsHeaders).forEach(([key, value]) => {
+                response.headers.set(key, value as string);
+              });
+            }
+          }
+
+          console.log('[Server] Returning route response:', response);
           return new Response(response.body, {
             status: response.status,
             headers: response.headers
           });
         } catch (error) {
+          console.error('[Server] Error:', error);
           return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' }

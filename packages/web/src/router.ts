@@ -68,8 +68,9 @@ export class Router extends Actor {
   }
 
   async handleRequest(request: HttpRequest): Promise<HttpResponse> {
-    const url = new URL(request.url);
-    const path = url.pathname;
+    console.log('[Router] Handling request:', request.method, request.url);
+    const path = request.url;
+    const searchParams = new URLSearchParams();
 
     for (const route of this.routes) {
       if (route.method !== request.method) {
@@ -81,17 +82,21 @@ export class Router extends Actor {
         continue;
       }
 
+      console.log('[Router] Found matching route:', route.pattern);
       const context: HttpContext = {
         ...this.context,
         request,
         params,
-        query: url.searchParams,
-        state: new Map()
+        query: searchParams,
+        state: request.state
       };
 
       try {
-        return await route.handler(context);
+        const response = await route.handler(context);
+        console.log('[Router] Route handler response:', response);
+        return response;
       } catch (error) {
+        console.error('[Router] Error in route handler:', error);
         return {
           status: 500,
           headers: new Headers({ 'Content-Type': 'application/json' }),
@@ -100,6 +105,7 @@ export class Router extends Actor {
       }
     }
 
+    console.log('[Router] No matching route found');
     return {
       status: 404,
       headers: new Headers({ 'Content-Type': 'application/json' }),

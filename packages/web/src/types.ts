@@ -5,6 +5,7 @@ export interface HttpRequest {
   url: string;
   headers: Headers;
   body?: ReadableStream | string | null;
+  state: Map<string, any>;
 }
 
 export interface HttpResponse {

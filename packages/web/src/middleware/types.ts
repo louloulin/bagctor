@@ -34,12 +34,17 @@ export abstract class MiddlewareActor extends Actor {
   protected behaviors(): void {
     this.addBehavior('default', async (msg) => {
       if (msg.type === 'process') {
+        console.log(`[${this.name}] Processing request`);
         const result = await this.process((msg as MiddlewareMessage).context);
+        console.log(`[${this.name}] Processing complete, handled:`, result.handled);
         if (msg.sender) {
+          console.log(`[${this.name}] Sending result back to sender`);
           await this.context.send(msg.sender, {
             type: 'middleware.result',
             payload: result
           });
+        } else {
+          console.log(`[${this.name}] Warning: No sender to return result to`);
         }
       }
     });

@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "rimraf tsconfig.tsbuildinfo && tsc",
     "test": "bun test",
     "clean": "rimraf dist",
     "example:agent": "bun run src/examples/agent_demo.ts"

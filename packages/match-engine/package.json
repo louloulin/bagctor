@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "bun run src/main.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "rimraf tsconfig.tsbuildinfo && tsc -p tsconfig.json",
     "test": "bun test",
     "example:simple": "bun run src/examples/simple_match.ts",
     "example:benchmark": "bun run src/examples/benchmark_match.ts",

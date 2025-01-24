@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "bun run src/main.ts",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/remote && cp -r src/remote/protos dist/remote/",
+    "build": "rimraf tsconfig.tsbuildinfo && tsc -p tsconfig.json && mkdir -p dist/remote && cp -r src/remote/protos dist/remote/",
     "test": "bun test",
     "test:perf": "bun test src/tests/performance.test.ts",
     "example:hello": "bun run src/examples/helloworld.ts",

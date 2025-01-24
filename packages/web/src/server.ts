@@ -1,4 +1,4 @@
-import { Actor, PID, Props } from '@bactor/core';
+import { Actor, PID, Props, Message } from '@bactor/core';
 import { Router } from './router';
 import { HttpRequest, HttpResponse } from './types';
 import { MiddlewareManager } from './middleware/manager';
@@ -12,8 +12,9 @@ export interface HttpServerProps extends Props {
 export class HttpServer extends Actor {
   private server: Server | null = null;
   private router: Router;
-  private middlewareManagerPid: PID;
+  private middlewareManagerPid!: PID;
   private config: { port: number; hostname: string };
+  private middlewareResolver: ((value: HttpResponse | null) => void) | null = null;
 
   constructor(props: Props) {
     super(props);
@@ -22,27 +23,106 @@ export class HttpServer extends Actor {
       hostname: (props as HttpServerProps).hostname || 'localhost'
     };
     this.router = new Router(this.context);
-    
+  }
+
+  public async preStart(): Promise<void> {
     // Create middleware manager as a child actor
-    this.middlewareManagerPid = this.context.spawn({
+    console.log('[Server] Creating middleware manager');
+    this.middlewareManagerPid = await this.context.spawn({
       actorClass: MiddlewareManager
     });
+    console.log('[Server] Middleware manager created with ID:', this.middlewareManagerPid.id);
   }
 
   protected behaviors(): void {
     this.addBehavior('default', async (msg) => {
+      console.log('[Server] Received message in default behavior:', msg.type);
       if (msg.type === 'start') {
         await this.start();
       } else if (msg.type === 'stop') {
         await this.stop();
       } else if (msg.type === 'middleware.add') {
-        await this.context.send(this.middlewareManagerPid, msg);
+        console.log('[Server] Forwarding middleware.add to manager:', this.middlewareManagerPid.id);
+        await this.context.send(this.middlewareManagerPid, {
+          type: msg.type,
+          payload: msg.payload,
+          sender: this.context.self
+        });
+      } else if (msg.type === 'middleware.complete') {
+        console.log('[Server] Warning: Received middleware.complete in default behavior');
+      }
+    });
+
+    this.addBehavior('await_middleware', async (msg: Message) => {
+      console.log('[Server] Received message in await_middleware:', msg.type, 'from:', msg.sender?.id);
+      if (msg.type === 'middleware.complete' && this.middlewareResolver) {
+        console.log('[Server] Middleware complete, payload:', msg.payload);
+        const resolver = this.middlewareResolver;
+        this.middlewareResolver = null;
+        this.become('default');
+        resolver(msg.payload as HttpResponse | null);
+      } else {
+        console.log('[Server] Unexpected message in await_middleware:', msg.type);
+        console.log('[Server] Has resolver:', !!this.middlewareResolver);
       }
     });
   }
 
   getRouter(): Router {
     return this.router;
+  }
+
+  private async processMiddleware(httpRequest: HttpRequest): Promise<HttpResponse | null> {
+    return new Promise<HttpResponse | null>((resolve, reject) => {
+      let isResolved = false;
+      const timeoutId = setTimeout(() => {
+        console.log('[Server] Middleware timeout triggered');
+        console.log('[Server] Current resolver:', !!this.middlewareResolver);
+        if (this.middlewareResolver && !isResolved) {
+          console.log('[Server] Handling timeout, switching back to default behavior');
+          const resolver = this.middlewareResolver;
+          this.middlewareResolver = null;
+          this.become('default');
+          isResolved = true;
+          resolver({
+            status: 504,
+            headers: new Headers({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ error: 'Gateway Timeout' })
+          });
+        }
+      }, 5000);
+
+      this.middlewareResolver = (response: HttpResponse | null) => {
+        console.log('[Server] Middleware resolver called');
+        console.log('[Server] Response:', response);
+        if (!isResolved) {
+          clearTimeout(timeoutId);
+          isResolved = true;
+          resolve(response);
+        } else {
+          console.log('[Server] Warning: Resolver called after timeout');
+        }
+      };
+
+      console.log('[Server] Setting up middleware processing');
+      this.become('await_middleware');
+      
+      console.log('[Server] Sending middleware.process message to:', this.middlewareManagerPid.id);
+      this.context.send(this.middlewareManagerPid, {
+        type: 'middleware.process',
+        payload: httpRequest,
+        sender: this.context.self
+      }).then(() => {
+        console.log('[Server] Middleware process message sent successfully');
+      }).catch((error: Error) => {
+        console.error('[Server] Error sending middleware process message:', error);
+        if (!isResolved) {
+          clearTimeout(timeoutId);
+          isResolved = true;
+          reject(error);
+        }
+      });
+    });
   }
 
   private async start() {
@@ -64,29 +144,7 @@ export class HttpServer extends Actor {
 
         try {
           console.log('[Server] Processing middleware...');
-          // Process middleware
-          const middlewareResponse = await new Promise<HttpResponse | null>((resolve) => {
-            const behaviorId = 'await_middleware';
-            console.log('[Server] Adding await_middleware behavior');
-            
-            this.addBehavior(behaviorId, async (msg) => {
-              console.log('[Server] Received message in await_middleware:', msg.type);
-              if (msg.type === 'middleware.complete') {
-                console.log('[Server] Middleware complete, payload:', msg.payload);
-                this.become('default');
-                resolve(msg.payload as HttpResponse | null);
-              }
-            });
-            
-            this.become(behaviorId);
-            console.log('[Server] Sending middleware.process message');
-            
-            this.context.send(this.middlewareManagerPid, {
-              type: 'middleware.process',
-              payload: httpRequest,
-              sender: this.context.self
-            });
-          });
+          const middlewareResponse = await this.processMiddleware(httpRequest);
 
           console.log('[Server] Middleware response:', middlewareResponse);
 

@@ -16,6 +16,7 @@ async function main() {
     };
     console.log('Creating HTTP server actor...');
     const serverPid = await system.spawn(props);
+    console.log('Server actor created with ID:', serverPid.id);
     const server = system.getActor(serverPid.id) as HttpServer;
     const router = server.getRouter();
 
@@ -25,22 +26,29 @@ async function main() {
       actorClass: LoggerMiddleware,
       actorContext: { name: 'RequestLogger' }
     });
+    console.log('Logger middleware created with ID:', loggerPid.id);
 
     const corsPid = await system.spawn({
       actorClass: CorsMiddleware,
       actorContext: { name: 'CORS' }
     });
+    console.log('CORS middleware created with ID:', corsPid.id);
 
     const authPid = await system.spawn({
       actorClass: AuthMiddleware,
       actorContext: { name: 'Auth' }
     });
+    console.log('Auth middleware created with ID:', authPid.id);
 
     // Add middleware to server
     console.log('Adding middleware to server...');
+    console.log('Adding logger middleware...');
     await system.send(serverPid, { type: 'middleware.add', payload: loggerPid });
+    console.log('Adding CORS middleware...');
     await system.send(serverPid, { type: 'middleware.add', payload: corsPid });
+    console.log('Adding Auth middleware...');
     await system.send(serverPid, { type: 'middleware.add', payload: authPid });
+    console.log('All middleware added');
 
     // Define protected routes
     console.log('Defining routes...');
@@ -66,6 +74,7 @@ async function main() {
     // Start the server
     console.log('Starting server...');
     await system.send(serverPid, { type: 'start' });
+    console.log('Server started');
     
     // Handle process termination
     process.on('SIGINT', async () => {

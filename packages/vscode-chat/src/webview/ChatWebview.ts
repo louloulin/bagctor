@@ -27,16 +27,17 @@ export class ChatWebview {
       type: 'init',
       username,
       systemAddress
-    });
+    } as WebviewMessage);
   }
 
   public reveal() {
     this._panel.reveal(vscode.ViewColumn.Two);
   }
 
-  public static render(extensionUri: vscode.Uri) {
+  public static render(extensionUri: vscode.Uri): ChatWebview {
     if (ChatWebview.currentPanel) {
       ChatWebview.currentPanel._panel.reveal(vscode.ViewColumn.Two);
+      return ChatWebview.currentPanel;
     } else {
       const panel = vscode.window.createWebviewPanel(
         "bactorChat",
@@ -54,12 +55,7 @@ export class ChatWebview {
       );
 
       ChatWebview.currentPanel = new ChatWebview(panel, extensionUri);
-
-      // Enable Chrome DevTools in development
-      if (process.env.NODE_ENV === 'development') {
-        // @ts-expect-error Internal VS Code WebView API for development purposes
-        panel.webview._options.enableDevTools = true;
-      }
+      return ChatWebview.currentPanel;
     }
   }
 

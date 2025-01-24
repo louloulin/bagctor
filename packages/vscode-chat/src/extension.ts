@@ -2,9 +2,6 @@ import { ExtensionContext, window, commands } from 'vscode';
 import { Actor, Message, ActorSystem, Props, log } from '@bactor/core';
 import { ChatWebview } from './webview/ChatWebview.js';
 
-// Configure logger
-log.level = 'debug';
-
 interface ChatMessage extends Message {
   type: 'chat' | 'response' | 'connect' | 'disconnect';
   content?: string;
@@ -93,14 +90,9 @@ export async function activate(context: ExtensionContext) {
 
     // Initialize UI with user data
     log.debug('Rendering ChatWebview');
-    ChatWebview.render(context.extensionUri);
-
-    if (ChatWebview.currentPanel) {
-      log.debug('Sending init data to webview');
-      ChatWebview.currentPanel.sendInitData(username, systemAddress);
-    } else {
-      log.warn('ChatWebview.currentPanel is undefined after render');
-    }
+    const webview = ChatWebview.render(context.extensionUri);
+    log.debug('Sending init data to webview');
+    webview.sendInitData(username, systemAddress);
 
     window.showInformationMessage(`Bactor Chat is now active at ${systemAddress}!`);
 
@@ -150,12 +142,9 @@ export async function activate(context: ExtensionContext) {
           ChatWebview.currentPanel.reveal();
         } else {
           log.debug('Creating new webview');
-          ChatWebview.render(context.extensionUri);
-          if (ChatWebview.currentPanel) {
-            ChatWebview.currentPanel.sendInitData(username, systemAddress);
-          } else {
-            log.warn('ChatWebview.currentPanel is undefined after render in startChat');
-          }
+          const webview = ChatWebview.render(context.extensionUri);
+          log.debug('Sending init data to webview');
+          webview.sendInitData(username, systemAddress);
         }
       } catch (error) {
         log.error(`Error in startChat command: ${error instanceof Error ? error.message : String(error)}`);

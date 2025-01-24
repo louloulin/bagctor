@@ -28,8 +28,32 @@ class TestSupervisorStrategy implements SupervisorStrategy {
   }
 }
 
+// Lifecycle test actor
+class LifecycleActor extends TestActor {
+  constructor(context: ActorContext, private lifecycleEvents: string[]) {
+    super(context);
+  }
+
+  async preStart(): Promise<void> {
+    this.lifecycleEvents.push('preStart');
+  }
+  async postStop(): Promise<void> {
+    this.lifecycleEvents.push('postStop');
+  }
+  async preRestart(): Promise<void> {
+    this.lifecycleEvents.push('preRestart');
+  }
+  async postRestart(): Promise<void> {
+    this.lifecycleEvents.push('postRestart');
+  }
+}
+
+let system: ActorSystem;
+let supervisorStrategy: TestSupervisorStrategy;
+let lifecycleEvents: string[];
+
 test("ActorSystem should spawn actors", async () => {
-  const system = new ActorSystem();
+  system = new ActorSystem();
   const pid = await system.spawn({
     actorClass: TestActor
   });
@@ -43,8 +67,8 @@ test("ActorSystem should spawn actors", async () => {
 });
 
 test("ActorSystem should handle actor failures with supervisor strategy", async () => {
-  const system = new ActorSystem();
-  const supervisorStrategy = new TestSupervisorStrategy();
+  system = new ActorSystem();
+  supervisorStrategy = new TestSupervisorStrategy();
   
   const pid = await system.spawn({
     actorClass: TestActor,
@@ -60,26 +84,11 @@ test("ActorSystem should handle actor failures with supervisor strategy", async 
 });
 
 test("ActorSystem should handle actor lifecycle", async () => {
-  const system = new ActorSystem();
-  const lifecycleEvents: string[] = [];
-
-  class LifecycleActor extends TestActor {
-    async preStart(): Promise<void> {
-      lifecycleEvents.push('preStart');
-    }
-    async postStop(): Promise<void> {
-      lifecycleEvents.push('postStop');
-    }
-    async preRestart(): Promise<void> {
-      lifecycleEvents.push('preRestart');
-    }
-    async postRestart(): Promise<void> {
-      lifecycleEvents.push('postRestart');
-    }
-  }
+  system = new ActorSystem();
+  lifecycleEvents = [];
 
   const pid = await system.spawn({
-    actorClass: LifecycleActor
+    producer: (context) => new LifecycleActor(context, lifecycleEvents)
   });
 
   // Verify preStart was called
@@ -93,7 +102,7 @@ test("ActorSystem should handle actor lifecycle", async () => {
 });
 
 test("ActorSystem should handle dead letters", async () => {
-  const system = new ActorSystem();
+  system = new ActorSystem();
   const pid = { id: 'non-existent' };
 
   // Send message to non-existent actor

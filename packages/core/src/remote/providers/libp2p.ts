@@ -1,11 +1,20 @@
+// @ts-ignore
 import { createLibp2p } from 'libp2p';
+// @ts-ignore
 import { tcp } from '@libp2p/tcp';
+// @ts-ignore
 import { noise } from '@chainsafe/libp2p-noise';
+// @ts-ignore
 import { mplex } from '@libp2p/mplex';
+// @ts-ignore
 import { kadDHT } from '@libp2p/kad-dht';
+// @ts-ignore
 import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery';
+// @ts-ignore
 import { gossipsub } from '@chainsafe/libp2p-gossipsub';
+// @ts-ignore
 import { identify } from '@libp2p/identify';
+// @ts-ignore
 import { multiaddr } from '@multiformats/multiaddr';
 import { Message } from '../../core/types';
 import { TransportProvider, Libp2pTransportOptions } from '../transport';
@@ -43,7 +52,9 @@ export class Libp2pTransportProvider implements TransportProvider {
                     allowPublishToZeroPeers: true,
                     gossipIncoming: true,
                     fallbackToFloodsub: true,
-                    floodPublish: true
+                    floodPublish: true,
+                    canRelayMessage: true,
+                    directPeers: []
                 })
             };
 
@@ -53,7 +64,8 @@ export class Libp2pTransportProvider implements TransportProvider {
                     enabled: true,
                     randomWalk: {
                         enabled: this.dhtRandomWalk
-                    }
+                    },
+                    protocolPrefix: '/bactor'
                 });
             }
 
@@ -62,24 +74,30 @@ export class Libp2pTransportProvider implements TransportProvider {
                     listen: [this.localAddress]
                 },
                 transports: [tcp()],
-                connectionEncryption: [noise()],
                 streamMuxers: [mplex()],
+                connectionEncryption: [noise()],
+                services,
                 peerDiscovery: [
                     pubsubPeerDiscovery({
-                        interval: 1000
+                        interval: 1000,
+                        topics: [TOPIC]
                     })
                 ],
-                services,
                 connectionManager: {
                     minConnections: 25,
                     maxConnections: 100,
                     autoDialInterval: 10000
+                },
+                connectionGater: {
+                    denyDialMultiaddr: () => false
+                },
+                start: false,
+                protocolPrefix: '/bactor',
+                protocols: [PROTOCOL],
+                transportManager: {
+                    faultTolerance: 1
                 }
             });
-
-            // Subscribe to messages
-            await this.node.services.pubsub.subscribe(TOPIC);
-            this.node.services.pubsub.addEventListener('message', this.handleIncomingMessage.bind(this));
 
             // Handle protocol messages
             await this.node.handle(PROTOCOL, this.handleProtocolMessage.bind(this));
@@ -95,6 +113,13 @@ export class Libp2pTransportProvider implements TransportProvider {
         try {
             await this.node.start();
             log.info(`libp2p node started with ID: ${this.node.peerId.toString()}`);
+
+            // Subscribe to messages after node is started
+            await this.node.services.pubsub.subscribe(TOPIC);
+            this.node.services.pubsub.addEventListener('message', this.handleIncomingMessage.bind(this));
+
+            // Wait for services to be fully started
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
             // Connect to bootstrap nodes
             for (const addr of this.bootstrapNodes) {
@@ -123,21 +148,26 @@ export class Libp2pTransportProvider implements TransportProvider {
 
     async send(address: string, message: Message): Promise<void> {
         try {
-            // Try direct protocol message first
-            const stream = await this.node.dialProtocol(multiaddr(address), PROTOCOL);
-            await this.writeToStream(stream, {
-                from: this.getLocalAddress(),
-                message: JSON.stringify(message)
-            });
-        } catch (error) {
-            log.warn(`Failed to send direct message to ${address}, falling back to pubsub:`, error);
+            if (!this.node.services.pubsub) {
+                throw new Error('Pubsub service not available');
+            }
 
-            // Fallback to pubsub
-            await this.node.services.pubsub.publish(TOPIC, new TextEncoder().encode(JSON.stringify({
+            const messageData = {
                 to: address,
                 from: this.getLocalAddress(),
                 message: JSON.stringify(message)
-            })));
+            };
+
+            await this.node.services.pubsub.publish(
+                TOPIC,
+                new TextEncoder().encode(JSON.stringify(messageData))
+            );
+
+            // Wait a short time to ensure message propagation
+            await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+            log.error(`Failed to send message to ${address}:`, error);
+            throw error;
         }
     }
 
@@ -145,6 +175,9 @@ export class Libp2pTransportProvider implements TransportProvider {
         try {
             await this.node.dial(multiaddr(address));
             log.debug(`Connected to peer: ${address}`);
+
+            // Wait for connection to be fully established
+            await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
             log.error(`Failed to connect to peer ${address}:`, error);
             throw error;
@@ -169,7 +202,9 @@ export class Libp2pTransportProvider implements TransportProvider {
 
             // Only process messages intended for us
             if (data.to === this.getLocalAddress() && this.messageHandler) {
-                await this.messageHandler(data.from, JSON.parse(data.message));
+                const message = JSON.parse(data.message);
+                log.debug(`Received message from ${data.from}:`, message);
+                await this.messageHandler(data.from, message);
             }
         } catch (error) {
             log.error('Error handling incoming pubsub message:', error);

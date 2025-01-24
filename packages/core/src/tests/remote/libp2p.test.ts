@@ -20,18 +20,18 @@ describe('Libp2p Transport Provider', () => {
     });
 
     test('should connect two nodes and exchange messages', async () => {
-        // Create two providers with fixed ports for testing
+        // Create two providers with dynamic ports for testing
         const provider1 = new Libp2pTransportProvider({
-            localAddress: '/ip4/127.0.0.1/tcp/40001'
+            localAddress: '/ip4/127.0.0.1/tcp/0'
         });
         const provider2 = new Libp2pTransportProvider({
-            localAddress: '/ip4/127.0.0.1/tcp/40002'
+            localAddress: '/ip4/127.0.0.1/tcp/0'
         });
 
         // Initialize and start both providers
         await Promise.all([
-            provider1.init({ localAddress: '/ip4/127.0.0.1/tcp/40001' }),
-            provider2.init({ localAddress: '/ip4/127.0.0.1/tcp/40002' })
+            provider1.init({ localAddress: '/ip4/127.0.0.1/tcp/0' }),
+            provider2.init({ localAddress: '/ip4/127.0.0.1/tcp/0' })
         ]);
 
         await Promise.all([
@@ -39,8 +39,8 @@ describe('Libp2p Transport Provider', () => {
             provider2.start()
         ]);
 
-        // Wait for providers to be ready
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Wait for providers to be fully ready
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Set up message handlers
         const messages1: Message[] = [];
@@ -56,10 +56,11 @@ describe('Libp2p Transport Provider', () => {
 
         // Connect the nodes using multiaddr format
         const peerId2 = provider2.getLocalAddress();
-        await provider1.dial(`/ip4/127.0.0.1/tcp/40002/p2p/${peerId2}`);
+        const addr2 = provider2.getListenAddresses()[0];
+        await provider1.dial(`${addr2}/p2p/${peerId2}`);
 
         // Wait for connection to be established
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Exchange messages
         const message1: Message = {
@@ -78,7 +79,7 @@ describe('Libp2p Transport Provider', () => {
         ]);
 
         // Wait for message propagation
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Verify messages were received
         expect(messages2).toContainEqual(message1);

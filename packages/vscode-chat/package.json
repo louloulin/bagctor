@@ -7,7 +7,7 @@
   "engines": {
     "vscode": "^1.96.4"
   },
-  "type": "commonjs",
+  "type": "module",
   "categories": [
     "Other"
   ],
@@ -50,13 +50,13 @@
     "clean": "rimraf dist out *.vsix",
     "prebuild": "bun run clean && cd ../core && bun run build && cd ../web && bun run build",
     "build": "bun run build:extension && bun run build:webview && bun run build:css",
-    "build:extension": "tsc -p ./ && bun build ./src/extension.ts --outdir ./dist --target node --external vscode",
-    "build:webview": "bun build ./src/webview/index.tsx --outdir ./dist --target browser --minify",
-    "build:css": "npx tailwindcss -i ./src/styles/globals.css -o ./dist/style.css",
+    "build:extension": "bun build src/extension.ts --outfile=dist/extension.js --target=node --external vscode --format=esm --platform=node",
+    "build:webview": "bun build src/webview/index.tsx --outdir=dist --target=browser --platform=browser --minify",
+    "build:css": "bunx tailwindcss -i ./src/styles/globals.css -o ./dist/style.css",
     "watch": "bun run watch:extension & bun run watch:webview & bun run watch:css",
-    "watch:extension": "tsc -p ./ -w",
-    "watch:webview": "bun build ./src/webview/index.tsx --outdir ./dist --target browser --watch",
-    "watch:css": "npx tailwindcss -i ./src/styles/globals.css -o ./dist/style.css --watch",
+    "watch:extension": "bun build src/extension.ts --outfile=dist/extension.js --target=node --external vscode --format=esm --platform=node --watch",
+    "watch:webview": "bun build src/webview/index.tsx --outdir=dist --target=browser --platform=browser --watch",
+    "watch:css": "bunx tailwindcss -i ./src/styles/globals.css -o ./dist/style.css --watch",
     "lint": "eslint src --ext ts,tsx",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",

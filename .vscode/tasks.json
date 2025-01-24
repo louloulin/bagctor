@@ -3,40 +3,35 @@
   "tasks": [
     {
       "type": "shell",
-      "command": "bun",
-      "args": [
-        "run",
-        "dev:vscode-chat"
-      ],
+      "command": "cd ${workspaceFolder}/packages/vscode-chat && bun run watch",
       "label": "bun: watch:vscode-chat",
       "isBackground": true,
       "problemMatcher": {
-        "pattern": {
-          "regexp": "^.*$",
-          "file": 1,
-          "location": 2,
-          "message": 3
-        },
+        "owner": "typescript",
+        "pattern": [
+          {
+            "regexp": "^([^\\s].*)\\((\\d+,\\d+)\\):\\s+(error|warning|info)\\s+(.*)$",
+            "file": 1,
+            "location": 2,
+            "severity": 3,
+            "message": 4
+          }
+        ],
         "background": {
           "activeOnStart": true,
-          "beginsPattern": ".*",
-          "endsPattern": ".*"
+          "beginsPattern": "^.*starting compilation.*$",
+          "endsPattern": "^.*compilation finished.*$"
         }
       },
       "presentation": {
-        "reveal": "never",
-        "panel": "dedicated"
+        "reveal": "always",
+        "panel": "new",
+        "clear": true
       }
     },
     {
       "type": "shell",
-      "command": "bun",
-      "args": [
-        "run",
-        "--cwd",
-        "packages/vscode-chat",
-        "test-compile"
-      ],
+      "command": "cd ${workspaceFolder}/packages/vscode-chat && bun run test-compile",
       "label": "bun: test-compile:vscode-chat",
       "group": "build",
       "problemMatcher": [
@@ -45,11 +40,7 @@
     },
     {
       "type": "shell",
-      "command": "bun",
-      "args": [
-        "run",
-        "build:vscode-chat"
-      ],
+      "command": "cd ${workspaceFolder}/packages/vscode-chat && bun run build",
       "label": "bun: build:vscode-chat",
       "group": {
         "kind": "build",

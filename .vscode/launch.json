@@ -11,7 +11,12 @@
       "outFiles": [
         "${workspaceFolder}/packages/vscode-chat/dist/**/*.js"
       ],
-      "preLaunchTask": "bun: watch:vscode-chat"
+      "preLaunchTask": "bun: watch:vscode-chat",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": [
+        "${workspaceFolder}/packages/vscode-chat/**",
+        "!**/node_modules/**"
+      ]
     },
     {
       "name": "VSCode Chat Extension Tests",
@@ -31,7 +36,10 @@
       "request": "attach",
       "name": "Attach to VSCode Chat Webview",
       "port": 9222,
-      "webRoot": "${workspaceFolder}/packages/vscode-chat/src/webview"
+      "webRoot": "${workspaceFolder}/packages/vscode-chat",
+      "sourceMapPathOverrides": {
+        "webpack:///src/*": "${webRoot}/src/*"
+      }
     }
   ],
   "compounds": [

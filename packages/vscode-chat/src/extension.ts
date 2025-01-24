@@ -1,6 +1,6 @@
-import * as vscode from 'vscode';
+import { ExtensionContext, window, commands } from 'vscode';
 import { Actor, Message, ActorSystem, Props } from '@bactor/core';
-import { ChatWebview } from './webview/ChatWebview';
+import { ChatWebview } from './webview/ChatWebview.js';
 
 interface ChatMessage extends Message {
   type: 'chat' | 'response' | 'connect' | 'disconnect';
@@ -15,7 +15,7 @@ class ChatActor extends Actor {
   protected behaviors(): void {
     this.addBehavior('default', async (message: Message) => {
       const chatMessage = message as ChatMessage;
-      
+
       switch (chatMessage.type) {
         case 'connect':
           if (chatMessage.peerAddress && chatMessage.username) {
@@ -65,14 +65,14 @@ class ChatActor extends Actor {
   }
 }
 
-export async function activate(context: vscode.ExtensionContext) {
+export async function activate(context: ExtensionContext) {
   // Create Bactor system with a random port for P2P
   const port = Math.floor(Math.random() * (65535 - 1024) + 1024);
   const systemAddress = `localhost:${port}`;
   const system = new ActorSystem(systemAddress);
   await system.start();
 
-  const username = await vscode.window.showInputBox({
+  const username = await window.showInputBox({
     prompt: 'Enter your username for the chat',
     placeHolder: 'Username'
   }) || 'Anonymous';
@@ -82,8 +82,8 @@ export async function activate(context: vscode.ExtensionContext) {
   } as Props);
 
   // Register command to connect to another peer
-  const connectDisposable = vscode.commands.registerCommand('vscode-bactor-chat.connect', async (address?: string) => {
-    const peerAddress = address || await vscode.window.showInputBox({
+  const connectDisposable = commands.registerCommand('vscode-bactor-chat.connect', async (address?: string) => {
+    const peerAddress = address || await window.showInputBox({
       prompt: 'Enter peer address (e.g., localhost:3000)',
       placeHolder: 'host:port'
     });
@@ -103,9 +103,9 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(connectDisposable);
 
   // Register command to start chat
-  const startDisposable = vscode.commands.registerCommand('vscode-bactor-chat.startChat', () => {
+  const startDisposable = commands.registerCommand('vscode-bactor-chat.startChat', () => {
     ChatWebview.render(context.extensionUri);
-    vscode.window.showInformationMessage(`Bactor Chat is now active at ${systemAddress}!`);
+    window.showInformationMessage(`Bactor Chat is now active at ${systemAddress}!`);
   });
 
   context.subscriptions.push(startDisposable);
@@ -246,4 +246,4 @@ function getWebviewContent() {
   </html>`;
 }
 
-export function deactivate() {}
+export function deactivate() { }

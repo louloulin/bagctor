@@ -22,8 +22,10 @@
     "@bactor/core": "workspace:*"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.6",
     "@types/node": "^20.10.5",
+    "autocannon": "^8.0.0",
     "bun-types": "latest",
     "typescript": "^5.3.3"
   }
-} 
+}

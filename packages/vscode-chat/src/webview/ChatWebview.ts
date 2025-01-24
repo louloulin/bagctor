@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 
 interface WebviewMessage {
-  type: 'connect' | 'chat';
+  type: 'connect' | 'chat' | 'init';
   address?: string;
   content?: string;
+  username?: string;
+  systemAddress?: string;
 }
 
 export class ChatWebview {
@@ -15,6 +17,21 @@ export class ChatWebview {
     this._panel = panel;
     this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, extensionUri);
     this._setWebviewMessageListener(this._panel.webview);
+
+    // Handle panel dispose
+    this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+  }
+
+  public sendInitData(username: string, systemAddress: string) {
+    this._panel.webview.postMessage({
+      type: 'init',
+      username,
+      systemAddress
+    });
+  }
+
+  public reveal() {
+    this._panel.reveal(vscode.ViewColumn.Two);
   }
 
   public static render(extensionUri: vscode.Uri) {
@@ -48,7 +65,7 @@ export class ChatWebview {
 
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(extensionUri, 'dist', 'webview.js')
+      vscode.Uri.joinPath(extensionUri, 'dist', 'index.js')
     );
 
     const styleUri = webview.asWebviewUri(
@@ -90,6 +107,9 @@ export class ChatWebview {
             return;
           case 'chat':
             // Handle chat message
+            return;
+          case 'init':
+            // Handle initialization message
             return;
         }
       },

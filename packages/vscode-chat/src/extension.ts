@@ -77,6 +77,13 @@ export async function activate(context: ExtensionContext) {
     placeHolder: 'Username'
   }) || 'Anonymous';
 
+  // Initialize UI with user data
+  ChatWebview.render(context.extensionUri);
+  if (ChatWebview.currentPanel) {
+    ChatWebview.currentPanel.sendInitData(username, systemAddress);
+  }
+  window.showInformationMessage(`Bactor Chat is now active at ${systemAddress}!`);
+
   const chatActor = await system.spawn({
     actorClass: ChatActor
   } as Props);
@@ -102,10 +109,16 @@ export async function activate(context: ExtensionContext) {
 
   context.subscriptions.push(connectDisposable);
 
-  // Register command to start chat
+  // Register command to start chat (now just focuses existing window)
   const startDisposable = commands.registerCommand('vscode-bactor-chat.startChat', () => {
-    ChatWebview.render(context.extensionUri);
-    window.showInformationMessage(`Bactor Chat is now active at ${systemAddress}!`);
+    if (ChatWebview.currentPanel) {
+      ChatWebview.currentPanel.reveal();
+    } else {
+      ChatWebview.render(context.extensionUri);
+      if (ChatWebview.currentPanel) {
+        ChatWebview.currentPanel.sendInitData(username, systemAddress);
+      }
+    }
   });
 
   context.subscriptions.push(startDisposable);

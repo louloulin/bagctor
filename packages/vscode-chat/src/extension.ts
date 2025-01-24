@@ -109,7 +109,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   // Register command to connect to another peer
-  let connectDisposable = vscode.commands.registerCommand('vscode-bactor-chat.connect', async () => {
+  const connectDisposable = vscode.commands.registerCommand('vscode-bactor-chat.connect', async () => {
     const address = await vscode.window.showInputBox({
       prompt: 'Enter peer address (e.g., localhost:3000)',
       placeHolder: 'host:port'
@@ -130,7 +130,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(connectDisposable);
 
   // Register command to start chat
-  let startDisposable = vscode.commands.registerCommand('vscode-bactor-chat.startChat', () => {
+  const startDisposable = vscode.commands.registerCommand('vscode-bactor-chat.startChat', () => {
     vscode.window.showInformationMessage(`Bactor Chat is now active at ${systemAddress}!`);
   });
 
@@ -272,4 +272,4 @@ function getWebviewContent() {
   </html>`;
 }
 
-export function deactivate() {} 
+export function deactivate() {}

@@ -47,16 +47,24 @@
     }
   },
   "scripts": {
-    "build": "bun build ./src/extension.ts --outdir ./dist --target node --external vscode",
-    "watch": "bun build ./src/extension.ts --outdir ./dist --target node --external vscode --watch",
+    "clean": "rimraf dist out *.vsix",
+    "prebuild": "bun run clean && cd ../core && bun run build && cd ../web && bun run build",
+    "build": "tsc -p ./ && bun build ./src/extension.ts --outdir ./dist --target node --external vscode",
+    "watch": "tsc -p ./ -w",
     "lint": "eslint src --ext ts",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
     "vscode:prepublish": "bun run build",
-    "compile": "bun run build",
+    "compile": "tsc -p ./",
     "pretest": "bun run compile && bun run lint",
-    "test": "bun test src/test/suite/extension.test.ts",
-    "test-compile": "tsc -p ./"
+    "test": "node ./out/test/runTest.js",
+    "test-compile": "tsc -p ./",
+    "dev": "bun run watch",
+    "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "esbuild": "bun run esbuild-base --sourcemap",
+    "esbuild-watch": "bun run esbuild-base --sourcemap --watch",
+    "test-watch": "tsc -p ./ -w",
+    "test-compile-watch": "tsc -p ./ -w"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",
@@ -67,9 +75,12 @@
     "@typescript-eslint/parser": "^6.15.0",
     "@vscode/test-electron": "^2.3.9",
     "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.20.0",
     "eslint": "^8.56.0",
     "glob": "^11.0.1",
     "mocha": "^11.1.0",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   },
   "dependencies": {

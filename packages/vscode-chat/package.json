@@ -63,7 +63,9 @@
     "vscode:prepublish": "bun run build",
     "compile": "tsc -p ./",
     "pretest": "bun run compile && bun run lint",
-    "test": "node ./out/test/runTest.js",
+    "test": "bun test --preload ./scripts/setup-vscode.ts",
+    "test:unit": "bun test src/test/suite/extension.test.ts --preload ./scripts/setup-vscode.ts",
+    "test:integration": "bun test src/test/runTest.ts --preload ./scripts/setup-vscode.ts",
     "test-compile": "tsc -p ./",
     "dev": "bun run watch"
   },

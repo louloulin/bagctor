@@ -2,17 +2,19 @@
   "name": "@bactor/core",
   "version": "0.1.0",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
+      "require": "./dist/index.cjs",
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
   },
   "scripts": {
     "dev": "bun run src/main.ts",
-    "build": "rimraf tsconfig.tsbuildinfo && tsc -p tsconfig.json && mkdir -p dist/remote && cp -r src/remote/protos dist/remote/",
+    "build": "rimraf tsconfig.tsbuildinfo && tsc -p tsconfig.json && mkdir -p dist/remote && cp -r src/remote/protos dist/remote/ && bun build src/index.ts --outfile=dist/index.cjs --target=node --format=cjs --external @grpc/grpc-js --external @grpc/proto-loader --external pino --external fastq",
     "test": "bun test",
     "test:perf": "bun test src/tests/performance.test.ts",
     "example:hello": "bun run src/examples/helloworld.ts",

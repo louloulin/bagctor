@@ -40,7 +40,7 @@ export class ChatWebview {
 
       // Enable Chrome DevTools in development
       if (process.env.NODE_ENV === 'development') {
-        // @ts-ignore
+        // @ts-expect-error Internal VS Code WebView API for development purposes
         panel.webview._options.enableDevTools = true;
       }
     }

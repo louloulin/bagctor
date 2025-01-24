@@ -1,0 +1,17 @@
+.git
+.gitignore
+node_modules
+src/**
+.eslintrc.json
+tsconfig.json
+.vscode/**
+.vscode-test/**
+out/test/**
+test/**
+bun.lockb
+*.vsix
+.editorconfig
+.prettierrc
+.prettierignore
+*.log
+*.tsbuildinfo 

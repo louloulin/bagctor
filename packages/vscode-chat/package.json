@@ -1,0 +1,79 @@
+{
+  "name": "vscode-bactor-chat",
+  "displayName": "Bactor Chat",
+  "description": "High-performance chat plugin powered by Bactor",
+  "version": "0.0.1",
+  "publisher": "bactor",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "type": "commonjs",
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:vscode-bactor-chat.startChat",
+    "onCommand:vscode-bactor-chat.connect"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vscode-bactor-chat.startChat",
+        "title": "Start Bactor Chat"
+      },
+      {
+        "command": "vscode-bactor-chat.connect",
+        "title": "Connect to Peer"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "bactor-chat",
+          "title": "Bactor Chat",
+          "icon": "resources/chat.svg"
+        }
+      ]
+    },
+    "views": {
+      "bactor-chat": [
+        {
+          "type": "webview",
+          "id": "bactorChatView",
+          "name": "Chat"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "bun build ./src/extension.ts --outdir ./dist --target node --external vscode",
+    "watch": "bun build ./src/extension.ts --outdir ./dist --target node --external vscode --watch",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies",
+    "vscode:prepublish": "bun run build",
+    "compile": "bun run build",
+    "pretest": "bun run compile && bun run lint",
+    "test": "bun test src/test/suite/extension.test.ts",
+    "test-compile": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "18.x",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vscode/test-electron": "^2.3.9",
+    "@vscode/vsce": "^3.2.1",
+    "eslint": "^8.56.0",
+    "glob": "^11.0.1",
+    "mocha": "^11.1.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@bactor/core": "workspace:*",
+    "@bactor/web": "workspace:*"
+  }
+}

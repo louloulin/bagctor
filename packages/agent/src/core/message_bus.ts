@@ -196,8 +196,18 @@ export class MessageBusActor extends Actor implements MessageBus {
     public async init(): Promise<void> {
         const traceCtx = this.createTraceContext('init');
 
+        log.debug('Starting MessageBus initialization', {
+            traceId: traceCtx.traceId,
+            actorId: this.context.self.id
+        });
+
         try {
             // Create subscription router with broadcast strategy
+            log.debug('Creating subscription router', {
+                traceId: traceCtx.traceId,
+                routerType: 'broadcast'
+            });
+
             const subRouter = await createRouter('broadcast', {
                 system: this.context.system,
                 routees: []
@@ -210,6 +220,12 @@ export class MessageBusActor extends Actor implements MessageBus {
             const subRouterPID = await this.context.spawn({
                 actorClass: RouterActor
             });
+
+            log.debug('Subscription router actor created', {
+                traceId: traceCtx.traceId,
+                routerId: subRouterPID.id
+            });
+
             await this.context.send(subRouterPID, {
                 type: 'router.set',
                 router: subRouter,
@@ -218,6 +234,11 @@ export class MessageBusActor extends Actor implements MessageBus {
             this.subscriptionRouter = subRouterPID;
 
             // Create request router with broadcast strategy
+            log.debug('Creating request router', {
+                traceId: traceCtx.traceId,
+                routerType: 'broadcast'
+            });
+
             const reqRouter = await createRouter('broadcast', {
                 system: this.context.system,
                 routees: []
@@ -230,6 +251,12 @@ export class MessageBusActor extends Actor implements MessageBus {
             const reqRouterPID = await this.context.spawn({
                 actorClass: RouterActor
             });
+
+            log.debug('Request router actor created', {
+                traceId: traceCtx.traceId,
+                routerId: reqRouterPID.id
+            });
+
             await this.context.send(reqRouterPID, {
                 type: 'router.set',
                 router: reqRouter,
@@ -237,15 +264,18 @@ export class MessageBusActor extends Actor implements MessageBus {
             });
             this.requestRouter = reqRouterPID;
 
-            log.info('MessageBus initialized with routers', {
+            log.info('MessageBus initialization completed', {
                 traceId: traceCtx.traceId,
                 subscriptionRouterId: this.subscriptionRouter?.id,
-                requestRouterId: this.requestRouter?.id
+                requestRouterId: this.requestRouter?.id,
+                actorId: this.context.self.id
             });
         } catch (error) {
             log.error('Failed to initialize MessageBus', {
                 traceId: traceCtx.traceId,
-                error: error instanceof Error ? error.message : 'Unknown error'
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined,
+                actorId: this.context.self.id
             });
             throw error;
         }
@@ -492,17 +522,25 @@ export class MessageBusActor extends Actor implements MessageBus {
     private async handleResponse(msg: Message, traceCtx: TraceContext): Promise<void> {
         const { response, correlationId } = msg.payload;
 
-        log.debug('Processing response', {
+        log.debug('Processing response message', {
             traceId: traceCtx.traceId,
             correlationId,
-            hasSender: !!msg.sender,
             responseType: response?.type,
-            sender: msg.sender?.id
+            senderId: msg.sender?.id,
+            hasRequestRouter: !!this.requestRouter,
+            priority: response?.context?.priority,
+            senderRole: response?.sender?.role
         });
 
         if (msg.sender && this.requestRouter) {
             try {
-                // First send the response
+                log.debug('Sending response to original requester', {
+                    traceId: traceCtx.traceId,
+                    correlationId,
+                    senderId: msg.sender.id,
+                    responseType: response?.type
+                });
+
                 await this.context.send(msg.sender, {
                     type: 'RESPONSE',
                     payload: {
@@ -512,13 +550,13 @@ export class MessageBusActor extends Actor implements MessageBus {
                     traceId: traceCtx.traceId
                 });
 
-                log.debug('Response successfully sent', {
+                log.debug('Response successfully sent, cleaning up routee', {
                     traceId: traceCtx.traceId,
                     correlationId,
-                    sender: msg.sender.id
+                    senderId: msg.sender.id,
+                    routerId: this.requestRouter.id
                 });
 
-                // Then remove sender from routees
                 try {
                     await this.context.send(this.requestRouter, {
                         type: 'router.remove-routee',
@@ -529,42 +567,57 @@ export class MessageBusActor extends Actor implements MessageBus {
                     log.debug('Successfully removed response routee', {
                         traceId: traceCtx.traceId,
                         correlationId,
-                        sender: msg.sender.id
+                        senderId: msg.sender.id,
+                        routerId: this.requestRouter.id
                     });
                 } catch (cleanupError) {
                     log.error('Failed to remove routee after response', {
                         traceId: traceCtx.traceId,
                         correlationId,
-                        sender: msg.sender.id,
-                        error: cleanupError instanceof Error ? cleanupError.message : 'Unknown error'
+                        senderId: msg.sender.id,
+                        routerId: this.requestRouter.id,
+                        error: cleanupError instanceof Error ? cleanupError.message : 'Unknown error',
+                        stack: cleanupError instanceof Error ? cleanupError.stack : undefined
                     });
                 }
             } catch (error) {
                 log.error('Failed to send response', {
                     traceId: traceCtx.traceId,
                     correlationId,
-                    sender: msg.sender.id,
-                    error: error instanceof Error ? error.message : 'Unknown error'
+                    senderId: msg.sender.id,
+                    responseType: response?.type,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    stack: error instanceof Error ? error.stack : undefined
                 });
                 throw error;
             }
         } else {
-            log.warn('Response received without sender or router', {
+            log.warn('Cannot process response - missing sender or router', {
                 traceId: traceCtx.traceId,
                 correlationId,
                 hasSender: !!msg.sender,
-                hasRouter: !!this.requestRouter
+                hasRouter: !!this.requestRouter,
+                responseType: response?.type
             });
         }
     }
 
     private handleClear(traceCtx: TraceContext): void {
+        log.debug('Starting message bus clear operation', {
+            traceId: traceCtx.traceId,
+            currentSubscriptions: this.subscriptions.size,
+            hasSubscriptionRouter: !!this.subscriptionRouter,
+            hasRequestRouter: !!this.requestRouter
+        });
+
         const subscriptionCount = this.subscriptions.size;
         this.subscriptions.clear();
 
-        log.debug('Message bus cleared', {
+        log.info('Message bus cleared', {
             traceId: traceCtx.traceId,
-            clearedSubscriptions: subscriptionCount
+            clearedSubscriptions: subscriptionCount,
+            remainingSubscriptions: this.subscriptions.size,
+            actorId: this.context.self.id
         });
     }
 

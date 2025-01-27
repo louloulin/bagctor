@@ -26,7 +26,7 @@ export class ThreadPoolDispatcher implements MessageDispatcher {
     // Round-robin scheduling
     const worker = this.workers[this.currentWorker];
     this.currentWorker = (this.currentWorker + 1) % this.threadCount;
-    
+
     // In a real implementation, we would post the task to the worker
     worker.postMessage({
       type: 'EXECUTE',
@@ -40,16 +40,26 @@ export class ThroughputDispatcher implements MessageDispatcher {
   private processing = false;
   private processedInWindow = 0;
   private windowStartTime = Date.now();
-  
+  private nextBatchTime = 0;
+  private readonly timePerBatch: number;
+  private readonly timePerTask: number;
+  private batchExecutionPromise: Promise<void> | null = null;
+
   constructor(
     private readonly throughput: number = 300,
     private readonly batchSize: number = 30,
     private readonly windowSize: number = 1000 // 1 second window
-  ) {}
+  ) {
+    // Pre-calculate timing constants
+    this.timePerBatch = (this.windowSize * this.batchSize) / this.throughput;
+    this.timePerTask = this.windowSize / this.throughput;
+  }
 
   schedule(runner: () => Promise<void>): void {
     this.queue.push(runner);
-    this.processQueue();
+    if (!this.processing) {
+      this.processQueue();
+    }
   }
 
   private async processQueue(): Promise<void> {
@@ -59,23 +69,28 @@ export class ThroughputDispatcher implements MessageDispatcher {
     try {
       while (this.queue.length > 0) {
         const now = Date.now();
-        const windowElapsed = now - this.windowStartTime;
 
         // Reset window if needed
-        if (windowElapsed >= this.windowSize) {
+        if (now >= this.windowStartTime + this.windowSize) {
           this.windowStartTime = now;
           this.processedInWindow = 0;
+          this.nextBatchTime = now;
         }
 
         // Check if we've hit throughput limit
         if (this.processedInWindow >= this.throughput) {
-          // Wait for next window
-          const waitTime = this.windowSize - windowElapsed;
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          const nextWindow = this.windowStartTime + this.windowSize;
+          await new Promise(resolve => setTimeout(resolve, nextWindow - now));
           continue;
         }
 
-        // Process batch
+        // Wait until next batch time if needed
+        if (now < this.nextBatchTime) {
+          await new Promise(resolve => setTimeout(resolve, this.nextBatchTime - now));
+          continue;
+        }
+
+        // Take batch of tasks
         const batchSize = Math.min(
           this.batchSize,
           this.throughput - this.processedInWindow,
@@ -83,24 +98,40 @@ export class ThroughputDispatcher implements MessageDispatcher {
         );
 
         const batch = this.queue.splice(0, batchSize);
-        const batchPromises = batch.map(runner => runner());
-        
-        try {
-          await Promise.all(batchPromises);
-          this.processedInWindow += batchSize;
-        } catch (error) {
-          console.error('Error processing batch:', error);
-        }
+        const batchStartTime = Date.now();
 
-        // Small delay between batches
-        await new Promise(resolve => setTimeout(resolve, 1));
+        // Execute batch tasks in parallel with timing control
+        const executions = batch.map((runner, index) => {
+          const targetStartTime = batchStartTime + (index * this.timePerTask / batchSize);
+          return (async () => {
+            const now = Date.now();
+            if (now < targetStartTime) {
+              await new Promise(resolve => setTimeout(resolve, targetStartTime - now));
+            }
+            return runner();
+          })();
+        });
+
+        // Wait for all tasks to complete
+        await Promise.all(executions);
+
+        // Update state
+        this.processedInWindow += batchSize;
+        this.nextBatchTime = batchStartTime + this.timePerBatch;
+
+        // Ensure minimum time between batches
+        const batchEndTime = Date.now();
+        const batchDuration = batchEndTime - batchStartTime;
+        if (batchDuration < this.timePerBatch) {
+          await new Promise(resolve => setTimeout(resolve, this.timePerBatch - batchDuration));
+        }
       }
     } finally {
       this.processing = false;
-      
-      // If there are still items in queue, schedule next processing
+
+      // If there are still items in queue, continue processing
       if (this.queue.length > 0) {
-        setTimeout(() => this.processQueue(), 0);
+        this.processQueue();
       }
     }
   }

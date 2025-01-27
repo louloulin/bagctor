@@ -199,19 +199,36 @@ class Mutex {
 }
 
 export class RandomStrategy implements IRoutingStrategy {
-  private readonly mutex = new Mutex();
+  private readonly buffer: Uint32Array;
+  private bufferIndex: number;
+
+  constructor() {
+    // Initialize a buffer for random values
+    this.buffer = new Uint32Array(1024);
+    this.bufferIndex = this.buffer.length;
+  }
 
   async selectRoutee(message: Message, routees: PID[]): Promise<PID> {
-    const release = await this.mutex.acquire();
-    try {
-      const array = new Uint32Array(1);
-      crypto.getRandomValues(array);
-      const index = array[0] % routees.length;
-      console.log(`[RandomStrategy] Selected routee ${routees[index].id} (index: ${index})`);
-      return routees[index];
-    } finally {
-      release();
+    // Refill buffer if needed
+    if (this.bufferIndex >= this.buffer.length) {
+      crypto.getRandomValues(this.buffer);
+      this.bufferIndex = 0;
     }
+
+    // Use modulo bias correction
+    const range = routees.length;
+    const min = (-range >>> 0) % range;
+    let value;
+
+    do {
+      value = this.buffer[this.bufferIndex++];
+    } while (value < min);
+
+    const index = value % range;
+    const selectedRoutee = routees[index];
+
+    log.info(`[RandomStrategy] Selected routee ${selectedRoutee.id} (index: ${index})`);
+    return selectedRoutee;
   }
 }
 
@@ -223,70 +240,108 @@ export class BroadcastStrategy implements IRoutingStrategy {
 }
 
 export class ConsistentHashStrategy implements IRoutingStrategy {
-  private readonly hashRing: Map<number, PID> = new Map();
-  private readonly virtualNodes: number;
+  private readonly virtualNodes: number = 100;
+  private readonly hashRing = new Map<number, PID>();
   private readonly hashFn: (message: Message) => string | number;
-  private readonly mutex = new Mutex();
 
-  constructor(config: RouterConfig) {
-    this.virtualNodes = config.routingConfig?.virtualNodeCount ?? 100;
-    this.hashFn = config.routingConfig?.hashFunction ??
-      ((message: Message) => message.type);
-    console.log(`[ConsistentHashStrategy] Initialized with ${this.virtualNodes} virtual nodes`);
+  constructor(config?: RouterConfig) {
+    if (config?.routingConfig?.virtualNodeCount) {
+      this.virtualNodes = config.routingConfig.virtualNodeCount;
+    }
+    this.hashFn = config?.routingConfig?.hashFunction ?? ((message: Message) => {
+      // Use both message type and content for better distribution
+      const key = `${message.type}-${message.content}-${Date.now()}`;
+      log.info(`[ConsistentHashStrategy] Generated hash key: ${key}`);
+      return key;
+    });
+    log.info(`[ConsistentHashStrategy] Initialized with ${this.virtualNodes} virtual nodes`);
   }
 
   async selectRoutee(message: Message, routees: PID[]): Promise<PID> {
-    const release = await this.mutex.acquire();
-    try {
-      if (routees.length === 0) {
-        console.error('[ConsistentHashStrategy] No routees available');
-        throw new Error('No routees available');
-      }
+    this.buildHashRing(routees);
 
-      // Rebuild hash ring if needed
-      if (this.hashRing.size === 0 || this.hashRing.size !== routees.length * this.virtualNodes) {
-        console.log('[ConsistentHashStrategy] Rebuilding hash ring');
-        this.buildHashRing(routees);
-      }
+    const messageKey = this.hashFn(message);
+    const messageHash = typeof messageKey === 'string' ?
+      this.hashString(messageKey) :
+      Math.abs(messageKey);
 
-      const hash = this.hashFn(message);
-      const hashValue = typeof hash === 'string' ?
-        this.hashString(hash) : hash;
+    log.info(`[ConsistentHashStrategy] Message hash details:`, {
+      key: messageKey,
+      hash: messageHash
+    });
 
-      console.log(`[ConsistentHashStrategy] Message hash: ${hashValue}`);
-
-      // Find the first node with hash >= hashValue
-      const nodes = Array.from(this.hashRing.entries())
-        .sort((a, b) => a[0] - b[0]);
-
-      const index = nodes.findIndex(([h]) => h >= hashValue);
-      const selected = index >= 0 ? nodes[index][1] : nodes[0][1];
-      console.log(`[ConsistentHashStrategy] Selected routee ${selected.id} for hash ${hashValue}`);
-      return selected;
-    } finally {
-      release();
+    const hashes = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
+    if (hashes.length === 0) {
+      throw new Error('No routees available');
     }
+
+    // Find the first hash greater than or equal to the message hash
+    let selectedHash = hashes.find(hash => hash >= messageHash);
+
+    // If no such hash exists, wrap around to the first hash
+    if (!selectedHash) {
+      selectedHash = hashes[0];
+    }
+
+    const selectedRoutee = this.hashRing.get(selectedHash)!;
+
+    log.info(`[ConsistentHashStrategy] Selection details:`, {
+      messageHash,
+      selectedHash,
+      routeeId: selectedRoutee.id,
+      wrapAround: !selectedHash
+    });
+
+    return selectedRoutee;
   }
 
   private buildHashRing(routees: PID[]): void {
     this.hashRing.clear();
+    log.info(`[ConsistentHashStrategy] Building hash ring for ${routees.length} routees`);
+
+    // Use a prime number for better distribution
+    const PRIME_MULTIPLIER = 16777619;
+
     for (const routee of routees) {
       for (let i = 0; i < this.virtualNodes; i++) {
-        const hash = this.hashString(`${routee.id}-${i}`);
+        // Use a better virtual node key generation
+        const virtualNodeKey = `${routee.id}-${i}-${PRIME_MULTIPLIER * (i + 1)}`;
+        const hash = this.hashString(virtualNodeKey);
         this.hashRing.set(hash, routee);
+
+        if (i === 0 || i === this.virtualNodes - 1) {
+          log.info(`[ConsistentHashStrategy] Virtual node details:`, {
+            routeeId: routee.id,
+            virtualNodeIndex: i,
+            key: virtualNodeKey,
+            hash: hash
+          });
+        }
       }
     }
-    console.log(`[ConsistentHashStrategy] Built hash ring with ${this.hashRing.size} virtual nodes`);
+
+    const hashes = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
+    log.info(`[ConsistentHashStrategy] Hash ring built:`, {
+      totalNodes: this.hashRing.size,
+      uniqueRoutees: new Set(Array.from(this.hashRing.values()).map(r => r.id)).size,
+      hashRange: {
+        min: hashes[0],
+        max: hashes[hashes.length - 1]
+      }
+    });
   }
 
   private hashString(str: string): number {
-    let hash = 0;
+    // FNV-1a hash algorithm
+    let hash = 0x811c9dc5; // FNV offset basis
+    const prime = 0x01000193; // FNV prime
+
     for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
+      hash ^= str.charCodeAt(i);
+      hash = Math.imul(hash, prime);
     }
-    return hash >>> 0;
+
+    return Math.abs(hash);
   }
 }
 

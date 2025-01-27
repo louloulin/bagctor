@@ -1,0 +1,30 @@
+{
+    "entryPoints": [
+        "packages/core/src/index.ts"
+    ],
+    "out": "docs",
+    "name": "Bactor API Documentation",
+    "excludePrivate": true,
+    "excludeProtected": false,
+    "excludeExternals": true,
+    "includeVersion": true,
+    "categorizeByGroup": true,
+    "categoryOrder": [
+        "Core",
+        "Remote",
+        "Utils",
+        "*"
+    ],
+    "navigationLinks": {
+        "GitHub": "https://github.com/yourusername/bactor"
+    },
+    "sidebarLinks": {
+        "Examples": "packages/core/src/examples"
+    },
+    "plugin": [
+        "typedoc-plugin-markdown"
+    ],
+    "theme": "default",
+    "readme": "README.md",
+    "tsconfig": "packages/core/tsconfig.json"
+}

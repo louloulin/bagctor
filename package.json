@@ -36,7 +36,9 @@
     "example:match": "bun run --cwd packages/match-engine example:simple",
     "benchmark:match": "bun run --cwd packages/match-engine benchmark",
     "example:web": "bun run --cwd packages/web example:basic",
-    "example:web:middleware": "bun run --cwd packages/web example:middleware"
+    "example:web:middleware": "bun run --cwd packages/web example:middleware",
+    "docs": "typedoc",
+    "docs:watch": "typedoc --watch"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
@@ -44,9 +46,12 @@
     "jest": "^29.5.0",
     "rimraf": "^5.0.0",
     "ts-jest": "^29.1.0",
+    "typedoc": "^0.27.6",
+    "typedoc-plugin-markdown": "^4.4.1",
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "@libp2p/plaintext": "^2.0.13",
     "lru-cache": "^11.0.2"
   }
 }

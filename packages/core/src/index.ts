@@ -23,5 +23,5 @@ export type { LoggerConfig } from './utils/logger';
 // Remote functionality
 export { ActorClient } from './remote/client';
 export { ActorServer } from './remote/server';
-export type { RemoteTransport } from './remote/transport';
+export type { TransportProvider as RemoteTransport } from './remote/transport';
 export { RemoteActorSystem } from './remote/remote_actor_system'; 

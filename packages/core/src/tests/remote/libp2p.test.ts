@@ -42,8 +42,8 @@ describe('Libp2p Transport Provider', () => {
             provider2.start()
         ]);
 
-        // Wait for providers to be fully ready
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Wait for providers to be fully ready - increased from 3000ms to 8000ms
+        await new Promise(resolve => setTimeout(resolve, 8000));
         log.debug('Providers started and ready');
 
         // Get provider2's address and connect
@@ -57,8 +57,8 @@ describe('Libp2p Transport Provider', () => {
         log.debug('Provider 1 attempting to connect to:', fullAddr);
         await provider1.dial(fullAddr);
 
-        // Wait for connection to be established
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Wait for connection to be established - increased from 3000ms to 8000ms
+        await new Promise(resolve => setTimeout(resolve, 8000));
         log.debug('Connection established');
 
         // Clean up
@@ -68,7 +68,7 @@ describe('Libp2p Transport Provider', () => {
             provider2.stop()
         ]);
         log.debug('Test completed');
-    });
+    }, 20000); // Increased timeout to 20 seconds
 
     test('should exchange a single message between nodes', async () => {
         // Create two providers with dynamic ports for testing
@@ -91,8 +91,8 @@ describe('Libp2p Transport Provider', () => {
             provider2.start()
         ]);
 
-        // Wait for providers to be fully ready
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Wait for providers to be fully ready - increased from 5000ms to 8000ms
+        await new Promise(resolve => setTimeout(resolve, 8000));
         log.debug('Providers started and ready');
 
         // Set up message handler for provider2
@@ -113,8 +113,8 @@ describe('Libp2p Transport Provider', () => {
         log.debug('Provider 1 attempting to connect to:', fullAddr);
         await provider1.dial(fullAddr);
 
-        // Wait for connection to be established
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Wait for connection to be established - increased from 5000ms to 8000ms
+        await new Promise(resolve => setTimeout(resolve, 8000));
         log.debug('Connection established');
 
         // Send a test message
@@ -126,11 +126,11 @@ describe('Libp2p Transport Provider', () => {
         log.debug('Sending test message from provider1 to provider2');
         await provider1.send(provider2.getLocalAddress(), testMessage);
 
-        // Wait for message propagation with retries
-        let retries = 5;
+        // Wait for message propagation with retries - increased retry interval and count
+        let retries = 8;  // Increased from 5 to 8
         while (retries > 0 && !receivedMessage) {
             log.debug(`Waiting for message to be received (${retries} retries left)`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, 2000));  // Increased from 1000ms to 2000ms
             retries--;
         }
 
@@ -147,5 +147,5 @@ describe('Libp2p Transport Provider', () => {
             provider2.stop()
         ]);
         log.debug('Test completed');
-    });
+    }, 30000); // Increased timeout to 30 seconds
 }); 

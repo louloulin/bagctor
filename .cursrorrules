@@ -16,3 +16,8 @@ mailbox的队列使用fastq实现，不要更改
 
 ### 工具
 使用bun来开发和部署nodejs项目。
+
+
+### agent
+* 底层协议就是基于bactor实现，这个最近基础的实现
+* class,method添加对应注释

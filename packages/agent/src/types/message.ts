@@ -55,7 +55,7 @@ export interface MessageFilter {
 }
 
 export interface MessageBus {
-    subscribe(filter: MessageFilter, handler: MessageHandler): () => void;
+    subscribe(filter: MessageFilter, handler: MessageHandler): Promise<() => void>;
     publish(message: EnhancedMessage): Promise<void>;
     request(message: EnhancedMessage, timeout?: number): Promise<EnhancedMessage>;
     clear(): void;

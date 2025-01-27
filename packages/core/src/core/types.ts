@@ -28,6 +28,7 @@ export interface Message {
   index?: number;
   content?: string;
   routee?: PID;
+  messageId?: string;  // Optional field for tracking message flow
 }
 
 export interface PID {

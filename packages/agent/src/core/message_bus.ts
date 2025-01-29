@@ -1,6 +1,6 @@
 import {
     RouterConfig,
-    Message,
+    Message as CoreMessage,
     RouterType,
     Actor,
     PID,
@@ -8,58 +8,228 @@ import {
     createRouter,
     IRouter
 } from '@bactor/core';
-import { log } from '@bactor/core';
+import { log } from '@bactor/core/src/utils/logger';
+import {
+    MessagePayload as AgentMessagePayload,
+    MessageTypes as AgentMessageTypes,
+    EnhancedMessage as AgentEnhancedMessage,
+    MessageFilter as AgentMessageFilter,
+    MessageHandler as AgentMessageHandler,
+    MessageType as AgentMessageType
+} from '../types/message';
 
-// Trace context for tracking message lifecycle
-interface TraceContext {
-    traceId: string;
-    parentId?: string;
-    timestamp: number;
-    operation: string;
+// Common message fields
+export interface MessageCommon {
+    type: string;
+    payload: any;
+    sender?: PID;
+    priority?: 'high' | 'normal' | 'low';
     correlationId?: string;
+    traceId?: string;
+    spanId?: string;
+    parentSpanId?: string;
 }
 
-// Message types
-export type MessageType = 'SUBSCRIBE' | 'UNSUBSCRIBE' | 'PUBLISH' | 'REQUEST' | 'RESPONSE' | 'CLEAR';
+// Router message types from core
+export const RouterMessageTypes = {
+    SET_ROUTER: 'router.set-router',
+    ADD_ROUTEE: 'router.add-routee',
+    REMOVE_ROUTEE: 'router.remove-routee',
+    GET_ROUTEES: 'router.get-routees',
+    BROADCAST: 'router.broadcast'
+} as const;
+
+export type RouterMessageType = typeof RouterMessageTypes[keyof typeof RouterMessageTypes];
+
+export interface RouterPayload {
+    routerId?: string;
+    routee?: PID;
+    routerConfig?: {
+        type: RouterType;
+        config: RouterConfig;
+        router?: IRouter;
+    };
+}
+
+export interface RouterMessage extends MessageCommon {
+    type: RouterMessageType;
+    payload: RouterPayload;
+}
+
+// Message bus types
+export const BusMessageTypes = {
+    PUBLISH: 'PUBLISH',
+    SUBSCRIBE: 'SUBSCRIBE',
+    REQUEST: 'REQUEST',
+    REGISTER_HANDLER: 'REGISTER_HANDLER'
+} as const;
+
+export type BusMessageType = typeof BusMessageTypes[keyof typeof BusMessageTypes];
+
+// Re-export core router types
+export { RouterConfig, RouterType, IRouter };
+
+// System message types
+export const SystemMessageTypes = {
+    ACTOR_STARTED: 'ACTOR_STARTED',
+    ACTOR_STOPPED: 'ACTOR_STOPPED',
+    ACTOR_ERROR: 'ACTOR_ERROR',
+    ACTOR_SUPERVISION: 'ACTOR_SUPERVISION',
+    TASK_ASSIGNED: 'TASK_ASSIGNED',
+    TASK_STARTED: 'TASK_STARTED',
+    TASK_COMPLETED: 'TASK_COMPLETED',
+    TASK_FAILED: 'TASK_FAILED',
+    KNOWLEDGE_SHARED: 'KNOWLEDGE_SHARED',
+    KNOWLEDGE_REQUESTED: 'KNOWLEDGE_REQUESTED',
+    KNOWLEDGE_UPDATED: 'KNOWLEDGE_UPDATED',
+    WORKFLOW_STARTED: 'WORKFLOW_STARTED',
+    WORKFLOW_STAGE_CHANGED: 'WORKFLOW_STAGE_CHANGED',
+    WORKFLOW_COMPLETED: 'WORKFLOW_COMPLETED',
+    COORDINATION_REQUEST: 'COORDINATION_REQUEST',
+    COORDINATION_RESPONSE: 'COORDINATION_RESPONSE',
+    SYSTEM_ERROR: 'SYSTEM_ERROR',
+    SYSTEM_WARNING: 'SYSTEM_WARNING',
+    SYSTEM_INFO: 'SYSTEM_INFO',
+    REQUEST_RESPONSE: 'REQUEST_RESPONSE',
+    CLEAR: 'CLEAR'
+} as const;
+
+export type SystemMessageType = typeof SystemMessageTypes[keyof typeof SystemMessageTypes];
+export type MessageType = BusMessageType | RouterMessageType | SystemMessageType | AgentMessageType;
 
 // Message filter interface
 export interface MessageFilter {
-    priority?: string[];
+    priority?: Array<'high' | 'normal' | 'low'>;
     roles?: string[];
     type?: string;
 }
 
-// Message handler type
-export type MessageHandler = (message: any) => Promise<void>;
+// Message interfaces
+export interface PublishMessage extends MessageCommon {
+    type: typeof BusMessageTypes.PUBLISH;
+    payload: BusMessage;
+}
 
-// Enhanced message interface
-export interface EnhancedMessage extends Message {
-    type: string;
-    payload?: any;
-    context?: {
-        priority?: string;
+export interface SubscribeMessage extends MessageCommon {
+    type: typeof BusMessageTypes.SUBSCRIBE;
+    payload: {
+        filter: MessageFilter;
+        handler: MessageHandler;
     };
-    sender?: {
-        id: string;
-        role?: string;
+}
+
+export interface RequestMessage extends MessageCommon {
+    type: typeof BusMessageTypes.REQUEST;
+    payload: {
+        request: BusMessage;
+        timeout?: number;
     };
+}
+
+export interface RegisterHandlerMessage extends MessageCommon {
+    type: typeof BusMessageTypes.REGISTER_HANDLER;
+    payload: {
+        handler: MessageHandler;
+        priority: 'high' | 'normal' | 'low';
+    };
+}
+
+// Message types
+export type BusMessage = RouterMessage | PublishMessage | SubscribeMessage | RequestMessage | RegisterHandlerMessage;
+export type MessageHandler = (message: BusMessage) => Promise<void>;
+export type RouterHandler = (message: RouterMessage) => Promise<void>;
+
+// Trace context for tracking message lifecycle
+export interface TraceContext {
+    traceId: string;
+    spanId: string;
+    parentSpanId?: string;
+    timestamp: number;
+    operation: string;
+}
+
+// Extended trace context with additional fields
+export interface ExtendedTraceContext extends TraceContext {
     correlationId?: string;
 }
 
-// Message bus interface
-export interface MessageBus {
-    subscribe(filter: MessageFilter, handler: MessageHandler): Promise<() => void>;
-    publish(message: EnhancedMessage): Promise<void>;
-    request(message: EnhancedMessage, timeout?: number): Promise<EnhancedMessage>;
-    clear(): void;
+// Message with trace context
+export interface MessageWithTrace {
+    message: BusMessage;
+    traceContext: ExtendedTraceContext;
 }
 
-interface RouterMessage extends Message {
-    router?: IRouter;
+// Type guards
+export function isRouterMessage(message: BusMessage): message is RouterMessage {
+    return message.type === RouterMessageTypes.ADD_ROUTEE ||
+        message.type === RouterMessageTypes.REMOVE_ROUTEE ||
+        message.type === RouterMessageTypes.GET_ROUTEES ||
+        message.type === RouterMessageTypes.BROADCAST;
 }
 
+export function isPublishMessage(message: BusMessage): message is PublishMessage {
+    return message.type === BusMessageTypes.PUBLISH;
+}
+
+export function isSubscribeMessage(message: BusMessage): message is SubscribeMessage {
+    return message.type === BusMessageTypes.SUBSCRIBE;
+}
+
+export function isRequestMessage(message: BusMessage): message is RequestMessage {
+    return message.type === BusMessageTypes.REQUEST;
+}
+
+export function isRegisterHandlerMessage(message: BusMessage): message is RegisterHandlerMessage {
+    return message.type === BusMessageTypes.REGISTER_HANDLER;
+}
+
+// Helper functions
+export function createMessage<T extends BusMessage>(type: T['type'], payload: T['payload'], options: Partial<MessageCommon> = {}): T {
+    return {
+        type,
+        payload,
+        ...options
+    } as T;
+}
+
+// Convert core message to bus message
+export function convertCoreMessage(message: CoreMessage): BusMessage {
+    const { type, payload, sender } = message;
+    const options: Partial<MessageCommon> = { sender };
+
+    switch (type) {
+        case BusMessageTypes.PUBLISH:
+            return createMessage<PublishMessage>(BusMessageTypes.PUBLISH, payload as BusMessage, options);
+        case BusMessageTypes.SUBSCRIBE:
+            return createMessage<SubscribeMessage>(BusMessageTypes.SUBSCRIBE, payload as { filter: MessageFilter; handler: MessageHandler }, options);
+        case BusMessageTypes.REQUEST:
+            return createMessage<RequestMessage>(BusMessageTypes.REQUEST, payload as { request: BusMessage; timeout?: number }, options);
+        case BusMessageTypes.REGISTER_HANDLER:
+            return createMessage<RegisterHandlerMessage>(BusMessageTypes.REGISTER_HANDLER, payload as { handler: MessageHandler; priority: 'high' | 'normal' | 'low' }, options);
+        case RouterMessageTypes.ADD_ROUTEE:
+        case RouterMessageTypes.REMOVE_ROUTEE:
+            return createMessage<RouterMessage>(type as RouterMessageType, payload as RouterPayload, options);
+        case SystemMessageTypes.CLEAR:
+            return createMessage<RegisterHandlerMessage>(BusMessageTypes.REGISTER_HANDLER, {
+                handler: async () => { },
+                priority: 'normal'
+            }, options);
+        default:
+            throw new Error(`Unknown message type: ${type}`);
+    }
+}
+
+// Convert bus message to core message
+export function convertToCore(message: BusMessage): CoreMessage {
+    return {
+        type: message.type,
+        payload: message.payload,
+        sender: message.sender
+    };
+}
+
+// Router actor class
 class RouterActor extends Actor {
-    private routees: PID[] = [];
     private router: IRouter | null = null;
 
     constructor(context: ActorContext) {
@@ -75,253 +245,69 @@ class RouterActor extends Actor {
         }
         this.router = router;
         log.debug('Router set', {
-            routerId: this.context.self.id,
-            routerType: 'broadcast'
+            routerId: this.context.self.id
         });
     }
 
     protected behaviors(): void {
-        this.addBehavior('default', async (message: RouterMessage) => {
-            const traceCtx = this.createTraceContext('router.handle', message);
-
-            log.debug('Router handling message', {
-                traceId: traceCtx.traceId,
-                type: message.type,
-                routees: this.routees.length,
-                routerId: this.context.self.id,
-                sender: message.sender?.id
-            });
+        this.addBehavior('default', async (message: CoreMessage) => {
+            const busMessage = convertCoreMessage(message);
+            if (!this.router) {
+                throw new Error('Router not initialized');
+            }
 
             try {
-                if (message.type === 'router.set') {
-                    if (!message.router) {
-                        throw new Error('Router not provided in router.set message');
-                    }
-                    this.setRouter(message.router);
-                    return;
-                }
-
-                if (!this.router) {
-                    throw new Error('Router not initialized');
-                }
-
-                if (message.type === 'router.add-routee' && message.routee) {
-                    const routeeId = message.routee.id;
-                    const alreadyExists = this.routees.some(r => r.id === routeeId);
-
-                    if (!alreadyExists) {
-                        this.routees.push(message.routee);
-                        log.debug('Added routee', {
-                            traceId: traceCtx.traceId,
-                            routeeId,
-                            totalRoutees: this.routees.length,
-                            routerId: this.context.self.id
-                        });
-                    } else {
-                        log.warn('Routee already exists', {
-                            traceId: traceCtx.traceId,
-                            routeeId,
-                            totalRoutees: this.routees.length,
-                            routerId: this.context.self.id
-                        });
-                    }
-                    return;
-                }
-
-                if (message.type === 'router.remove-routee' && message.routee) {
-                    const routeeId = message.routee.id;
-                    const initialLength = this.routees.length;
-                    this.routees = this.routees.filter(r => r.id !== routeeId);
-
-                    const removed = initialLength > this.routees.length;
-                    log.debug('Removed routee', {
-                        traceId: traceCtx.traceId,
-                        routeeId,
-                        removed,
-                        totalRoutees: this.routees.length,
-                        routerId: this.context.self.id
-                    });
-                    return;
-                }
-
-                if (this.routees.length === 0) {
-                    log.warn('No routees available for routing', {
-                        traceId: traceCtx.traceId,
-                        messageType: message.type,
-                        routerId: this.context.self.id
-                    });
-                    return;
-                }
-
-                await this.router.route(message, this.routees);
-                log.debug('Successfully routed message', {
-                    traceId: traceCtx.traceId,
-                    type: message.type,
-                    routees: this.routees.length,
-                    routerId: this.context.self.id
-                });
+                const routees = (this.router as any).getRoutees?.() || [];
+                await this.router.route(busMessage, routees);
             } catch (error) {
                 log.error('Failed to route message', {
-                    traceId: traceCtx.traceId,
-                    type: message.type,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    routerId: this.context.self.id,
-                    routees: this.routees.length
+                    error: error instanceof Error ? error.message : 'Unknown error'
                 });
                 throw error;
             }
         });
     }
-
-    private createTraceContext(operation: string, message?: Message): TraceContext {
-        return {
-            traceId: Math.random().toString(36).substring(7),
-            parentId: message ? (message as any).traceId : undefined,
-            timestamp: Date.now(),
-            operation,
-            correlationId: message ? (message as any).correlationId : undefined
-        };
-    }
 }
 
-export class MessageBusActor extends Actor implements MessageBus {
-    private subscriptionRouter: PID | null = null;
-    private requestRouter: PID | null = null;
-    private subscriptions = new Map<string, {
-        filter: MessageFilter;
-        handler: MessageHandler;
-        traceContext: TraceContext;
-    }>();
-
-    public async init(): Promise<void> {
-        const traceCtx = this.createTraceContext('init');
-
-        log.debug('Starting MessageBus initialization', {
-            traceId: traceCtx.traceId,
-            actorId: this.context.self.id
-        });
-
-        try {
-            // Create subscription router with broadcast strategy
-            log.debug('Creating subscription router', {
-                traceId: traceCtx.traceId,
-                routerType: 'broadcast'
-            });
-
-            const subRouter = await createRouter('broadcast', {
-                system: this.context.system,
-                routees: []
-            });
-
-            if (!subRouter) {
-                throw new Error('Failed to create subscription router');
-            }
-
-            const subRouterPID = await this.context.spawn({
-                actorClass: RouterActor
-            });
-
-            log.debug('Subscription router actor created', {
-                traceId: traceCtx.traceId,
-                routerId: subRouterPID.id
-            });
-
-            await this.context.send(subRouterPID, {
-                type: 'router.set',
-                router: subRouter,
-                traceId: traceCtx.traceId
-            });
-            this.subscriptionRouter = subRouterPID;
-
-            // Create request router with broadcast strategy
-            log.debug('Creating request router', {
-                traceId: traceCtx.traceId,
-                routerType: 'broadcast'
-            });
-
-            const reqRouter = await createRouter('broadcast', {
-                system: this.context.system,
-                routees: []
-            });
-
-            if (!reqRouter) {
-                throw new Error('Failed to create request router');
-            }
-
-            const reqRouterPID = await this.context.spawn({
-                actorClass: RouterActor
-            });
-
-            log.debug('Request router actor created', {
-                traceId: traceCtx.traceId,
-                routerId: reqRouterPID.id
-            });
-
-            await this.context.send(reqRouterPID, {
-                type: 'router.set',
-                router: reqRouter,
-                traceId: traceCtx.traceId
-            });
-            this.requestRouter = reqRouterPID;
-
-            log.info('MessageBus initialization completed', {
-                traceId: traceCtx.traceId,
-                subscriptionRouterId: this.subscriptionRouter?.id,
-                requestRouterId: this.requestRouter?.id,
-                actorId: this.context.self.id
-            });
-        } catch (error) {
-            log.error('Failed to initialize MessageBus', {
-                traceId: traceCtx.traceId,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                actorId: this.context.self.id
-            });
-            throw error;
-        }
+class HandlerActor extends Actor {
+    constructor(context: ActorContext) {
+        super(context);
+        this.initialize();
     }
 
     protected behaviors(): void {
-        this.addBehavior('default', async (msg: Message) => {
-            const traceCtx = this.createTraceContext('handle_message');
-
-            log.debug('MessageBus received message', {
-                traceId: traceCtx.traceId,
-                type: msg.type,
-                payload: msg.payload,
-                sender: msg.sender?.id
-            });
+        this.addBehavior('default', async (message: CoreMessage) => {
+            const busMessage = convertCoreMessage(message);
+            const traceCtx: ExtendedTraceContext = {
+                traceId: busMessage.traceId || generateTraceId(),
+                spanId: generateSpanId(),
+                parentSpanId: busMessage.spanId,
+                timestamp: Date.now(),
+                operation: 'handle_message',
+                correlationId: busMessage.correlationId
+            };
 
             try {
-                switch (msg.type) {
-                    case 'SUBSCRIBE':
-                        await this.handleSubscribe(msg, traceCtx);
-                        break;
-                    case 'UNSUBSCRIBE':
-                        await this.handleUnsubscribe(msg, traceCtx);
-                        break;
-                    case 'PUBLISH':
-                        await this.handlePublish(msg, traceCtx);
-                        break;
-                    case 'REQUEST':
-                        await this.handleRequest(msg, traceCtx);
-                        break;
-                    case 'RESPONSE':
-                        await this.handleResponse(msg, traceCtx);
-                        break;
-                    case 'CLEAR':
-                        this.handleClear(traceCtx);
-                        break;
-                    default:
-                        log.warn('Received unknown message type', {
-                            traceId: traceCtx.traceId,
-                            type: msg.type
-                        });
+                const { type, payload } = busMessage;
+                const priority = (payload as any)?.priority || 'normal';
+
+                // 根据消息类型和优先级处理
+                if (type === 'PUBLISH') {
+                    await this.handlePublish(payload, priority, traceCtx);
+                } else if (type === 'SUBSCRIBE') {
+                    await this.handleSubscribe(payload, traceCtx);
+                } else if (type === 'REQUEST') {
+                    await this.handleRequest(payload, traceCtx);
                 }
-            } catch (error) {
-                log.error('Error handling message', {
+
+                log.info('Message handled successfully', {
                     traceId: traceCtx.traceId,
-                    type: msg.type,
+                    type,
+                    priority
+                });
+            } catch (error) {
+                log.error('Failed to handle message', {
+                    traceId: traceCtx.traceId,
                     error: error instanceof Error ? error.message : 'Unknown error'
                 });
                 throw error;
@@ -329,417 +315,502 @@ export class MessageBusActor extends Actor implements MessageBus {
         });
     }
 
-    private createTraceContext(operation: string, parentContext?: TraceContext): TraceContext {
+    private async handlePublish(payload: any, priority: string, traceCtx: ExtendedTraceContext): Promise<void> {
+        const { message } = payload;
+        if (!message) {
+            throw new Error('Invalid publish payload');
+        }
+
+        // 根据优先级处理消息
+        if (priority === 'high') {
+            await this.handleHighPriorityMessage(message, traceCtx);
+        } else {
+            await this.handleNormalPriorityMessage(message, traceCtx);
+        }
+    }
+
+    private async handleSubscribe(payload: any, traceCtx: ExtendedTraceContext): Promise<void> {
+        const { pattern, handler } = payload;
+        if (!pattern || !handler) {
+            throw new Error('Invalid subscribe payload');
+        }
+
+        // 注册订阅处理器
+        await this.context.send(this.context.parent, {
+            type: 'REGISTER_HANDLER',
+            payload: {
+                pattern,
+                handler
+            },
+            traceId: traceCtx.traceId
+        });
+    }
+
+    private async handleRequest(payload: any, traceCtx: ExtendedTraceContext): Promise<void> {
+        const { request, timeout } = payload;
+        if (!request) {
+            throw new Error('Invalid request payload');
+        }
+
+        // 处理请求
+        const response = await Promise.race([
+            this.processRequest(request),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out')), timeout || 3000))
+        ]);
+
+        // 发送响应
+        await this.context.send(this.context.sender, {
+            type: 'RESPONSE',
+            payload: response,
+            traceId: traceCtx.traceId
+        });
+    }
+
+    private async handleHighPriorityMessage(message: any, traceCtx: ExtendedTraceContext): Promise<void> {
+        // 高优先级消息处理逻辑
+        log.info('Processing high priority message', {
+            traceId: traceCtx.traceId,
+            message
+        });
+
+        // 调用注册的高优先级处理器
+        const handler = (this.context.parent as MessageBusActor).getHighPriorityHandler();
+        if (handler) {
+            await handler(message);
+        }
+    }
+
+    private async handleNormalPriorityMessage(message: any, traceCtx: ExtendedTraceContext): Promise<void> {
+        // 普通优先级消息处理逻辑
+        log.info('Processing normal priority message', {
+            traceId: traceCtx.traceId,
+            message
+        });
+
+        // 调用注册的普通优先级处理器
+        const handler = (this.context.parent as MessageBusActor).getNormalPriorityHandler();
+        if (handler) {
+            await handler(message);
+        }
+    }
+
+    private async processRequest(request: any): Promise<any> {
+        // 请求处理逻辑
+        return { success: true, data: request };
+    }
+}
+
+// 生成追踪 ID
+function generateTraceId(): string {
+    return Math.random().toString(36).substring(2, 15);
+}
+
+// 生成 Span ID
+function generateSpanId(): string {
+    return Math.random().toString(36).substring(2, 10);
+}
+
+export interface MessageBusMetrics {
+    messageCount: number;
+    errorCount: number;
+    avgProcessingTime: number;
+    lastProcessingTimes: number[];
+    currentIndex: number;
+}
+
+// Message bus interface
+export interface IMessageBus {
+    publish(message: BusMessage): Promise<void>;
+    subscribe(pattern: string, handler: MessageHandler): Promise<void>;
+    request(message: BusMessage, timeout?: number): Promise<any>;
+    registerHandler(handler: MessageHandler, priority?: 'high' | 'normal'): Promise<void>;
+}
+
+// Message bus actor class
+export class MessageBusActor extends Actor {
+    private subscriptionRouter: PID | null = null;
+    private requestRouter: PID | null = null;
+    private routerConfigs: Map<string, RouterConfig> = new Map();
+    private subscriptions: Map<string, MessageHandler> = new Map();
+    private highPriorityHandler?: MessageHandler;
+    private normalPriorityHandler?: MessageHandler;
+    private metrics: MessageBusMetrics = {
+        messageCount: 0,
+        errorCount: 0,
+        avgProcessingTime: 0,
+        lastProcessingTimes: new Array(100).fill(0),
+        currentIndex: 0
+    };
+
+    constructor(context: ActorContext) {
+        super(context);
+        this.initialize().catch(error => {
+            log.error('Failed to initialize MessageBus', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        });
+    }
+
+    protected async initialize(): Promise<void> {
+        try {
+            await this.initializeRouters();
+            log.info('MessageBus initialized successfully');
+        } catch (error) {
+            log.error('Failed to initialize MessageBus', {
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            throw error;
+        }
+    }
+
+    private async initializeRouters(): Promise<void> {
+        // Initialize subscription router
+        this.subscriptionRouter = await this.context.spawn({
+            producer: (context: ActorContext) => new RouterActor(context)
+        });
+
+        // Initialize request router
+        this.requestRouter = await this.context.spawn({
+            producer: (context: ActorContext) => new RouterActor(context)
+        });
+
+        log.debug('Routers initialized', {
+            subscriptionRouter: this.subscriptionRouter?.id,
+            requestRouter: this.requestRouter?.id
+        });
+    }
+
+    protected behaviors(): void {
+        // Handle router messages
+        this.addBehavior('router', async (message: CoreMessage) => {
+            const busMessage = convertCoreMessage(message);
+            const traceCtx = this.createTraceContext('router.handle', busMessage);
+            try {
+                if (!isRouterMessage(busMessage)) {
+                    throw new Error('Invalid router message');
+                }
+
+                log.debug('Router handling message', {
+                    traceId: traceCtx.traceId,
+                    type: busMessage.type,
+                    routerId: busMessage.payload.routerId
+                });
+
+                await this.handleRouterMessage(busMessage, traceCtx);
+            } catch (error) {
+                log.error('Failed to handle router message', {
+                    traceId: traceCtx.traceId,
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+                throw error;
+            }
+        });
+
+        // Handle regular messages
+        this.addBehavior('default', async (message: CoreMessage) => {
+            const busMessage = convertCoreMessage(message);
+            const traceCtx = this.createTraceContext('message.handle', busMessage);
+            const startTime = performance.now();
+
+            try {
+                log.debug('Handling message', {
+                    traceId: traceCtx.traceId,
+                    type: busMessage.type
+                });
+
+                if (isPublishMessage(busMessage)) {
+                    await this.handlePublish(busMessage, traceCtx);
+                } else if (isSubscribeMessage(busMessage)) {
+                    await this.handleSubscribe(busMessage, traceCtx);
+                } else if (isRequestMessage(busMessage)) {
+                    await this.handleRequest(busMessage, traceCtx);
+                } else if (isRegisterHandlerMessage(busMessage)) {
+                    await this.handleRegisterHandler(busMessage, traceCtx);
+                } else {
+                    throw new Error(`Unsupported message type: ${busMessage.type}`);
+                }
+
+                const processingTime = performance.now() - startTime;
+                this.updateMetrics(processingTime, false);
+            } catch (error) {
+                const processingTime = performance.now() - startTime;
+                this.updateMetrics(processingTime, true);
+
+                log.error('Failed to handle message', {
+                    traceId: traceCtx.traceId,
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+                throw error;
+            }
+        });
+    }
+
+    private createTraceContext(operation: string, message: BusMessage): TraceContext {
         return {
-            traceId: Math.random().toString(36).substring(7),
-            parentId: parentContext?.traceId,
+            traceId: message.traceId || crypto.randomUUID(),
+            spanId: crypto.randomUUID(),
+            parentSpanId: message.spanId,
             timestamp: Date.now(),
             operation
         };
     }
 
-    private async handleSubscribe(msg: Message, traceCtx: TraceContext): Promise<void> {
-        const { filter, handler } = msg.payload;
-        const subscriptionId = msg.payload.correlationId;
-
-        this.subscriptions.set(subscriptionId, {
-            filter,
-            handler,
-            traceContext: traceCtx
-        });
-
-        if (this.subscriptionRouter) {
-            await this.context.send(this.subscriptionRouter, {
-                type: 'router.add-routee',
-                routee: msg.sender,
-                traceId: traceCtx.traceId
-            });
+    private updateMetrics(processingTime: number, isError: boolean): void {
+        this.metrics.messageCount++;
+        if (isError) {
+            this.metrics.errorCount++;
         }
 
-        log.debug('Subscription added', {
+        this.metrics.lastProcessingTimes[this.metrics.currentIndex] = processingTime;
+        this.metrics.currentIndex = (this.metrics.currentIndex + 1) % this.metrics.lastProcessingTimes.length;
+
+        const sum = this.metrics.lastProcessingTimes.reduce((a, b) => a + b, 0);
+        this.metrics.avgProcessingTime = sum / this.metrics.lastProcessingTimes.length;
+    }
+
+    private async handleRouterMessage(message: RouterMessage, traceCtx: TraceContext): Promise<void> {
+        switch (message.type) {
+            case RouterMessageTypes.SET_ROUTER:
+                if (!message.payload.routerConfig?.router) {
+                    throw new Error('Router not provided in router.set message');
+                }
+                await this.setRouter(message.payload.routerConfig.router, traceCtx);
+                break;
+
+            case RouterMessageTypes.ADD_ROUTEE:
+                if (!message.payload.routee) {
+                    throw new Error('Routee not provided in router.add-routee message');
+                }
+                await this.addRoutee(message.payload.routee, traceCtx);
+                break;
+
+            case RouterMessageTypes.REMOVE_ROUTEE:
+                if (!message.payload.routee) {
+                    throw new Error('Routee not provided in router.remove-routee message');
+                }
+                await this.removeRoutee(message.payload.routee, traceCtx);
+                break;
+
+            default:
+                throw new Error(`Unsupported router message type: ${message.type}`);
+        }
+    }
+
+    private async handlePublish(message: PublishMessage, traceCtx: TraceContext): Promise<void> {
+        if (!this.subscriptionRouter) {
+            throw new Error('Subscription router not initialized');
+        }
+
+        const { payload: publishedMessage } = message;
+        const matchingSubscriptions = Array.from(this.subscriptions.entries())
+            .filter(([_, handler]) => this.matchesFilter(publishedMessage, handler))
+            .map(([id, _]) => id);
+
+        if (matchingSubscriptions.length === 0) {
+            log.warn('No matching subscriptions found', {
+                traceId: traceCtx.traceId,
+                messageType: publishedMessage.type
+            });
+            return;
+        }
+
+        await Promise.all(
+            matchingSubscriptions.map(async (subscriptionId) => {
+                const handler = this.subscriptions.get(subscriptionId);
+                if (handler) {
+                    try {
+                        await handler(publishedMessage);
+                    } catch (error) {
+                        log.error('Failed to handle published message', {
+                            traceId: traceCtx.traceId,
+                            subscriptionId,
+                            error: error instanceof Error ? error.message : 'Unknown error'
+                        });
+                    }
+                }
+            })
+        );
+    }
+
+    private async handleSubscribe(message: SubscribeMessage, traceCtx: TraceContext): Promise<void> {
+        const { filter, handler } = message.payload;
+        const subscriptionId = crypto.randomUUID();
+
+        this.subscriptions.set(subscriptionId, handler);
+        log.debug('Subscription registered', {
             traceId: traceCtx.traceId,
             subscriptionId,
             filter
         });
     }
 
-    private async handleUnsubscribe(msg: Message, traceCtx: TraceContext): Promise<void> {
-        const subscriptionId = msg.payload.subscriptionId;
-        const subscription = this.subscriptions.get(subscriptionId);
-
-        log.debug('Processing unsubscribe request', {
-            traceId: traceCtx.traceId,
-            subscriptionId,
-            hasSubscription: !!subscription,
-            totalSubscriptions: this.subscriptions.size
-        });
-
-        if (subscription && this.subscriptionRouter) {
-            try {
-                // First remove from subscriptions to prevent any new messages
-                this.subscriptions.delete(subscriptionId);
-
-                // Then remove from router
-                await this.context.send(this.subscriptionRouter, {
-                    type: 'router.remove-routee',
-                    routee: msg.sender,
-                    traceId: traceCtx.traceId
-                });
-
-                log.debug('Successfully removed subscription', {
-                    traceId: traceCtx.traceId,
-                    subscriptionId,
-                    remainingSubscriptions: this.subscriptions.size
-                });
-            } catch (error) {
-                // If router removal fails, add back to subscriptions
-                if (subscription) {
-                    this.subscriptions.set(subscriptionId, subscription);
-                }
-                log.error('Failed to remove subscription routee', {
-                    traceId: traceCtx.traceId,
-                    subscriptionId,
-                    error: error instanceof Error ? error.message : 'Unknown error'
-                });
-                throw error;
-            }
-        } else {
-            log.warn('Unsubscribe requested for non-existent subscription', {
-                traceId: traceCtx.traceId,
-                subscriptionId
-            });
+    private async handleRequest(message: RequestMessage, traceCtx: TraceContext): Promise<void> {
+        if (!this.requestRouter) {
+            throw new Error('Request router not initialized');
         }
-    }
 
-    private async handlePublish(msg: Message, traceCtx: TraceContext): Promise<void> {
-        const message = msg.payload.message as EnhancedMessage;
+        const { request, timeout = 5000 } = message.payload;
+        const requestId = crypto.randomUUID();
 
-        if (this.subscriptionRouter) {
-            const matchingSubscriptions = Array.from(this.subscriptions.entries())
-                .filter(([_, sub]) => this.matchesFilter(message, sub.filter));
+        try {
+            const response = await Promise.race([
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error(`Request timed out after ${timeout}ms`)), timeout)
+                ),
+                this.processRequest(request, requestId, traceCtx)
+            ]);
 
-            log.debug('Publishing message', {
-                traceId: traceCtx.traceId,
-                messageType: message.type,
-                matchingSubscriptions: matchingSubscriptions.length
-            });
-
-            for (const [id, subscription] of matchingSubscriptions) {
-                try {
-                    await subscription.handler(message);
-                    log.debug('Successfully delivered message to subscriber', {
-                        traceId: traceCtx.traceId,
-                        subscriptionId: id
-                    });
-                } catch (error) {
-                    log.error('Error delivering message to subscriber', {
-                        traceId: traceCtx.traceId,
-                        subscriptionId: id,
-                        error: error instanceof Error ? error.message : 'Unknown error'
-                    });
-                }
+            if (message.sender) {
+                await this.context.send(message.sender, {
+                    type: 'REQUEST_RESPONSE' as MessageType,
+                    payload: response,
+                    correlationId: message.correlationId
+                });
             }
-        }
-    }
-
-    private async handleRequest(msg: Message, traceCtx: TraceContext): Promise<void> {
-        const { message, correlationId } = msg.payload;
-
-        log.debug('Processing request', {
-            traceId: traceCtx.traceId,
-            correlationId,
-            messageType: message.type,
-            hasRequestRouter: !!this.requestRouter,
-            sender: msg.sender?.id
-        });
-
-        if (this.requestRouter) {
-            try {
-                // Send the request first
-                await this.context.send(this.requestRouter, {
-                    type: 'REQUEST',
-                    payload: {
-                        originalMessage: message,
-                        correlationId,
-                        sender: msg.sender
-                    },
-                    traceId: traceCtx.traceId,
-                    sender: msg.sender
-                });
-
-                // Then add sender as routee for response
-                await this.context.send(this.requestRouter, {
-                    type: 'router.add-routee',
-                    routee: msg.sender,
-                    traceId: traceCtx.traceId
-                });
-
-                log.debug('Request successfully routed', {
-                    traceId: traceCtx.traceId,
-                    correlationId,
-                    messageType: message.type,
-                    sender: msg.sender?.id
-                });
-            } catch (error) {
-                // Clean up routee on error
-                if (msg.sender) {
-                    try {
-                        await this.context.send(this.requestRouter, {
-                            type: 'router.remove-routee',
-                            routee: msg.sender,
-                            traceId: traceCtx.traceId
-                        });
-                    } catch (cleanupError) {
-                        log.error('Failed to clean up routee after request error', {
-                            traceId: traceCtx.traceId,
-                            correlationId,
-                            sender: msg.sender.id,
-                            error: cleanupError instanceof Error ? cleanupError.message : 'Unknown error'
-                        });
-                    }
-                }
-
-                log.error('Failed to route request', {
-                    traceId: traceCtx.traceId,
-                    correlationId,
-                    messageType: message.type,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    sender: msg.sender?.id
-                });
-                throw error;
-            }
-        } else {
-            const error = new Error('Request router not initialized');
-            log.error('Failed to process request', {
+        } catch (error) {
+            log.error('Failed to handle request', {
                 traceId: traceCtx.traceId,
-                correlationId,
-                error: error.message
+                requestId,
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
             throw error;
         }
     }
 
-    private async handleResponse(msg: Message, traceCtx: TraceContext): Promise<void> {
-        const { response, correlationId } = msg.payload;
+    private async handleRegisterHandler(message: RegisterHandlerMessage, traceCtx: TraceContext): Promise<void> {
+        const { handler, priority } = message.payload;
 
-        log.debug('Processing response message', {
-            traceId: traceCtx.traceId,
-            correlationId,
-            responseType: response?.type,
-            senderId: msg.sender?.id,
-            hasRequestRouter: !!this.requestRouter,
-            priority: response?.context?.priority,
-            senderRole: response?.sender?.role
-        });
-
-        if (msg.sender && this.requestRouter) {
-            try {
-                log.debug('Sending response to original requester', {
-                    traceId: traceCtx.traceId,
-                    correlationId,
-                    senderId: msg.sender.id,
-                    responseType: response?.type
-                });
-
-                await this.context.send(msg.sender, {
-                    type: 'RESPONSE',
-                    payload: {
-                        response,
-                        correlationId
-                    },
-                    traceId: traceCtx.traceId
-                });
-
-                log.debug('Response successfully sent, cleaning up routee', {
-                    traceId: traceCtx.traceId,
-                    correlationId,
-                    senderId: msg.sender.id,
-                    routerId: this.requestRouter.id
-                });
-
-                try {
-                    await this.context.send(this.requestRouter, {
-                        type: 'router.remove-routee',
-                        routee: msg.sender,
-                        traceId: traceCtx.traceId
-                    });
-
-                    log.debug('Successfully removed response routee', {
-                        traceId: traceCtx.traceId,
-                        correlationId,
-                        senderId: msg.sender.id,
-                        routerId: this.requestRouter.id
-                    });
-                } catch (cleanupError) {
-                    log.error('Failed to remove routee after response', {
-                        traceId: traceCtx.traceId,
-                        correlationId,
-                        senderId: msg.sender.id,
-                        routerId: this.requestRouter.id,
-                        error: cleanupError instanceof Error ? cleanupError.message : 'Unknown error',
-                        stack: cleanupError instanceof Error ? cleanupError.stack : undefined
-                    });
-                }
-            } catch (error) {
-                log.error('Failed to send response', {
-                    traceId: traceCtx.traceId,
-                    correlationId,
-                    senderId: msg.sender.id,
-                    responseType: response?.type,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    stack: error instanceof Error ? error.stack : undefined
-                });
-                throw error;
-            }
+        if (priority === 'high') {
+            this.highPriorityHandler = handler;
         } else {
-            log.warn('Cannot process response - missing sender or router', {
+            this.normalPriorityHandler = handler;
+        }
+
+        log.debug('Handler registered', {
+            traceId: traceCtx.traceId,
+            priority
+        });
+    }
+
+    private async processRequest(request: BusMessage, requestId: string, traceCtx: TraceContext): Promise<any> {
+        const startTime = performance.now();
+
+        try {
+            if (request.priority === 'high' && this.highPriorityHandler) {
+                await this.highPriorityHandler(request);
+            } else if (this.normalPriorityHandler) {
+                await this.normalPriorityHandler(request);
+            } else {
+                throw new Error('No handler available for request');
+            }
+
+            const processingTime = performance.now() - startTime;
+            this.updateMetrics(processingTime, false);
+
+            return {
+                success: true,
+                requestId,
+                processingTime
+            };
+        } catch (error) {
+            const processingTime = performance.now() - startTime;
+            this.updateMetrics(processingTime, true);
+
+            log.error('Failed to process request', {
                 traceId: traceCtx.traceId,
-                correlationId,
-                hasSender: !!msg.sender,
-                hasRouter: !!this.requestRouter,
-                responseType: response?.type
+                requestId,
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
+            throw error;
         }
     }
 
-    private handleClear(traceCtx: TraceContext): void {
-        log.debug('Starting message bus clear operation', {
-            traceId: traceCtx.traceId,
-            currentSubscriptions: this.subscriptions.size,
-            hasSubscriptionRouter: !!this.subscriptionRouter,
-            hasRequestRouter: !!this.requestRouter
-        });
-
-        const subscriptionCount = this.subscriptions.size;
-        this.subscriptions.clear();
-
-        log.info('Message bus cleared', {
-            traceId: traceCtx.traceId,
-            clearedSubscriptions: subscriptionCount,
-            remainingSubscriptions: this.subscriptions.size,
-            actorId: this.context.self.id
-        });
-    }
-
-    private matchesFilter(message: EnhancedMessage, filter: MessageFilter): boolean {
-        // Match priority
-        if (filter.priority && filter.priority.length > 0) {
-            if (!message.context?.priority || !filter.priority.includes(message.context.priority)) {
-                return false;
-            }
-        }
-
-        // Match roles
-        if (filter.roles && filter.roles.length > 0) {
-            if (!message.sender?.role || !filter.roles.includes(message.sender.role)) {
-                return false;
-            }
-        }
-
+    private matchesFilter(message: BusMessage, handler: MessageHandler): boolean {
+        // TODO: Implement filter matching logic
         return true;
     }
 
-    // Public API implementation
-    async subscribe(filter: MessageFilter, handler: MessageHandler): Promise<() => void> {
-        const traceCtx = this.createTraceContext('subscribe');
-        const subscriptionId = Math.random().toString(36).substring(7);
+    private async setRouter(router: IRouter, traceCtx: TraceContext): Promise<void> {
+        // TODO: Implement router setting logic
+        log.debug('Setting router', {
+            traceId: traceCtx.traceId,
+            routerType: router.constructor.name
+        });
+    }
 
-        await this.context.send(this.context.self, {
+    private async addRoutee(routee: PID, traceCtx: TraceContext): Promise<void> {
+        // TODO: Implement routee addition logic
+        log.debug('Adding routee', {
+            traceId: traceCtx.traceId,
+            routeeId: routee.id
+        });
+    }
+
+    private async removeRoutee(routee: PID, traceCtx: TraceContext): Promise<void> {
+        // TODO: Implement routee removal logic
+        log.debug('Removing routee', {
+            traceId: traceCtx.traceId,
+            routeeId: routee.id
+        });
+    }
+
+    public getHighPriorityHandler(): MessageHandler | undefined {
+        return this.highPriorityHandler;
+    }
+
+    public getNormalPriorityHandler(): MessageHandler | undefined {
+        return this.normalPriorityHandler;
+    }
+
+    public setHighPriorityHandler(handler: MessageHandler): void {
+        this.highPriorityHandler = handler;
+    }
+
+    public setNormalPriorityHandler(handler: MessageHandler): void {
+        this.normalPriorityHandler = handler;
+    }
+
+    public async publish(message: BusMessage): Promise<void> {
+        const traceCtx = this.createTraceContext('publish', message);
+        await this.handlePublish(message as PublishMessage, traceCtx);
+    }
+
+    public async subscribe(pattern: string, handler: MessageHandler): Promise<() => void> {
+        const message: SubscribeMessage = {
             type: 'SUBSCRIBE',
             payload: {
-                filter,
-                handler,
-                correlationId: subscriptionId
-            },
-            traceId: traceCtx.traceId
-        });
-
-        log.debug('Subscribe request sent', {
-            traceId: traceCtx.traceId,
-            subscriptionId,
-            filter
-        });
-
+                filter: { type: pattern },
+                handler
+            }
+        };
+        const traceCtx = this.createTraceContext('subscribe', message);
+        await this.handleSubscribe(message, traceCtx);
         return () => {
-            const unsubTraceCtx = this.createTraceContext('unsubscribe', traceCtx);
-            this.context.send(this.context.self, {
-                type: 'UNSUBSCRIBE',
-                payload: { subscriptionId },
-                traceId: unsubTraceCtx.traceId
-            });
-
-            log.debug('Unsubscribe request sent', {
-                traceId: unsubTraceCtx.traceId,
-                subscriptionId
-            });
+            // TODO: Implement unsubscribe
         };
     }
 
-    async publish(message: EnhancedMessage): Promise<void> {
-        const traceCtx = this.createTraceContext('publish');
-
-        await this.context.send(this.context.self, {
-            type: 'PUBLISH',
-            payload: { message },
-            traceId: traceCtx.traceId
-        });
-
-        log.debug('Publish request sent', {
-            traceId: traceCtx.traceId,
-            messageType: message.type
-        });
+    public async request(message: BusMessage, timeout: number = 5000): Promise<any> {
+        const traceCtx = this.createTraceContext('request', message);
+        return this.handleRequest(message as RequestMessage, traceCtx);
     }
 
-    async request(message: EnhancedMessage, timeout: number = 5000): Promise<EnhancedMessage> {
-        const traceCtx = this.createTraceContext('request');
-        const correlationId = Math.random().toString(36).substring(7);
-
-        return new Promise((resolve, reject) => {
-            const timeoutId = setTimeout(() => {
-                log.error('Request timed out', {
-                    traceId: traceCtx.traceId,
-                    correlationId,
-                    messageType: message.type,
-                    timeout
-                });
-                reject(new Error('Request timed out'));
-            }, timeout);
-
-            this.context.send(this.context.self, {
-                type: 'REQUEST',
-                payload: {
-                    message,
-                    correlationId
-                },
-                traceId: traceCtx.traceId
-            }).catch((error: Error) => {
-                log.error('Error sending request', {
-                    traceId: traceCtx.traceId,
-                    correlationId,
-                    error: error.message
-                });
-                clearTimeout(timeoutId);
-                reject(error);
-            });
-
-            log.debug('Request initiated', {
-                traceId: traceCtx.traceId,
-                correlationId,
-                messageType: message.type,
-                timeout
-            });
-        });
-    }
-
-    clear(): void {
-        const traceCtx = this.createTraceContext('clear');
+    public clear(): void {
+        const clearMessage: RegisterHandlerMessage = {
+            type: BusMessageTypes.REGISTER_HANDLER,
+            payload: {
+                handler: async () => { },
+                priority: 'normal'
+            }
+        };
+        const traceCtx = this.createTraceContext('clear', clearMessage);
         this.context.send(this.context.self, {
-            type: 'CLEAR',
-            traceId: traceCtx.traceId
-        });
-
-        log.debug('Clear request sent', {
-            traceId: traceCtx.traceId
+            type: BusMessageTypes.REGISTER_HANDLER,
+            payload: {
+                handler: async () => { },
+                priority: 'normal'
+            }
         });
     }
 } 

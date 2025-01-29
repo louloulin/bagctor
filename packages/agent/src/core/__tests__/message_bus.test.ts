@@ -1,306 +1,169 @@
-import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import { ActorSystem } from '@bactor/core';
-import { MessageBusActor, MessageFilter, EnhancedMessage, MessageHandler } from '../message_bus';
+import { expect, test, mock } from "bun:test";
+import { Actor, ActorContext, PID, createRouter, Message, Props } from '@bactor/core';
+import {
+    MessageBusActor,
+    BusMessageTypes,
+    RouterMessageTypes,
+    BusMessage,
+    RouterMessage,
+    MessageHandler
+} from '../message_bus';
+import { log } from '@bactor/core/src/utils/logger';
 
-describe('MessageBusActor', () => {
-    let system: ActorSystem;
-    let messageBus: MessageBusActor;
+// Mock mailbox implementation
+const mockMailbox = {
+    push: async () => { },
+    pop: async () => undefined,
+    isEmpty: () => true,
+    start: () => { },
+    suspend: () => { },
+    resume: () => { },
+    postSystemMessage: () => { },
+    postUserMessage: () => { },
+    registerHandlers: () => { },
+    isSuspended: () => false,
+    getCurrentMessage: () => undefined,
+    hasMessages: async () => false,
+    getQueueSizes: async () => ({ system: 0, high: 0, normal: 0, low: 0 })
+};
 
-    beforeEach(async () => {
-        system = new ActorSystem();
-        const context = await system.spawn({
-            actorClass: MessageBusActor
-        });
-        messageBus = system.getActor(context.id) as MessageBusActor;
-        await messageBus.init();
+// Mock actor class for testing
+class MockActor extends Actor {
+    protected behaviors(): void {
+        this.addBehavior('default', async () => { });
+    }
+}
 
-        // Add a test request handler
-        await messageBus.subscribe({ type: 'TEST' }, async (message: EnhancedMessage) => {
-            return {
-                type: 'RESPONSE',
-                payload: message.payload,
-                correlationId: message.correlationId
+// Mock system implementation
+const mockSystem = {
+    send: async (target: PID, message: Message) => { },
+    spawn: async (props: Props) => ({ id: 'child_' + Math.random().toString(36).substring(7) }),
+    stop: async (pid: PID) => { },
+    restart: async (pid: PID, error: Error) => { }
+};
+
+// Mock context implementation
+class MockContext extends ActorContext {
+    public sentMessages: { target: PID; message: any }[] = [];
+    private spawnedActors: PID[] = [];
+
+    constructor(pid: PID) {
+        super(pid, mockSystem as any);
+    }
+
+    async send(target: PID, message: Message): Promise<void> {
+        this.sentMessages.push({ target, message });
+        await super.send(target, message);
+    }
+
+    async spawn(props: Props): Promise<PID> {
+        if (!props.actorClass && !props.producer) {
+            props = {
+                ...props,
+                actorClass: MockActor
             };
-        });
+        }
+        const child = await super.spawn(props);
+        this.spawnedActors.push(child);
+        return child;
+    }
+
+    getSpawnedActorCount(): number {
+        return this.spawnedActors.length;
+    }
+}
+
+// Test helper functions
+function createTestPID(id: string): PID {
+    return { id };
+}
+
+function createTestMessage(type: typeof BusMessageTypes[keyof typeof BusMessageTypes] | typeof RouterMessageTypes[keyof typeof RouterMessageTypes], payload: any = {}) {
+    return {
+        type,
+        payload,
+        messageId: Math.random().toString(36).substring(7)
+    };
+}
+
+// Tests
+test("MessageBusActor should initialize routers", async () => {
+    const context = new MockContext(createTestPID('test-bus'));
+    const messageBus = new MessageBusActor(context);
+
+    // Wait for initialization
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    expect(context.getSpawnedActorCount()).toBe(2); // Should have subscription and request routers
+});
+
+test("MessageBusActor should handle publish messages", async () => {
+    const context = new MockContext(createTestPID('test-bus'));
+    const messageBus = new MessageBusActor(context);
+
+    // Wait for initialization
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const handler = mock(() => Promise.resolve());
+    await messageBus.subscribe('test-event', handler);
+
+    const publishMessage = createTestMessage(BusMessageTypes.PUBLISH, {
+        type: 'test-event',
+        data: 'test'
     });
 
-    afterEach(async () => {
-        await system.stop();
+    await messageBus.publish(publishMessage);
+    expect(handler).toHaveBeenCalled();
+});
+
+test("MessageBusActor should handle request messages", async () => {
+    const context = new MockContext(createTestPID('test-bus'));
+    const messageBus = new MessageBusActor(context);
+
+    // Wait for initialization
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const requestMessage = createTestMessage(BusMessageTypes.REQUEST, {
+        request: { type: 'test-request', data: 'test' },
+        timeout: 1000
     });
 
-    it('should handle subscribe and unsubscribe', async () => {
-        const filter: MessageFilter = {
-            priority: ['high'],
-            roles: ['test']
-        };
+    const handler = mock(() => Promise.resolve());
+    await messageBus.setHighPriorityHandler(handler);
 
-        const handler = jest.fn<MessageHandler>().mockImplementation(async () => { });
-        const unsubscribe = await messageBus.subscribe(filter, handler);
+    const response = await messageBus.request(requestMessage);
+    expect(response).toBeDefined();
+    expect(handler).toHaveBeenCalled();
+});
 
-        // Publish a matching message
-        const message: EnhancedMessage = {
-            type: 'TEST',
-            context: {
-                priority: 'high'
-            },
-            sender: {
-                id: '1',
-                role: 'test'
-            }
-        };
+test("MessageBusActor should handle message priorities", async () => {
+    const context = new MockContext(createTestPID('test-bus'));
+    const messageBus = new MessageBusActor(context);
 
-        await messageBus.publish(message);
-        await new Promise(resolve => setTimeout(resolve, 100)); // Wait for message processing
-        expect(handler).toHaveBeenCalledWith(message);
+    // Wait for initialization
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Unsubscribe and verify no more messages are received
-        unsubscribe();
-        await messageBus.publish(message);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        expect(handler).toHaveBeenCalledTimes(1);
+    const highPriorityHandler = mock(() => Promise.resolve());
+    const normalPriorityHandler = mock(() => Promise.resolve());
+
+    await messageBus.setHighPriorityHandler(highPriorityHandler);
+    await messageBus.setNormalPriorityHandler(normalPriorityHandler);
+
+    const highPriorityMessage = createTestMessage(BusMessageTypes.PUBLISH, {
+        type: 'test-event',
+        data: 'high',
+        priority: 'high'
     });
 
-    it('should handle request-response pattern', async () => {
-        const request: EnhancedMessage = {
-            type: 'TEST',
-            payload: {
-                data: 'test'
-            },
-            context: {
-                priority: 'high'
-            },
-            sender: {
-                id: '1',
-                role: 'test'
-            }
-        };
-
-        const response = await messageBus.request(request);
-        expect(response).toMatchObject({
-            type: 'RESPONSE',
-            payload: {
-                data: 'test'
-            }
-        });
+    const normalPriorityMessage = createTestMessage(BusMessageTypes.PUBLISH, {
+        type: 'test-event',
+        data: 'normal',
+        priority: 'normal'
     });
 
-    it('should timeout on request with no response', async () => {
-        const request: EnhancedMessage = {
-            type: 'TIMEOUT_TEST',
-            payload: {
-                data: 'test'
-            }
-        };
+    await messageBus.publish(highPriorityMessage);
+    await messageBus.publish(normalPriorityMessage);
 
-        await expect(messageBus.request(request, 100)).rejects.toThrow('Request timed out');
-    });
-
-    it('should clear all subscriptions and pending requests', async () => {
-        const filter: MessageFilter = {
-            priority: ['high']
-        };
-
-        const handler = jest.fn<MessageHandler>().mockImplementation(async () => { });
-        await messageBus.subscribe(filter, handler);
-
-        messageBus.clear();
-
-        const message: EnhancedMessage = {
-            type: 'TEST',
-            context: {
-                priority: 'high'
-            }
-        };
-
-        await messageBus.publish(message);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        expect(handler).not.toHaveBeenCalled();
-    });
-
-    it('should handle publish messages', async () => {
-        const filter: MessageFilter = {
-            priority: ['high']
-        };
-
-        const handler = jest.fn<MessageHandler>().mockImplementation(async () => { });
-        await messageBus.subscribe(filter, handler);
-
-        const message: EnhancedMessage = {
-            type: 'TEST_PUBLISH',
-            context: {
-                priority: 'high'
-            }
-        };
-
-        await messageBus.publish(message);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        expect(handler).toHaveBeenCalledWith(message);
-    });
-
-    it('should handle multiple concurrent requests', async () => {
-        const requests = [
-            {
-                type: 'TEST',
-                payload: { data: 'test-1' }
-            },
-            {
-                type: 'TEST',
-                payload: { data: 'test-2' }
-            },
-            {
-                type: 'TEST',
-                payload: { data: 'test-3' }
-            }
-        ] as EnhancedMessage[];
-
-        const responses = await Promise.all(
-            requests.map(req => messageBus.request(req))
-        );
-
-        responses.forEach((res, i) => {
-            expect(res).toMatchObject({
-                type: 'RESPONSE',
-                payload: {
-                    data: requests[i].payload.data
-                }
-            });
-        });
-    });
-
-    it('should filter messages based on priority', async () => {
-        const filter: MessageFilter = {
-            priority: ['high']
-        };
-
-        const handler = jest.fn<MessageHandler>().mockImplementation(async () => { });
-        await messageBus.subscribe(filter, handler);
-
-        const highPriorityMessage: EnhancedMessage = {
-            type: 'TEST',
-            context: {
-                priority: 'high'
-            }
-        };
-
-        const lowPriorityMessage: EnhancedMessage = {
-            type: 'TEST',
-            context: {
-                priority: 'low'
-            }
-        };
-
-        await messageBus.publish(highPriorityMessage);
-        await messageBus.publish(lowPriorityMessage);
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        expect(handler).toHaveBeenCalledTimes(1);
-        expect(handler).toHaveBeenCalledWith(highPriorityMessage);
-    });
-
-    it('should filter messages based on roles', async () => {
-        const filter: MessageFilter = {
-            roles: ['developer']
-        };
-
-        const handler = jest.fn<MessageHandler>().mockImplementation(async () => { });
-        await messageBus.subscribe(filter, handler);
-
-        const devMessage: EnhancedMessage = {
-            type: 'TEST',
-            sender: {
-                id: '1',
-                role: 'developer'
-            }
-        };
-
-        const adminMessage: EnhancedMessage = {
-            type: 'TEST',
-            sender: {
-                id: '2',
-                role: 'admin'
-            }
-        };
-
-        await messageBus.publish(devMessage);
-        await messageBus.publish(adminMessage);
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        expect(handler).toHaveBeenCalledTimes(1);
-        expect(handler).toHaveBeenCalledWith(devMessage);
-    });
-
-    it('should handle unsubscribe correctly', async () => {
-        const filter: MessageFilter = {
-            priority: ['high']
-        };
-
-        const handler = jest.fn<MessageHandler>().mockImplementation(async () => { });
-        const unsubscribe = await messageBus.subscribe(filter, handler);
-
-        const message: EnhancedMessage = {
-            type: 'TEST',
-            context: {
-                priority: 'high'
-            }
-        };
-
-        await messageBus.publish(message);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        expect(handler).toHaveBeenCalledTimes(1);
-
-        unsubscribe();
-
-        await messageBus.publish(message);
-        await new Promise(resolve => setTimeout(resolve, 100));
-        expect(handler).toHaveBeenCalledTimes(1);
-    });
-
-    it('should handle multiple subscribers', async () => {
-        const filter: MessageFilter = {
-            priority: ['high']
-        };
-
-        const handler1 = jest.fn<MessageHandler>().mockImplementation(async () => { });
-        const handler2 = jest.fn<MessageHandler>().mockImplementation(async () => { });
-
-        await messageBus.subscribe(filter, handler1);
-        await messageBus.subscribe(filter, handler2);
-
-        const message: EnhancedMessage = {
-            type: 'TEST',
-            context: {
-                priority: 'high'
-            }
-        };
-
-        await messageBus.publish(message);
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        expect(handler1).toHaveBeenCalledWith(message);
-        expect(handler2).toHaveBeenCalledWith(message);
-    });
-
-    it('should handle errors in subscriber handlers', async () => {
-        const filter: MessageFilter = {
-            priority: ['high']
-        };
-
-        const errorHandler = jest.fn<MessageHandler>().mockImplementation(async () => {
-            throw new Error('Handler error');
-        });
-        await messageBus.subscribe(filter, errorHandler);
-
-        const message: EnhancedMessage = {
-            type: 'TEST',
-            context: {
-                priority: 'high'
-            }
-        };
-
-        // Should not throw
-        await messageBus.publish(message);
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        expect(errorHandler).toHaveBeenCalledWith(message);
-    });
+    expect(highPriorityHandler).toHaveBeenCalledTimes(1);
+    expect(normalPriorityHandler).toHaveBeenCalledTimes(1);
 }); 

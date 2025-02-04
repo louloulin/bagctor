@@ -1,0 +1,16 @@
+{
+    "id": "calculator",
+    "name": "Calculator Plugin",
+    "version": "1.0.0",
+    "description": "A simple calculator plugin for demonstration",
+    "author": "BActor Team",
+    "type": "inline",
+    "capabilities": [
+        "arithmetic",
+        "math"
+    ],
+    "config": {
+        "precision": 2,
+        "maxOperands": 10
+    }
+}

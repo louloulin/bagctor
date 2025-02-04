@@ -27,7 +27,8 @@
     "build:mood": "bun build src/examples/multibehaviors.ts --compile --outfile dist/examples/mood --external @grpc/* --external pino --external fastq",
     "check": "bun run scripts/check.ts",
     "compile": "tsc --noEmit",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "test:watch": "bun test --watch"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.0",

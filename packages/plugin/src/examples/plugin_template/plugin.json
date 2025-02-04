@@ -1,10 +1,17 @@
 {
-    "type": "inline",
+    "name": "template-plugin",
+    "version": "1.0.0",
+    "description": "A template plugin for the Bactor system",
+    "author": "Bactor Team",
+    "license": "MIT",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
     "capabilities": [
-        "template"
+        "plugin.action",
+        "plugin.status",
+        "plugin.config"
     ],
     "config": {
-        "defaultOption": "value"
-    },
-    "entry": "dist/index.js"
+        "defaultOption": "default"
+    }
 }

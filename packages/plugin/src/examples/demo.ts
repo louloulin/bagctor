@@ -113,7 +113,7 @@ async function main() {
 
     // Wait for all calculations to complete
     await new Promise(resolve => setTimeout(resolve, 2000));
-    await system.shutdown();
+    await system.stop();
 }
 
 main().catch(error => {

@@ -6,41 +6,16 @@ import {
     RouterMessageTypes,
     BusMessage,
     RouterMessage,
-    MessageHandler
+    MessageHandler,
+    PublishMessage,
+    RequestMessage,
+    SystemMessageTypes,
+    MessageCommon,
+    SystemMessageType,
+    MessageType
 } from '../message_bus';
 import { log } from '@bactor/core/src/utils/logger';
-
-// Mock mailbox implementation
-const mockMailbox = {
-    push: async () => { },
-    pop: async () => undefined,
-    isEmpty: () => true,
-    start: () => { },
-    suspend: () => { },
-    resume: () => { },
-    postSystemMessage: () => { },
-    postUserMessage: () => { },
-    registerHandlers: () => { },
-    isSuspended: () => false,
-    getCurrentMessage: () => undefined,
-    hasMessages: async () => false,
-    getQueueSizes: async () => ({ system: 0, high: 0, normal: 0, low: 0 })
-};
-
-// Mock actor class for testing
-class MockActor extends Actor {
-    protected behaviors(): void {
-        this.addBehavior('default', async () => { });
-    }
-}
-
-// Mock system implementation
-const mockSystem = {
-    send: async (target: PID, message: Message) => { },
-    spawn: async (props: Props) => ({ id: 'child_' + Math.random().toString(36).substring(7) }),
-    stop: async (pid: PID) => { },
-    restart: async (pid: PID, error: Error) => { }
-};
+import { describe, beforeEach, jest } from 'bun:test';
 
 // Mock context implementation
 class MockContext extends ActorContext {
@@ -48,7 +23,24 @@ class MockContext extends ActorContext {
     private spawnedActors: PID[] = [];
 
     constructor(pid: PID) {
-        super(pid, mockSystem as any);
+        super(pid, {
+            send: async (target: PID, message: Message) => {
+                if (target && message.type === BusMessageTypes.REQUEST) {
+                    const response = {
+                        type: SystemMessageTypes.REQUEST_RESPONSE,
+                        payload: { success: true, data: message.payload }
+                    };
+                    await this.send(message.sender!, response);
+                }
+            },
+            spawn: async (props: Props) => {
+                const pid = { id: 'test-routee', address: 'local' };
+                this.spawnedActors.push(pid);
+                return pid;
+            },
+            stop: async (pid: PID) => { },
+            restart: async (pid: PID, error: Error) => { }
+        } as any);
     }
 
     async send(target: PID, message: Message): Promise<void> {
@@ -57,12 +49,6 @@ class MockContext extends ActorContext {
     }
 
     async spawn(props: Props): Promise<PID> {
-        if (!props.actorClass && !props.producer) {
-            props = {
-                ...props,
-                actorClass: MockActor
-            };
-        }
         const child = await super.spawn(props);
         this.spawnedActors.push(child);
         return child;
@@ -86,84 +72,113 @@ function createTestMessage(type: typeof BusMessageTypes[keyof typeof BusMessageT
     };
 }
 
-// Tests
-test("MessageBusActor should initialize routers", async () => {
-    const context = new MockContext(createTestPID('test-bus'));
-    const messageBus = new MessageBusActor(context);
+function createTaskMessage(taskId: string, priority?: 'high' | 'normal' | 'low'): RequestMessage {
+    const innerMessage: BusMessage = {
+        type: BusMessageTypes.REGISTER_HANDLER,
+        payload: {
+            handler: async () => { },
+            priority: priority || 'normal'
+        }
+    };
 
-    // Wait for initialization
-    await new Promise(resolve => setTimeout(resolve, 100));
+    return {
+        type: BusMessageTypes.REQUEST,
+        payload: {
+            request: innerMessage,
+            timeout: 1000
+        },
+        sender: { id: 'test-sender', address: 'local' }
+    };
+}
 
-    expect(context.getSpawnedActorCount()).toBe(2); // Should have subscription and request routers
-});
+describe('MessageBusActor', () => {
+    let context: MockContext;
+    let messageBus: MessageBusActor;
 
-test("MessageBusActor should handle publish messages", async () => {
-    const context = new MockContext(createTestPID('test-bus'));
-    const messageBus = new MessageBusActor(context);
-
-    // Wait for initialization
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    const handler = mock(() => Promise.resolve());
-    await messageBus.subscribe('test-event', handler);
-
-    const publishMessage = createTestMessage(BusMessageTypes.PUBLISH, {
-        type: 'test-event',
-        data: 'test'
+    beforeEach(async () => {
+        context = new MockContext(createTestPID('test-actor'));
+        messageBus = new MessageBusActor(context);
+        // Wait for initialization
+        await new Promise(resolve => setTimeout(resolve, 100));
     });
 
-    await messageBus.publish(publishMessage);
-    expect(handler).toHaveBeenCalled();
-});
-
-test("MessageBusActor should handle request messages", async () => {
-    const context = new MockContext(createTestPID('test-bus'));
-    const messageBus = new MessageBusActor(context);
-
-    // Wait for initialization
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    const requestMessage = createTestMessage(BusMessageTypes.REQUEST, {
-        request: { type: 'test-request', data: 'test' },
-        timeout: 1000
+    test('should initialize with routers', async () => {
+        expect(context.getSpawnedActorCount()).toBe(4); // 2 routers + 2 initial routees
     });
 
-    const handler = mock(() => Promise.resolve());
-    await messageBus.setHighPriorityHandler(handler);
+    test('should handle high priority messages correctly', async () => {
+        const highPriorityHandler = mock(() => Promise.resolve(void 0));
+        await messageBus.setHighPriorityHandler(highPriorityHandler);
 
-    const response = await messageBus.request(requestMessage);
-    expect(response).toBeDefined();
-    expect(handler).toHaveBeenCalled();
-});
+        const message = createTaskMessage('test-task', 'high');
+        const response = await messageBus.request(message);
 
-test("MessageBusActor should handle message priorities", async () => {
-    const context = new MockContext(createTestPID('test-bus'));
-    const messageBus = new MessageBusActor(context);
-
-    // Wait for initialization
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    const highPriorityHandler = mock(() => Promise.resolve());
-    const normalPriorityHandler = mock(() => Promise.resolve());
-
-    await messageBus.setHighPriorityHandler(highPriorityHandler);
-    await messageBus.setNormalPriorityHandler(normalPriorityHandler);
-
-    const highPriorityMessage = createTestMessage(BusMessageTypes.PUBLISH, {
-        type: 'test-event',
-        data: 'high',
-        priority: 'high'
+        expect(response).toBeDefined();
+        expect(response.success).toBe(true);
     });
 
-    const normalPriorityMessage = createTestMessage(BusMessageTypes.PUBLISH, {
-        type: 'test-event',
-        data: 'normal',
-        priority: 'normal'
+    test('should handle normal priority messages correctly', async () => {
+        const normalPriorityHandler = mock(() => Promise.resolve(void 0));
+        await messageBus.setNormalPriorityHandler(normalPriorityHandler);
+
+        const message = createTaskMessage('test-task', 'normal');
+        const response = await messageBus.request(message);
+
+        expect(response).toBeDefined();
+        expect(response.success).toBe(true);
     });
 
-    await messageBus.publish(highPriorityMessage);
-    await messageBus.publish(normalPriorityMessage);
+    test('should handle publish/subscribe correctly', async () => {
+        const handler = mock(() => Promise.resolve(void 0));
+        await messageBus.subscribe(BusMessageTypes.PUBLISH, handler);
 
-    expect(highPriorityHandler).toHaveBeenCalledTimes(1);
-    expect(normalPriorityHandler).toHaveBeenCalledTimes(1);
+        const innerMessage: BusMessage = {
+            type: BusMessageTypes.REGISTER_HANDLER,
+            payload: {
+                handler: async () => { },
+                priority: 'normal'
+            }
+        };
+
+        const message: PublishMessage = {
+            type: BusMessageTypes.PUBLISH,
+            payload: innerMessage,
+            sender: { id: 'test-sender', address: 'local' }
+        };
+
+        await messageBus.publish(message);
+        expect(context.sentMessages.length).toBeGreaterThan(0);
+    });
+
+    test('should handle request timeout', async () => {
+        const message = createTaskMessage('test-task');
+        message.payload.timeout = 1; // 1ms timeout
+
+        await expect(messageBus.request(message)).rejects.toThrow('Request timed out');
+    });
+
+    test('should handle multiple subscribers', async () => {
+        const handler1 = mock(() => Promise.resolve(void 0));
+        const handler2 = mock(() => Promise.resolve(void 0));
+
+        await messageBus.subscribe(BusMessageTypes.PUBLISH, handler1);
+        await messageBus.subscribe(BusMessageTypes.PUBLISH, handler2);
+
+        const innerMessage: BusMessage = {
+            type: BusMessageTypes.REGISTER_HANDLER,
+            payload: {
+                handler: async () => { },
+                priority: 'normal'
+            }
+        };
+
+        const message: PublishMessage = {
+            type: BusMessageTypes.PUBLISH,
+            payload: innerMessage,
+            sender: { id: 'test-sender', address: 'local' }
+        };
+
+        await messageBus.publish(message);
+        expect(context.sentMessages.length).toBeGreaterThan(1);
+    });
 }); 

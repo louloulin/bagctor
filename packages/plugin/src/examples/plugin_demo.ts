@@ -53,7 +53,7 @@ async function runPluginDemo() {
     log.info('Actor system started');
 
     // Create plugin manager
-    const pluginsDir = path.join(__dirname, 'plugins');
+    const pluginsDir = path.join(__dirname, 'calculator');
     const tempDir = path.join(__dirname, 'temp');
     log.info('Plugin directories:', { pluginsDir, tempDir });
 
@@ -67,11 +67,11 @@ async function runPluginDemo() {
 
     try {
         // Install calculator plugin
-        const calculatorPluginPath = path.join(pluginsDir, 'calculator');
+        const calculatorPluginPath = path.join(pluginsDir);
         log.info('Installing calculator plugin from:', calculatorPluginPath);
 
         // Load plugin metadata
-        const metadataPath = path.join(calculatorPluginPath, 'plugin.json');
+        const metadataPath = path.join(calculatorPluginPath, 'src', 'plugin.json');
         log.info('Loading plugin metadata from:', metadataPath);
         const metadata = await fs.readJson(metadataPath) as PluginMetadata;
         log.info('Plugin metadata loaded:', metadata);

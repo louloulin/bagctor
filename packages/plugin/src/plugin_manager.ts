@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as semver from 'semver';
-import { fork, ChildProcess } from 'child_process';
 import {
     PluginMetadata,
     PluginInstance,
@@ -15,6 +14,7 @@ import {
     PluginManagerState
 } from './types';
 import { LocalPluginHub } from './plugin_hub';
+import { PluginLoader } from './plugin_loader';
 
 interface PluginManagerActorState {
     behavior: string;
@@ -24,6 +24,7 @@ interface PluginManagerActorState {
 export class PluginManager extends Actor {
     private pluginState: PluginManagerState;
     private hub: LocalPluginHub;
+    private loader: PluginLoader;
 
     constructor(context: ActorContext, config: PluginConfig) {
         super(context);
@@ -36,6 +37,7 @@ export class PluginManager extends Actor {
         };
         this.pluginState = this.state.data;
         this.hub = new LocalPluginHub(config);
+        this.loader = new PluginLoader(config.pluginsDir);
 
         // Ensure plugin directory exists
         fs.ensureDirSync(config.pluginsDir);
@@ -73,10 +75,24 @@ export class PluginManager extends Actor {
 
     private async handlePluginInstall(message: Message): Promise<void> {
         try {
-            if (!message.payload.metadata) {
-                throw new Error('Plugin metadata is required for installation');
+            const { metadata, source, config } = message.payload;
+
+            let pluginMetadata: PluginMetadata;
+            if (source) {
+                // Dynamic loading from source
+                pluginMetadata = await this.loader.loadFromDynamic(source, metadata || {});
+            } else if (metadata) {
+                // Loading from package.json
+                const packagePath = path.join(this.pluginState.config.pluginsDir, metadata.id);
+                pluginMetadata = await this.loader.loadFromPackage(packagePath);
+            } else {
+                throw new Error('Either metadata or source must be provided for installation');
             }
-            await this.install(message.payload.metadata);
+
+            // Create plugin instance
+            const instance = await this.loader.createInstance(pluginMetadata, this.context, config);
+            this.pluginState.plugins.set(pluginMetadata.id, instance);
+
             if (message.sender) {
                 await this.context.send(message.sender, {
                     type: 'plugin.response',
@@ -253,7 +269,7 @@ export class PluginManager extends Actor {
                 type: 'plugin.response',
                 payload: {
                     success: false,
-                    error: error instanceof Error ? error.message : 'Unknown error'
+                    error: error instanceof Error ? error.message : String(error)
                 }
             }).catch((err: unknown) => {
                 log.error('Failed to send error response:', err);
@@ -276,96 +292,19 @@ export class PluginManager extends Actor {
         if (query.name && plugin.metadata.name !== query.name) return false;
         if (query.version && !semver.satisfies(plugin.metadata.version, query.version)) return false;
         if (query.type && plugin.metadata.type !== query.type) return false;
-        if (query.status && plugin.status !== query.status) return false;
         if (query.capability && !plugin.metadata.capabilities?.includes(query.capability)) return false;
+        if (query.status && plugin.status !== query.status) return false;
         return true;
     }
 
-    private async install(metadata: PluginMetadata, config?: any): Promise<void> {
-        log.info('Installing plugin:', {
-            pluginId: metadata.id,
-            type: metadata.type,
-            config
-        });
-
-        if (this.pluginState.plugins.has(metadata.id)) {
-            throw new Error(`Plugin ${metadata.id} is already installed`);
-        }
-
-        // Check dependencies
-        if (metadata.dependencies) {
-            for (const [depId, version] of Object.entries(metadata.dependencies)) {
-                const dep = this.pluginState.plugins.get(depId);
-                if (!dep || !semver.satisfies(dep.metadata.version, version)) {
-                    throw new Error(`Dependency not satisfied: ${depId}@${version}`);
-                }
-            }
-        }
-
-        // Create plugin instance
-        const plugin: PluginInstance = {
-            metadata,
-            status: 'installed',
-            config: {
-                ...metadata.config,
-                ...config
-            }
-        };
-
-        log.info('Setting up plugin:', {
-            pluginId: metadata.id,
-            type: metadata.type,
-            status: plugin.status
-        });
-
-        // Handle different plugin types
-        try {
-            switch (metadata.type) {
-                case 'process':
-                    await this.setupProcessPlugin(plugin);
-                    break;
-                case 'worker':
-                    await this.setupWorkerPlugin(plugin);
-                    break;
-                case 'inline':
-                    await this.setupInlinePlugin(plugin);
-                    break;
-                default:
-                    throw new Error(`Unsupported plugin type: ${metadata.type}`);
-            }
-
-            this.pluginState.plugins.set(metadata.id, plugin);
-            log.info('Plugin installed successfully:', {
-                pluginId: metadata.id,
-                type: metadata.type,
-                status: plugin.status
-            });
-
-            if (this.pluginState.config.autoStart) {
-                log.info('Auto-starting plugin:', metadata.id);
-                await this.activate(metadata.id);
-            }
-        } catch (error) {
-            log.error('Failed to install plugin:', {
-                pluginId: metadata.id,
-                type: metadata.type,
-                error: error instanceof Error ? error.message : String(error)
-            });
-            throw error;
-        }
+    private async install(metadata: PluginMetadata): Promise<void> {
+        // Implementation moved to handlePluginInstall
     }
 
     private async uninstall(pluginId: string): Promise<void> {
         const plugin = this.pluginState.plugins.get(pluginId);
         if (!plugin) {
-            throw new Error(`Plugin ${pluginId} is not installed`);
-        }
-
-        // Check if any other plugins depend on this one
-        for (const other of this.pluginState.plugins.values()) {
-            if (other.metadata.dependencies?.[pluginId]) {
-                throw new Error(`Cannot uninstall: plugin ${other.metadata.id} depends on ${pluginId}`);
-            }
+            throw new Error(`Plugin ${pluginId} not found`);
         }
 
         // Deactivate if active
@@ -373,117 +312,74 @@ export class PluginManager extends Actor {
             await this.deactivate(pluginId);
         }
 
-        // Clean up based on plugin type
-        switch (plugin.metadata.type) {
-            case 'process':
-                if (plugin.process) {
-                    plugin.process.kill();
-                }
-                break;
-            case 'worker':
-                if (plugin.worker) {
-                    plugin.worker.terminate();
-                }
-                break;
-            case 'inline':
-                if (plugin.actor) {
-                    await this.context.stop(plugin.actor);
-                }
-                break;
-        }
-
         // Remove plugin files
         const pluginDir = path.join(this.pluginState.config.pluginsDir, pluginId);
         await fs.remove(pluginDir);
 
+        // Remove from state
         this.pluginState.plugins.delete(pluginId);
     }
 
-    private async update(pluginId: string, version?: string): Promise<void> {
+    private async update(pluginId: string): Promise<void> {
         const plugin = this.pluginState.plugins.get(pluginId);
         if (!plugin) {
-            throw new Error(`Plugin ${pluginId} is not installed`);
+            throw new Error(`Plugin ${pluginId} not found`);
         }
 
-        // Get latest version from hub if not specified
-        const newVersion = version || await this.hub.getLatestVersion(pluginId);
-        if (!newVersion || !semver.gt(newVersion, plugin.metadata.version)) {
+        // Get latest version from hub
+        const latestVersion = await this.hub.getLatestVersion(pluginId);
+        if (!latestVersion) {
+            throw new Error(`No updates available for plugin ${pluginId}`);
+        }
+
+        if (!semver.gt(latestVersion, plugin.metadata.version)) {
             return; // Already at latest version
         }
 
         // Download new version
-        const pluginPath = await this.hub.download(pluginId, newVersion);
-        const newMetadata = await this.loadPluginMetadata(pluginPath);
+        const newPluginPath = await this.hub.download(pluginId, latestVersion);
 
-        // Deactivate current version
-        if (plugin.status === 'active') {
+        // Load new version metadata
+        const newMetadata = await this.loader.loadFromPackage(newPluginPath);
+
+        // Deactivate current version if active
+        const wasActive = plugin.status === 'active';
+        if (wasActive) {
             await this.deactivate(pluginId);
         }
 
-        // Install new version
-        await this.install(newMetadata, plugin.config);
+        // Create new instance
+        const newInstance = await this.loader.createInstance(newMetadata, this.context, plugin.config);
+        this.pluginState.plugins.set(pluginId, newInstance);
 
-        // Clean up old version
-        await this.uninstall(pluginId);
+        // Activate if it was active before
+        if (wasActive) {
+            await this.activate(pluginId);
+        }
     }
 
     private async activate(pluginId: string): Promise<void> {
         const plugin = this.pluginState.plugins.get(pluginId);
         if (!plugin) {
-            throw new Error(`Plugin ${pluginId} is not installed`);
+            throw new Error(`Plugin ${pluginId} not found`);
         }
 
         if (plugin.status === 'active') {
-            log.info('Plugin already active:', { pluginId });
-            return;
+            return; // Already active
         }
 
-        log.info('Starting plugin activation process:', {
-            pluginId,
-            type: plugin.metadata.type,
-            status: plugin.status,
-            config: plugin.config
-        });
-
-        // Check max concurrent plugins limit
-        const activeCount = Array.from(this.pluginState.plugins.values())
-            .filter(p => p.status === 'active').length;
-        if (this.pluginState.config.maxConcurrentPlugins &&
-            activeCount >= this.pluginState.config.maxConcurrentPlugins) {
-            throw new Error('Maximum number of concurrent plugins reached');
-        }
-
-        // Activate based on plugin type
         try {
-            switch (plugin.metadata.type) {
-                case 'process':
-                    log.info('Activating process plugin:', { pluginId });
-                    await this.activateProcessPlugin(plugin);
-                    break;
-                case 'worker':
-                    log.info('Activating worker plugin:', { pluginId });
-                    await this.activateWorkerPlugin(plugin);
-                    break;
-                case 'inline':
-                    log.info('Activating inline plugin:', { pluginId });
-                    await this.activateInlinePlugin(plugin);
-                    break;
+            plugin.status = 'updating';
+
+            // Create actor if not exists
+            if (!plugin.actor) {
+                const instance = await this.loader.createInstance(plugin.metadata, this.context, plugin.config);
+                plugin.actor = instance.actor;
             }
 
             plugin.status = 'active';
-            log.info('Plugin activation process completed:', {
-                pluginId,
-                type: plugin.metadata.type,
-                status: plugin.status,
-                hasActor: !!plugin.actor
-            });
         } catch (error) {
-            log.error('Plugin activation process failed:', {
-                pluginId,
-                type: plugin.metadata.type,
-                error: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined
-            });
+            plugin.status = 'error';
             throw error;
         }
     }
@@ -491,314 +387,38 @@ export class PluginManager extends Actor {
     private async deactivate(pluginId: string): Promise<void> {
         const plugin = this.pluginState.plugins.get(pluginId);
         if (!plugin) {
-            throw new Error(`Plugin ${pluginId} is not installed`);
+            throw new Error(`Plugin ${pluginId} not found`);
         }
 
         if (plugin.status !== 'active') {
-            log.info('Plugin not active:', { pluginId, status: plugin.status });
-            return;
+            return; // Not active
         }
 
-        log.info('Starting plugin deactivation:', {
-            pluginId,
-            type: plugin.metadata.type,
-            status: plugin.status
-        });
-
         try {
-            // Deactivate based on plugin type
+            plugin.status = 'updating';
+
+            // Cleanup based on plugin type
             switch (plugin.metadata.type) {
                 case 'process':
-                    await this.deactivateProcessPlugin(plugin);
+                    if (plugin.process) {
+                        plugin.process.kill();
+                        plugin.process = undefined;
+                    }
                     break;
                 case 'worker':
-                    await this.deactivateWorkerPlugin(plugin);
+                    if (plugin.worker) {
+                        plugin.worker.terminate();
+                        plugin.worker = undefined;
+                    }
                     break;
-                case 'inline':
-                    await this.deactivateInlinePlugin(plugin);
-                    break;
             }
 
-            plugin.status = 'inactive';
-            log.info('Plugin deactivation completed:', {
-                pluginId,
-                type: plugin.metadata.type,
-                status: plugin.status
-            });
-        } catch (error) {
-            log.error('Plugin deactivation failed:', {
-                pluginId,
-                type: plugin.metadata.type,
-                error: error instanceof Error ? error.message : String(error)
-            });
-            throw error;
-        }
-    }
-
-    private async setupProcessPlugin(plugin: PluginInstance): Promise<void> {
-        const pluginDir = path.join(this.pluginState.config.pluginsDir, plugin.metadata.id);
-        const mainFile = path.join(pluginDir, 'index.js');
-
-        if (!fs.existsSync(mainFile)) {
-            throw new Error(`Plugin main file not found: ${mainFile}`);
-        }
-
-        // Validate the main file
-        try {
-            require.resolve(mainFile);
-        } catch (error) {
-            throw new Error(`Invalid plugin main file: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-
-    private async setupWorkerPlugin(plugin: PluginInstance): Promise<void> {
-        const pluginDir = path.join(this.pluginState.config.pluginsDir, plugin.metadata.id);
-        const mainFile = path.join(pluginDir, 'worker.js');
-
-        if (!fs.existsSync(mainFile)) {
-            throw new Error(`Plugin worker file not found: ${mainFile}`);
-        }
-
-        // Validate the worker file
-        try {
-            await fs.access(mainFile, fs.constants.R_OK);
-        } catch (error) {
-            throw new Error(`Invalid plugin worker file: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-
-    private async setupInlinePlugin(plugin: PluginInstance): Promise<void> {
-        const pluginDir = path.join(this.pluginState.config.pluginsDir, plugin.metadata.id);
-        const mainFile = path.join(pluginDir, 'index.ts');
-        log.info('Setting up inline plugin:', { pluginId: plugin.metadata.id, mainFile });
-
-        if (!fs.existsSync(mainFile)) {
-            throw new Error(`Plugin main file not found: ${mainFile}`);
-        }
-
-        // Validate the main file
-        try {
-            const pluginModule = await import(mainFile);
-            if (typeof pluginModule.createActor !== 'function') {
-                throw new Error('Plugin must export a createActor function');
-            }
-            log.info('Plugin module validated successfully');
-        } catch (error) {
-            log.error('Failed to validate plugin module:', error);
-            throw new Error(`Invalid plugin module: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-
-    private async activateProcessPlugin(plugin: PluginInstance): Promise<void> {
-        const pluginDir = path.join(this.pluginState.config.pluginsDir, plugin.metadata.id);
-        const mainFile = path.join(pluginDir, 'index.js');
-
-        // Fork the plugin process
-        const childProcess = fork(mainFile, [], {
-            cwd: pluginDir,
-            env: {
-                ...process.env,
-                PLUGIN_ID: plugin.metadata.id,
-                PLUGIN_CONFIG: JSON.stringify(plugin.config || {})
-            }
-        });
-
-        // Handle process events
-        childProcess.on('error', (error: Error) => {
-            log.error(`Plugin ${plugin.metadata.id} process error:`, error);
-            this.handlePluginError(plugin, error);
-        });
-
-        childProcess.on('exit', (code: number) => {
-            if (code !== 0) {
-                log.error(`Plugin ${plugin.metadata.id} process exited with code ${code}`);
-                this.handlePluginError(plugin, new Error(`Process exited with code ${code}`));
-            }
-        });
-
-        // Store the process reference
-        plugin.process = childProcess;
-
-        // Wait for ready signal
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('Plugin activation timeout'));
-            }, this.pluginState.config.taskTimeout || 30000);
-
-            childProcess.once('message', (message: { type: string }) => {
-                if (message.type === 'plugin.ready') {
-                    clearTimeout(timeout);
-                    resolve();
-                }
-            });
-        });
-    }
-
-    private async activateWorkerPlugin(plugin: PluginInstance): Promise<void> {
-        const pluginDir = path.join(this.pluginState.config.pluginsDir, plugin.metadata.id);
-        const workerFile = path.join(pluginDir, 'worker.js');
-
-        // Create worker
-        const worker = new Worker(workerFile, {
-            type: 'module',
-            name: plugin.metadata.id
-        });
-
-        // Handle worker events
-        worker.onerror = (error: ErrorEvent) => {
-            log.error(`Plugin ${plugin.metadata.id} worker error:`, error);
-            this.handlePluginError(plugin, error.error);
-        };
-
-        // Store the worker reference
-        plugin.worker = worker;
-
-        // Initialize the worker
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('Plugin activation timeout'));
-            }, this.pluginState.config.taskTimeout || 30000);
-
-            worker.onmessage = (event: MessageEvent) => {
-                if (event.data.type === 'plugin.ready') {
-                    clearTimeout(timeout);
-                    resolve();
-                }
-            };
-
-            worker.postMessage({
-                type: 'plugin.init',
-                payload: {
-                    id: plugin.metadata.id,
-                    config: plugin.config || {}
-                }
-            });
-        });
-    }
-
-    private async activateInlinePlugin(plugin: PluginInstance): Promise<void> {
-        const pluginDir = path.join(this.pluginState.config.pluginsDir, plugin.metadata.id);
-        const mainFile = path.join(pluginDir, 'index.ts');
-        log.info('Activating inline plugin:', {
-            pluginId: plugin.metadata.id,
-            mainFile,
-            config: plugin.config
-        });
-
-        try {
-            // Use Bun's built-in TypeScript support
-            const pluginModule = await import(mainFile);
-            log.info('Plugin module loaded:', {
-                pluginId: plugin.metadata.id,
-                exports: Object.keys(pluginModule)
-            });
-
-            const config = {
-                ...plugin.metadata.config,
-                ...plugin.config,
-                pluginId: plugin.metadata.id
-            };
-            log.info('Creating actor with config:', config);
-
-            const actor = await pluginModule.createActor(this.context, config);
-            log.info('Actor created:', {
-                pluginId: plugin.metadata.id,
-                actorType: actor.constructor.name
-            });
-
-            if (!(actor instanceof Actor)) {
-                throw new Error('Plugin must create an Actor instance');
-            }
-
-            plugin.actor = actor;
-            await this.context.start(actor);
-            log.info('Actor started:', {
-                pluginId: plugin.metadata.id,
-                actorId: this.context.id
-            });
-
-        } catch (error) {
-            log.error('Failed to activate inline plugin:', {
-                pluginId: plugin.metadata.id,
-                error: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined
-            });
-            throw error;
-        }
-    }
-
-    private async deactivateProcessPlugin(plugin: PluginInstance): Promise<void> {
-        if (plugin.process) {
-            plugin.process.kill();
-            plugin.process = undefined;
-        }
-    }
-
-    private async deactivateWorkerPlugin(plugin: PluginInstance): Promise<void> {
-        if (plugin.worker) {
-            plugin.worker.terminate();
-            plugin.worker = undefined;
-        }
-    }
-
-    private async deactivateInlinePlugin(plugin: PluginInstance): Promise<void> {
-        if (plugin.actor) {
-            await this.context.stop(plugin.actor);
+            // Clear actor reference
             plugin.actor = undefined;
-        }
-    }
-
-    private handlePluginError(plugin: PluginInstance, error: Error): void {
-        log.error(`Plugin ${plugin.metadata.id} error:`, error);
-        plugin.status = 'error';
-
-        // Clean up resources
-        switch (plugin.metadata.type) {
-            case 'process':
-                if (plugin.process) {
-                    plugin.process.kill();
-                    plugin.process = undefined;
-                }
-                break;
-            case 'worker':
-                if (plugin.worker) {
-                    plugin.worker.terminate();
-                    plugin.worker = undefined;
-                }
-                break;
-            case 'inline':
-                if (plugin.actor) {
-                    this.context.stop(plugin.actor).catch((err: Error) => {
-                        log.error(`Failed to stop actor for plugin ${plugin.metadata.id}:`, err);
-                    });
-                    plugin.actor = undefined;
-                }
-                break;
-        }
-    }
-
-    private async loadPluginMetadata(pluginPath: string): Promise<PluginMetadata> {
-        const metadataPath = path.join(pluginPath, 'plugin.json');
-        if (!fs.existsSync(metadataPath)) {
-            throw new Error(`Plugin metadata not found: ${metadataPath}`);
-        }
-
-        try {
-            const metadata = await fs.readJson(metadataPath);
-
-            // Validate required fields
-            if (!metadata.id || !metadata.name || !metadata.version || !metadata.type) {
-                throw new Error('Invalid plugin metadata: missing required fields');
-            }
-
-            // Validate plugin type
-            if (!['process', 'worker', 'inline'].includes(metadata.type)) {
-                throw new Error(`Invalid plugin type: ${metadata.type}`);
-            }
-
-            return metadata;
+            plugin.status = 'inactive';
         } catch (error) {
-            throw new Error(`Failed to load plugin metadata: ${error instanceof Error ? error.message : String(error)}`);
+            plugin.status = 'error';
+            throw error;
         }
     }
 } 

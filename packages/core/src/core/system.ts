@@ -42,7 +42,7 @@ export class ActorSystem {
       // Local actor stopping
       const actor = this.actors.get(pid.id);
       const context = this.contexts.get(pid.id);
-      
+
       if (actor && context) {
         try {
           await context.stopAll(); // Stop all children first
@@ -52,25 +52,31 @@ export class ActorSystem {
           this.contexts.delete(pid.id);
         }
       }
-    } else {
-      // Stop entire system
-      // Stop all remote clients
-      for (const client of this.remoteClients.values()) {
-        client.close();
-      }
-      this.remoteClients.clear();
 
-      // Stop server if running
-      if (this.server) {
-        await this.server.stop();
-      }
-
-      // Stop all local actors
-      const pids = Array.from(this.actors.keys()).map(id => ({ id }));
-      await Promise.all(pids.map(pid => this.stop(pid)));
     }
   }
-  
+
+  async shutdown(): Promise<void> {
+    // Stop all actors
+    const stopPromises = Array.from(this.actors.keys()).map(actorId =>
+      this.stop({ id: actorId, address: this.address })
+    );
+    await Promise.all(stopPromises);
+
+    // Stop the server if it exists
+    if (this.server) {
+      await this.server.stop();
+    }
+
+    // Clear all maps and collections
+    this.actors.clear();
+    this.contexts.clear();
+    this.deadLetters = [];
+    this.remoteClients.clear();
+    this.actorClasses.clear();
+    this.messageHandlers.clear();
+  }
+
   async spawn(props: Props): Promise<PID> {
     // Handle remote actor spawning
     if (props.address) {
@@ -80,14 +86,14 @@ export class ActorSystem {
     }
 
     // Local actor spawning
-    const pid: PID = { 
+    const pid: PID = {
       id: uuidv4(),
-      address: this.address 
+      address: this.address
     };
-    
+
     const context = new ActorContext(pid, this, props.mailboxType, props.supervisorStrategy);
     this.contexts.set(pid.id, context);  // 先设置 context
-    
+
     let actor: Actor;
     if (props.actorClass) {
       // Class-based actor
@@ -111,9 +117,9 @@ export class ActorSystem {
     } else {
       throw new Error('Props must have either actorClass or producer defined');
     }
-    
+
     this.actors.set(pid.id, actor);
-    
+
     try {
       if (actor.preStart) {
         await actor.preStart();
@@ -122,7 +128,7 @@ export class ActorSystem {
       await this.handlePreStartError(pid, error as Error);
       throw error;
     }
-    
+
     return pid;
   }
 

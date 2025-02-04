@@ -1,0 +1,10 @@
+{
+    "type": "inline",
+    "capabilities": [
+        "template"
+    ],
+    "config": {
+        "defaultOption": "value"
+    },
+    "entry": "dist/index.js"
+}

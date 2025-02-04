@@ -2,12 +2,12 @@
     "id": "calculator",
     "name": "Calculator Plugin",
     "version": "1.0.0",
-    "description": "A simple calculator plugin for demonstration",
+    "description": "A simple calculator plugin for BActor",
     "author": "BActor Team",
     "type": "inline",
+    "main": "dist/index.js",
     "capabilities": [
-        "arithmetic",
-        "math"
+        "calculator.calculate"
     ],
     "config": {
         "precision": 2,

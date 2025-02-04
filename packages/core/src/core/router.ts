@@ -436,4 +436,23 @@ export function createRouter(type: RouterType, config: RouterConfig): Router {
   }
 
   return new RouterImpl(config.system, config);
+}
+
+// Concrete Router Implementations
+export class BroadcastRouter extends Router {
+  protected createStrategy(): IRoutingStrategy {
+    return new BroadcastStrategy();
+  }
+}
+
+export class RoundRobinRouter extends Router {
+  protected createStrategy(): IRoutingStrategy {
+    return new RoundRobinStrategy();
+  }
+}
+
+export class RandomRouter extends Router {
+  protected createStrategy(): IRoutingStrategy {
+    return new RandomStrategy();
+  }
 } 

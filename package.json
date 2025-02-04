@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "build": "bun run build:all",
-    "build:all": "bun run build:core && bun run build:agent && bun run build:match-engine && bun run build:web && bun run build:vscode-chat",
+    "build:all": "bun run build:core && bun run build:agent && bun run build:match-engine && bun run build:web",
     "build:core": "cd packages/core && tsc",
     "build:agent": "cd packages/agent && tsc",
     "build:match-engine": "cd packages/match-engine && tsc",

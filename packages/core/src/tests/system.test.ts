@@ -6,7 +6,7 @@ import { Message, ActorContext, Props, SupervisorStrategy, SupervisorDirective }
 // Test actor implementation
 class TestActor extends Actor {
   public messages: Message[] = [];
-  
+
   protected behaviors(): void {
     this.addBehavior('default', async (msg: Message) => {
       this.messages.push(msg);
@@ -48,18 +48,14 @@ class LifecycleActor extends TestActor {
   }
 }
 
-let system: ActorSystem;
-let supervisorStrategy: TestSupervisorStrategy;
-let lifecycleEvents: string[];
-
 test("ActorSystem should spawn actors", async () => {
-  system = new ActorSystem();
+  const system = new ActorSystem();
   const pid = await system.spawn({
     actorClass: TestActor
   });
 
   expect(pid.id).toBeDefined();
-  
+
   // Send a message to verify actor exists
   await system.send(pid, { type: 'test' });
   const actor = system['actors'].get(pid.id) as TestActor;
@@ -67,9 +63,9 @@ test("ActorSystem should spawn actors", async () => {
 });
 
 test("ActorSystem should handle actor failures with supervisor strategy", async () => {
-  system = new ActorSystem();
-  supervisorStrategy = new TestSupervisorStrategy();
-  
+  const system = new ActorSystem();
+  const supervisorStrategy = new TestSupervisorStrategy();
+
   const pid = await system.spawn({
     actorClass: TestActor,
     supervisorStrategy
@@ -84,8 +80,8 @@ test("ActorSystem should handle actor failures with supervisor strategy", async 
 });
 
 test("ActorSystem should handle actor lifecycle", async () => {
-  system = new ActorSystem();
-  lifecycleEvents = [];
+  const system = new ActorSystem();
+  const lifecycleEvents: string[] = [];
 
   const pid = await system.spawn({
     producer: (context) => new LifecycleActor(context, lifecycleEvents)
@@ -102,13 +98,16 @@ test("ActorSystem should handle actor lifecycle", async () => {
 });
 
 test("ActorSystem should handle dead letters", async () => {
-  system = new ActorSystem();
-  const pid = { id: 'non-existent' };
+  const system = new ActorSystem();
+  const deadLetters: Message[] = [];
+
+  system.addMessageHandler(async (msg: Message) => {
+    deadLetters.push(msg);
+  });
 
   // Send message to non-existent actor
-  const message = { type: 'test' };
-  await system.send(pid, message);
+  await system.send({ id: 'non-existent' }, { type: 'test' });
 
-  // Verify message was added to dead letters
-  expect(system['deadLetters']).toEqual([message]);
+  expect(deadLetters.length).toBe(1);
+  expect(deadLetters[0]).toEqual({ type: 'test' });
 }); 

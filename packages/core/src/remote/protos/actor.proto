@@ -5,30 +5,33 @@ package actor;
 // Actor message service
 service ActorService {
   // Send a message to a remote actor
-  rpc SendMessage (SendRequest) returns (SendResponse);
+  rpc SendMessage (MessageRequest) returns (MessageResponse);
   
   // Spawn a remote actor
-  rpc SpawnActor (SpawnRequest) returns (SpawnResponse);
+  rpc Spawn (SpawnRequest) returns (SpawnResponse);
   
   // Stop a remote actor
-  rpc StopActor (StopRequest) returns (StopResponse);
+  rpc Stop (StopRequest) returns (StopResponse);
   
   // Watch a remote actor's lifecycle
-  rpc WatchActor (WatchRequest) returns (stream WatchResponse);
+  rpc Watch (WatchRequest) returns (stream WatchEvent);
 }
 
 // Message to be sent to an actor
-message SendRequest {
-  string actorId = 1;
-  Message message = 2;
+message MessageRequest {
+  string id = 1;
+  bytes payload = 2;
+  optional string sender = 3;
 }
 
-message SendResponse {}
+message MessageResponse {
+  bool success = 1;
+}
 
 // Request to spawn a new actor
 message SpawnRequest {
-  string className = 1;
-  string id = 2;  // Optional, if not provided server will generate
+  string actorType = 1;
+  bytes config = 2;
 }
 
 message SpawnResponse {
@@ -38,21 +41,28 @@ message SpawnResponse {
 
 // Request to stop an actor
 message StopRequest {
-  string actorId = 1;
+  string id = 1;
 }
 
-message StopResponse {}
+message StopResponse {
+  bool success = 1;
+}
 
 // Request to watch an actor
 message WatchRequest {
-  string actorId = 1;
-  string watcherId = 2;
+  string id = 1;
 }
 
-// Actor lifecycle events
-message WatchResponse {
-  string type = 1;  // 'terminated' or 'restarted'
-  string actorId = 2;
+enum EventType {
+  STARTED = 0;
+  STOPPED = 1;
+  FAILED = 2;
+}
+
+message WatchEvent {
+  EventType type = 1;
+  string id = 2;
+  optional string error = 3;
 }
 
 message Message {

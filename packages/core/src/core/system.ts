@@ -156,6 +156,10 @@ export class ActorSystem {
       }
     } else {
       this.deadLetters.push(message);
+      // Notify all message handlers about the dead letter
+      for (const handler of this.messageHandlers) {
+        await handler(message);
+      }
     }
   }
 

@@ -1,181 +1,172 @@
-import { ActorSystem, log, Actor, Message, ActorContext } from '@bactor/core';
-import * as path from 'path';
-import * as fs from 'fs-extra';
-import { PluginManager } from '../plugin_manager';
-import { PluginMetadata } from '../types';
+import { ActorSystem, Message, PID, log } from '@bactor/core';
+import { createPluginActorFromClass } from '../adapters/plugin_adapter';
+import { CalculatorPlugin } from './calculator-simplified/src';
+import { ActorContext } from '@bactor/core';
 
-class TestActor extends Actor {
-    constructor(context: ActorContext) {
-        super(context);
-        log.info('Test actor constructed');
-    }
-
-    protected behaviors(): void {
-        log.info('Registering test actor behaviors');
-        this.addBehavior('default', async (msg: Message) => {
-            log.info('Test actor received message:', {
-                type: msg.type,
-                payload: msg.payload,
-                sender: msg.sender
-            });
-            switch (msg.type) {
-                case 'plugin.response':
-                    if (msg.payload.success) {
-                        log.info('Plugin operation succeeded:', msg.payload.data);
-                    } else {
-                        log.error('Plugin operation failed:', msg.payload.error);
-                    }
-                    break;
-                case 'calculator.result':
-                    if (msg.payload.success) {
-                        log.info('Calculation result:', {
-                            result: msg.payload.result,
-                            operation: msg.payload.operation,
-                            operands: msg.payload.operands
-                        });
-                    } else {
-                        log.error('Calculation failed:', msg.payload.error);
-                    }
-                    break;
-                default:
-                    log.info('Received unknown response:', msg);
-            }
-        });
-    }
-}
-
+/**
+ * 新设计的插件系统验证示例
+ * 
+ * 本示例展示了如何:
+ * 1. 创建Actor系统
+ * 2. 加载插件
+ * 3. 向插件发送消息
+ * 4. 处理插件的响应
+ */
 async function runPluginDemo() {
-    log.info('Starting plugin demo');
-
-    // Initialize actor system
-    const system = new ActorSystem();
-    await system.start();
-    log.info('Actor system started');
-
-    // Create plugin manager
-    const pluginsDir = path.join(__dirname, 'calculator');
-    const tempDir = path.join(__dirname, 'temp');
-    log.info('Plugin directories:', { pluginsDir, tempDir });
-
-    const pluginManager = await system.spawn({
-        producer: (context) => new PluginManager(context, {
-            pluginsDir,
-            tempDir
-        })
-    });
-    log.info('Plugin manager created with ID:', pluginManager);
+    log.info('==== 启动插件验证示例 ====');
 
     try {
-        // Install calculator plugin
-        const calculatorPluginPath = path.join(pluginsDir);
-        log.info('Installing calculator plugin from:', calculatorPluginPath);
+        // 创建Actor系统
+        const system = new ActorSystem();
+        log.info('创建了Actor系统');
 
-        // Load plugin metadata
-        const metadataPath = path.join(calculatorPluginPath, 'src', 'plugin.json');
-        log.info('Loading plugin metadata from:', metadataPath);
-        const metadata = await fs.readJson(metadataPath) as PluginMetadata;
-        log.info('Plugin metadata loaded:', metadata);
+        // 启动Actor系统
+        await system.start();
 
-        // Install plugin with metadata
-        log.info('Sending plugin install message');
-        await system.send(pluginManager, {
-            type: 'plugin.install',
-            payload: { metadata }
-        });
-
-        log.info('Calculator plugin installed successfully');
-
-        // Activate the plugin
-        log.info('Activating calculator plugin');
-        await system.send(pluginManager, {
-            type: 'plugin.activate',
-            payload: { pluginId: 'calculator' }
-        });
-        log.info('Calculator plugin activated');
-
-        // Create a test actor to receive responses
-        log.info('Creating test actor');
-        const testActor = await system.spawn({
-            producer: (context) => new TestActor(context)
-        });
-        log.info('Test actor created with ID:', testActor);
-
-        // Query plugin status
-        log.info('Querying calculator plugin status');
-        await system.send(pluginManager, {
-            type: 'plugin.query',
-            payload: { query: { id: 'calculator' } },
-            sender: testActor
-        });
-
-        // Test addition
-        log.info('Testing addition operation');
-        const addMessage = {
-            type: 'calculator.calculate',
-            payload: {
-                pluginId: 'calculator',
-                operation: 'add',
-                operands: [10, 5, 3]
-            },
-            sender: testActor
+        // 计算器插件配置
+        const calculatorConfig = {
+            precision: 2,
+            maxOperands: 5
         };
-        log.info('Sending addition message:', addMessage);
-        await system.send(pluginManager, addMessage);
 
-        // Test multiplication
-        log.info('Testing multiplication operation');
-        const mulMessage = {
-            type: 'calculator.calculate',
-            payload: {
-                pluginId: 'calculator',
-                operation: 'multiply',
-                operands: [2, 3, 4]
-            },
-            sender: testActor
-        };
-        log.info('Sending multiplication message:', mulMessage);
-        await system.send(pluginManager, mulMessage);
+        // 创建一个ActorContext作为根上下文
+        const rootContext = new ActorContext(
+            { id: 'root' },  // PID
+            system           // Actor系统
+        );
 
-        // Test division by zero (should handle error)
-        log.info('Testing division by zero (error case)');
-        const divMessage = {
-            type: 'calculator.calculate',
-            payload: {
-                pluginId: 'calculator',
-                operation: 'divide',
-                operands: [10, 0]
-            },
-            sender: testActor
-        };
-        log.info('Sending division message:', divMessage);
-        await system.send(pluginManager, divMessage);
+        // 加载计算器插件
+        log.info('正在加载计算器插件...');
+        const calculatorActor = await createPluginActorFromClass(
+            rootContext,
+            CalculatorPlugin,
+            calculatorConfig
+        );
 
-        // Wait longer for responses
-        log.info('Waiting for responses...');
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // 获取计算器PID
+        const calculatorPid = (calculatorActor as any).context.getPID();
+        log.info(`计算器插件已加载，PID: ${calculatorPid.id}`);
 
-    } catch (error) {
-        log.error('Error during plugin demo:', error instanceof Error ? error.message : String(error));
-        if (error instanceof Error && error.stack) {
-            log.error('Stack trace:', error.stack);
-        }
-    } finally {
-        // Clean up
-        log.info('Stopping actor system');
+        // 创建结果处理Actor
+        const resultHandler = await system.spawn({
+            producer: (context: ActorContext) => {
+                return {
+                    behaviors: () => {
+                        return {
+                            'calculator.result': async (message: Message) => {
+                                const result = message.payload;
+                                if (result.success) {
+                                    log.info('✅ 计算结果:', result);
+                                } else {
+                                    log.error('❌ 计算错误:', result.error);
+                                }
+                            }
+                        };
+                    }
+                };
+            }
+        });
+        log.info(`创建了结果处理器，PID: ${resultHandler.id}`);
+
+        // 执行几个测试计算
+        await testCalculations(system, calculatorPid, resultHandler);
+
+        // 等待所有消息处理完成
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        log.info('==== 插件验证示例完成 ====');
+
+        // 关闭Actor系统
         await system.stop();
-        log.info('Plugin demo completed');
+    } catch (error) {
+        log.error('插件示例运行失败:', error);
     }
 }
 
-// Run the demo
-if (require.main === module) {
-    runPluginDemo().catch(error => {
-        log.error('Demo failed:', error instanceof Error ? error.message : String(error));
-        if (error instanceof Error && error.stack) {
-            log.error('Stack trace:', error.stack);
-        }
-        process.exit(1);
+/**
+ * 执行一系列计算操作测试插件功能
+ */
+async function testCalculations(system: ActorSystem, calculatorPid: PID, sender: PID) {
+    // 测试加法
+    log.info('测试加法操作...');
+    await system.send(calculatorPid, {
+        type: 'calculator.calculate',
+        payload: {
+            operation: 'add',
+            operands: [1, 2, 3, 4, 5]
+        },
+        sender
     });
+
+    // 测试减法
+    log.info('测试减法操作...');
+    await system.send(calculatorPid, {
+        type: 'calculator.calculate',
+        payload: {
+            operation: 'subtract',
+            operands: [100, 20, 5]
+        },
+        sender
+    });
+
+    // 测试乘法
+    log.info('测试乘法操作...');
+    await system.send(calculatorPid, {
+        type: 'calculator.calculate',
+        payload: {
+            operation: 'multiply',
+            operands: [2, 3, 4]
+        },
+        sender
+    });
+
+    // 测试除法
+    log.info('测试除法操作...');
+    await system.send(calculatorPid, {
+        type: 'calculator.calculate',
+        payload: {
+            operation: 'divide',
+            operands: [100, 2, 5]
+        },
+        sender
+    });
+
+    // 测试错误情况 - 除零
+    log.info('测试错误情况: 除零...');
+    await system.send(calculatorPid, {
+        type: 'calculator.calculate',
+        payload: {
+            operation: 'divide',
+            operands: [10, 0]
+        },
+        sender
+    });
+
+    // 测试错误情况 - 操作数过多
+    log.info('测试错误情况: 操作数过多...');
+    await system.send(calculatorPid, {
+        type: 'calculator.calculate',
+        payload: {
+            operation: 'add',
+            operands: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        },
+        sender
+    });
+
+    // 测试错误情况 - 无效操作
+    log.info('测试错误情况: 无效操作...');
+    await system.send(calculatorPid, {
+        type: 'calculator.calculate',
+        payload: {
+            operation: 'power',
+            operands: [2, 3]
+        } as any,
+        sender
+    });
+}
+
+// 运行示例
+if (require.main === module) {
+    runPluginDemo().catch(console.error);
 }
 
 export { runPluginDemo }; 

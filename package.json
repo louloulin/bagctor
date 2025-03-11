@@ -3,15 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/plugin/examples/multi-loader-demo",
+    "packages/plugin/examples/multi-loader-demo/plugins/*"
   ],
   "scripts": {
     "build": "bun run build:all",
-    "build:all": "bun run build:core && bun run build:agent && bun run build:match-engine && bun run build:web",
+    "build:all": "bun run build:core && bun run build:agent && bun run build:match-engine && bun run build:web && bun run build:plugin",
     "build:core": "cd packages/core && tsc",
     "build:agent": "cd packages/agent && tsc",
     "build:match-engine": "cd packages/match-engine && tsc",
     "build:web": "cd packages/web && tsc",
+    "build:plugin": "cd packages/plugin && tsc",
     "build:vscode-chat": "cd packages/vscode-chat && bun run build",
     "dev": "bun run dev:all",
     "dev:all": "bun run dev:core && bun run dev:agent && bun run dev:match-engine && bun run dev:web && bun run dev:vscode-chat",

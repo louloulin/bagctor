@@ -29,7 +29,7 @@ export interface WorkflowContext {
 
 export class WorkflowActor extends Actor {
   private config: WorkflowConfig;
-  private context: WorkflowContext;
+  protected context: WorkflowContext;
   private pendingSteps = new Set<string>();
 
   constructor(actorContext: ActorContext, config: WorkflowConfig) {

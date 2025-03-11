@@ -15,4 +15,7 @@ export * from './bactor-agent';
 export * from './workflow-actor';
 
 // 导出工具工厂
-export * from './tool-factory'; 
+export * from './tool-factory';
+
+// 导出Mastra集成
+export * from './mastra-agent-actor'; 

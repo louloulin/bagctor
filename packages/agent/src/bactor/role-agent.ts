@@ -4,10 +4,16 @@
  * 专注于扮演特定角色的Agent实现，继承自BactorAgent
  */
 
-import { Actor, ActorContext, ActorRef, Props } from '@bactor/core';
+import { Actor, ActorContext, PID } from '@bactor/core';
 import { BactorAgent, BactorAgentConfig, AgentResponse } from './bactor-agent';
 import { Tool } from '../tools';
-import { Memory } from '../memory';
+
+// Mock Memory implementation
+interface Memory {
+    add(input: string, response: string, metadata?: Record<string, any>): Promise<void>;
+    retrieve(query: string, options?: any): Promise<any[]>;
+    clear(): Promise<void>;
+}
 
 /**
  * 角色Agent配置
@@ -41,10 +47,15 @@ export class RoleAgent extends BactorAgent {
     private enhanceSystemPrompt(): void {
         const rolePrompt = this.buildRolePrompt();
 
-        // 更新底层Agent的系统提示
+        // 更新底层Agent的系统提示 - use config-based approach instead of direct property access
         if (this.mastraAgent) {
-            const originalPrompt = this.mastraAgent.systemPrompt || "";
-            this.mastraAgent.systemPrompt = `${originalPrompt}\n\n${rolePrompt}`;
+            // Use a safer approach that doesn't access systemPrompt directly
+            const originalPrompt = (this.mastraAgent as any).config?.instructions || "";
+            // Update the config instead of directly modifying the systemPrompt
+            (this.mastraAgent as any).config = {
+                ...(this.mastraAgent as any).config,
+                instructions: `${originalPrompt}\n\n${rolePrompt}`
+            };
         }
     }
 
@@ -102,7 +113,7 @@ export class RoleAgent extends BactorAgent {
 export function createRoleAgent(
     system: any,
     config: RoleAgentConfig
-): Promise<ActorRef> {
+): Promise<PID> {
     return system.spawn({
         producer: (context: ActorContext) => new RoleAgent(context, config)
     });

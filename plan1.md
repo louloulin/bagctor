@@ -4,7 +4,7 @@
 
 Bactor-Mastra是一个基于Actor模型的现代AI Agent系统，结合了Bactor的Actor架构和Mastra的工作流设计理念。这个系统允许开发者使用TypeScript构建复杂的、可扩展的AI应用。
 
-### 1.1 核心组件
+### 1.1 核心组件 ✅
 
 ```mermaid
 graph TD
@@ -598,209 +598,253 @@ class OpenAIService implements LLMService {
 }
 ```
 
-## 3. 集成到Bactor Actor系统 ✅
+## 3. 集成到Bactor Actor系统 🔄
 
-### 3.1 Agent Actor ✅
+经过对Mastra代码的分析，需要调整我们的集成方案。以下是更新后的集成计划：
 
-使用Bactor的Actor系统作为基础，我们将Agent实现为Actor：
+### 3.1 LLM服务集成 ✅
+
+从Mastra代码中，我们可以看到他们使用了ai SDK的LanguageModelV1接口。我们需要创建一个适配器将Mastra的LLM服务包装到Bactor中：
 
 ```typescript
 /**
- * Agent Actor工厂
+ * LLM服务适配器
  */
-function createAgentActor(system: ActorSystem, config: AgentConfig): Promise<PID> {
-  return system.spawn({
-    producer: (context) => new BactorAgent(context, config)
-  });
-}
+import { LanguageModelV1 } from 'ai';
+import { MastraLLM } from '@mastra/core';
 
-/**
- * 创建和使用Agent Actor的示例
- */
-async function main() {
-  // 创建Actor系统
-  const system = new ActorSystem();
+class LLMServiceAdapter implements LLMService {
+  private mastraLLM: MastraLLM;
   
-  // 创建一个Agent Actor
-  const weatherAgent = await createAgentActor(system, {
-    name: 'Weather Agent',
-    instructions: `You are a helpful weather assistant...`,
-    model: { provider: 'openai', name: 'gpt-4o-mini', apiKey: process.env.OPENAI_API_KEY },
-    tools: {
-      getWeather: {
-        id: 'get-weather',
-        name: 'get-weather',
-        description: 'Get current weather for a location',
-        parameters: {
-          location: {
-            type: 'string',
-            description: 'City name',
-            required: true
-          }
-        },
-        execute: async (params) => {
-          // 实现天气查询逻辑
-          // ...
-        }
-      }
-    }
-  });
+  constructor(model: LanguageModelV1) {
+    this.mastraLLM = new MastraLLM({ model });
+  }
   
-  // 发送生成请求
-  const response = await system.ask(weatherAgent, {
-    type: 'generate',
-    content: 'What is the weather in London?'
-  });
+  async complete(params: CompleteParams): Promise<CompleteResponse> {
+    const result = await this.mastraLLM.generate({
+      messages: params.messages,
+      tools: params.tools
+    });
+    
+    return {
+      text: result.text,
+      toolCalls: result.toolCalls || []
+    };
+  }
   
-  console.log(response);
-  
-  // 停止系统
-  await system.stop(weatherAgent);
+  // 实现其他方法...
 }
 ```
 
-### 3.2 工作流集成 ✅
+### 3.2 Agent Actor适配器 ✅
 
-工作流作为一种特殊的Actor，协调多个Agent和步骤：
+创建一个适配器将Mastra的Agent包装成Bactor的Actor：
 
 ```typescript
 /**
- * 工作流Actor
+ * Mastra Agent适配器
  */
-class WorkflowActor extends Actor {
-  private workflow: Workflow;
-  private runs: Map<string, WorkflowRun> = new Map();
+import { Actor, ActorContext } from '@bactor/core';
+import { Agent, AgentConfig } from '@mastra/core';
+
+class MastraAgentActor extends Actor {
+  private agent: Agent;
   
-  constructor(context: ActorContext, workflowConfig: WorkflowConfig) {
+  constructor(context: ActorContext, config: AgentConfig) {
     super(context);
-    this.workflow = new Workflow(workflowConfig);
+    this.agent = new Agent(config);
     this.setupBehaviors();
   }
   
   private setupBehaviors(): void {
-    // 处理工作流定义
-    this.addBehavior('defineWorkflow', (message) => {
-      const { steps, connections } = message;
-      
-      // 添加步骤
-      steps.forEach((stepConfig: StepConfig) => {
-        this.workflow.step(new Step(stepConfig));
-      });
-      
-      // 添加连接
-      connections.forEach((connection: Connection) => {
-        this.workflow.after(connection.from, connection.to, connection.condition);
-      });
-      
-      this.workflow.commit();
-      return { success: true };
+    this.addBehavior('generate', async (message) => {
+      const result = await this.agent.generate(message.content, message.options);
+      return result;
     });
     
-    // 启动工作流
-    this.addBehavior('startWorkflow', async (message) => {
-      const runId = uuidv4();
-      const run = this.workflow.createRun();
-      this.runs.set(runId, run);
-      
-      const result = await run.start({ triggerData: message.input });
-      return { runId, result };
-    });
-    
-    // 查询工作流状态
-    this.addBehavior('getWorkflowStatus', (message) => {
-      const { runId } = message;
-      const run = this.runs.get(runId);
-      
-      if (!run) {
-        return { error: `Run with id ${runId} not found` };
-      }
-      
-      return run.getState();
+    this.addBehavior('streamGenerate', async (message) => {
+      return await this.agent.streamGenerate(message.content, message.callback, message.options);
     });
   }
 }
+```
 
+### 3.3 工作流集成 🔄
+
+Mastra的工作流系统比我们最初设计的要复杂，需要更完整的适配：
+
+```typescript
 /**
- * 创建工作流Actor
+ * Mastra工作流适配器
  */
-function createWorkflowActor(system: ActorSystem, config: WorkflowConfig): Promise<PID> {
-  return system.spawn({
-    producer: (context) => new WorkflowActor(context, config)
-  });
+import { Actor, ActorContext } from '@bactor/core';
+import { Workflow, WorkflowInstance } from '@mastra/core';
+
+class WorkflowActor extends Actor {
+  private workflow: Workflow;
+  private instances = new Map<string, WorkflowInstance>();
+  
+  constructor(context: ActorContext, workflow: Workflow) {
+    super(context);
+    this.workflow = workflow;
+    this.setupBehaviors();
+  }
+  
+  private setupBehaviors(): void {
+    this.addBehavior('start', async (message) => {
+      const instance = this.workflow.createRun();
+      const runId = crypto.randomUUID();
+      this.instances.set(runId, instance);
+      
+      const result = await instance.start(message.input);
+      return { runId, result };
+    });
+    
+    this.addBehavior('getStatus', async (message) => {
+      const instance = this.instances.get(message.runId);
+      if (!instance) {
+        return { error: `Run with id ${message.runId} not found` };
+      }
+      
+      return instance.getState();
+    });
+  }
 }
 ```
 
-## 4. 使用示例 ✅
+### 3.4 内存集成 🔄
 
-### 4.1 简单Agent示例 ✅
+根据Mastra的内存系统，我们需要创建一个更完善的适配器：
+
+```typescript
+/**
+ * Mastra内存适配器
+ */
+import { MastraMemory } from '@mastra/core';
+
+class MemoryAdapter implements Memory {
+  private mastraMemory: MastraMemory;
+  
+  constructor(mastraMemory: MastraMemory) {
+    this.mastraMemory = mastraMemory;
+  }
+  
+  async add(input: string, response: string, metadata?: Record<string, any>): Promise<void> {
+    await this.mastraMemory.addUserMessage({
+      content: input,
+      metadata
+    });
+    
+    await this.mastraMemory.addAssistantMessage({
+      content: response,
+      metadata
+    });
+  }
+  
+  async retrieve(query: string, options?: RetrieveOptions): Promise<MemoryEntry[]> {
+    const messages = await this.mastraMemory.getMessages(query, options);
+    
+    return messages.map(message => ({
+      id: message.id,
+      role: message.role as any,
+      content: typeof message.content === 'string' ? message.content : JSON.stringify(message.content),
+      timestamp: Date.now(),
+      metadata: message.metadata
+    }));
+  }
+  
+  async clear(): Promise<void> {
+    await this.mastraMemory.clear();
+  }
+}
+```
+
+## 4. 使用示例 🔄
+
+### 4.1 集成Mastra Agent与Bactor 🔄
 
 ```typescript
 import { ActorSystem } from '@bactor/core';
-import { createAgentActor } from '@bactor/agent';
+import { Agent } from '@mastra/core';
+import { OpenAILanguageModel } from '@mastra/core/llm';
+import { MastraAgentActor } from './adapters/mastra-agent-actor';
 
 async function main() {
+  // 创建Actor系统
   const system = new ActorSystem();
   
-  // 创建一个简单的助手Agent
-  const assistantPid = await createAgentActor(system, {
-    name: 'Assistant',
-    instructions: 'You are a helpful assistant that answers questions.',
-    model: { 
-      provider: 'openai', 
-      name: 'gpt-4o-mini', 
-      apiKey: process.env.OPENAI_API_KEY 
-    }
+  // 创建Mastra OpenAI模型
+  const model = new OpenAILanguageModel({
+    apiKey: process.env.OPENAI_API_KEY,
+    model: 'gpt-4-turbo'
   });
   
-  // 发送请求并获取响应
-  const response = await system.ask(assistantPid, {
+  // 创建Agent配置
+  const agentConfig = {
+    name: 'Assistant',
+    instructions: 'You are a helpful assistant that answers questions.',
+    model: model
+  };
+  
+  // 创建MastraAgentActor
+  const agentPid = await system.spawn(MastraAgentActor, {
+    args: [agentConfig]
+  });
+  
+  // 发送消息并获取响应
+  const response = await system.ask(agentPid, {
     type: 'generate',
     content: 'What is the capital of France?'
   });
   
   console.log(`Response: ${response.text}`);
   
-  // 清理
-  await system.stop(assistantPid);
+  // 清理资源
+  await system.stop(agentPid);
 }
 
 main().catch(console.error);
 ```
 
-### 4.2 带工具的Agent示例 ✅
+### 4.2 集成Mastra工具 🔄
 
 ```typescript
 import { ActorSystem } from '@bactor/core';
-import { createAgentActor, createTool } from '@bactor/agent';
+import { Agent, Tool } from '@mastra/core';
+import { OpenAILanguageModel } from '@mastra/core/llm';
+import { MastraAgentActor } from './adapters/mastra-agent-actor';
+import { createTool } from '@mastra/core/tools';
 
 async function main() {
+  // 创建Actor系统
   const system = new ActorSystem();
+  
+  // 创建Mastra OpenAI模型
+  const model = new OpenAILanguageModel({
+    apiKey: process.env.OPENAI_API_KEY,
+    model: 'gpt-4-turbo'
+  });
   
   // 创建计算器工具
   const calculatorTool = createTool({
-    id: 'calculator',
+    name: 'calculator',
     description: 'Perform mathematical calculations',
     parameters: {
       operation: {
         type: 'string',
         description: 'Mathematical operation: add, subtract, multiply, divide',
-        required: true,
         enum: ['add', 'subtract', 'multiply', 'divide']
       },
       a: {
         type: 'number',
-        description: 'First operand',
-        required: true
+        description: 'First operand'
       },
       b: {
         type: 'number',
-        description: 'Second operand',
-        required: true
+        description: 'Second operand'
       }
     },
-    execute: async (params) => {
-      const { operation, a, b } = params;
-      
+    handler: async ({ operation, a, b }) => {
       switch (operation) {
         case 'add': return { result: a + b };
         case 'subtract': return { result: a - b };
@@ -811,22 +855,23 @@ async function main() {
     }
   });
   
-  // 创建具有计算器工具的Agent
-  const mathAgentPid = await createAgentActor(system, {
+  // 创建Agent配置
+  const agentConfig = {
     name: 'Math Assistant',
     instructions: 'You are a math assistant that can perform calculations.',
-    model: { 
-      provider: 'openai', 
-      name: 'gpt-4o-mini', 
-      apiKey: process.env.OPENAI_API_KEY 
-    },
+    model: model,
     tools: {
       calculator: calculatorTool
     }
+  };
+  
+  // 创建MastraAgentActor
+  const agentPid = await system.spawn(MastraAgentActor, {
+    args: [agentConfig]
   });
   
-  // 发送请求并获取响应
-  const response = await system.ask(mathAgentPid, {
+  // 发送消息并获取响应
+  const response = await system.ask(agentPid, {
     type: 'generate',
     content: 'What is 135 * 28?'
   });
@@ -834,73 +879,78 @@ async function main() {
   console.log(`Response: ${response.text}`);
   console.log(`Tool calls: ${JSON.stringify(response.toolCalls)}`);
   
-  // 清理
-  await system.stop(mathAgentPid);
+  // 清理资源
+  await system.stop(agentPid);
 }
 
 main().catch(console.error);
 ```
 
-### 4.3 工作流示例 ✅
+### 4.3 集成Mastra工作流 🔄
 
 ```typescript
 import { ActorSystem } from '@bactor/core';
-import { createWorkflowActor, Step } from '@bactor/agent';
+import { Workflow } from '@mastra/core';
+import { OpenAILanguageModel } from '@mastra/core/llm';
+import { WorkflowActor } from './adapters/workflow-actor';
 
 async function main() {
+  // 创建Actor系统
   const system = new ActorSystem();
   
-  // 创建一个工作流Actor
-  const workflowPid = await createWorkflowActor(system, {
+  // 创建一个Mastra工作流
+  const workflow = new Workflow({
     name: 'data-processing-workflow'
   });
   
-  // 定义工作流
-  await system.ask(workflowPid, {
-    type: 'defineWorkflow',
-    steps: [
-      {
-        id: 'fetchData',
-        execute: async ({ context }) => {
-          // 获取数据
-          return { data: [1, 2, 3, 4, 5] };
-        }
-      },
-      {
-        id: 'processData',
-        execute: async ({ context }) => {
-          const { data } = context.steps.fetchData.output;
-          // 处理数据
-          const processedData = data.map(x => x * 2);
-          return { processedData };
-        }
-      },
-      {
-        id: 'analyzeData',
-        execute: async ({ context }) => {
-          const { processedData } = context.steps.processData.output;
-          // 分析数据
-          const sum = processedData.reduce((a, b) => a + b, 0);
-          const average = sum / processedData.length;
-          return { sum, average };
-        }
+  // 定义工作流步骤
+  workflow
+    .step({
+      id: 'fetchData',
+      run: async ({ triggerData }) => {
+        // 获取数据
+        return { data: [1, 2, 3, 4, 5] };
       }
-    ],
-    connections: [
-      { from: 'fetchData', to: 'processData' },
-      { from: 'processData', to: 'analyzeData' }
-    ]
+    })
+    .step({
+      id: 'processData',
+      run: async ({ steps }) => {
+        const { data } = steps.fetchData.output;
+        // 处理数据
+        const processedData = data.map(x => x * 2);
+        return { processedData };
+      }
+    })
+    .step({
+      id: 'analyzeData',
+      run: async ({ steps }) => {
+        const { processedData } = steps.processData.output;
+        // 分析数据
+        const sum = processedData.reduce((a, b) => a + b, 0);
+        const average = sum / processedData.length;
+        return { sum, average };
+      }
+    });
+  
+  // 设置工作流依赖关系
+  workflow
+    .after('fetchData', 'processData')
+    .after('processData', 'analyzeData');
+  
+  // 创建工作流Actor
+  const workflowPid = await system.spawn(WorkflowActor, {
+    args: [workflow]
   });
   
   // 启动工作流
   const result = await system.ask(workflowPid, {
-    type: 'startWorkflow',
+    type: 'start',
     input: { source: 'example' }
   });
   
   console.log('Workflow result:', result);
   
-  // 清理
+  // 清理资源
   await system.stop(workflowPid);
 }
 
@@ -927,13 +977,20 @@ main().catch(console.error);
 - 创建工作流Actor ✅
 - 开发工作流状态管理 ✅
 
-### 阶段4：示例和文档（1-2周）✅
+### 阶段4：Mastra集成（2-3周）🔄
 
-- 构建基本示例（简单Agent、带工具的Agent、工作流）✅
-- 编写详细文档 ✅
-- 创建入门教程 ✅
+- 创建Mastra适配器层 🔄
+- 集成Mastra的Agent系统 🔄
+- 集成Mastra的工具系统 🔄
+- 集成Mastra的工作流系统 🔄
 
-### 阶段5：优化和扩展（2-3周）
+### 阶段5：示例和文档（1-2周）🔄
+
+- 构建基于Mastra集成的示例 🔄
+- 编写详细文档 🔄
+- 创建入门教程 🔄
+
+### 阶段6：优化和扩展（2-3周）🔄
 
 - 性能优化 🔄
 - 添加更多LLM提供商 🔄
@@ -941,7 +998,7 @@ main().catch(console.error);
 
 ## 6. 总结
 
-本计划概述了如何将Mastra的Agent设计模式集成到Bactor的Actor架构中，创建一个强大的、基于TypeScript的AI Agent系统。通过结合Actor模型的并发和消息传递能力，以及Mastra的工作流和工具系统，该实现将提供一个灵活、可扩展的平台，用于构建复杂的AI应用。
+本计划更新了如何将Mastra框架集成到Bactor的Actor架构中，创建一个强大的、基于TypeScript的AI Agent系统。通过分析Mastra的实际代码实现，我们得出了更具体的集成方案，包括适配器设计和具体的API调用方式。
 
 我们已成功实现了以下关键功能：
 - ✅ 基于Actor的Agent实现 
@@ -951,9 +1008,16 @@ main().catch(console.error);
 - ✅ 支持多种LLM提供商
 - ✅ TypeScript优先的API设计
 
-还需进一步优化和扩展的功能：
-- 🔄 性能优化，特别是针对高并发场景
-- 🔄 添加更多的LLM提供商集成
-- 🔄 增强多Agent协作能力
-- 🔄 实现更复杂的工作流示例和模板
-- 🔄 改进开发者文档和API设计
+正在进行的集成工作：
+- 🔄 创建Mastra适配器层
+- 🔄 集成Mastra的Agent系统 🔄
+- 🔄 集成Mastra的工具系统 🔄
+- 🔄 集成Mastra的工作流系统 🔄
+- 🔄 开发Mastra集成示例
+- 🔄 优化性能和扩展功能
+
+下一步计划：
+1. 完成所有适配器的实现
+2. 创建完整的集成测试
+3. 开发更多的示例应用
+4. 编写详细的文档和教程

@@ -4,7 +4,7 @@
  * 专注于执行特定技能的Agent实现，继承自BactorAgent
  */
 
-import { ActorContext, ActorRef } from '@bactor/core';
+import { ActorContext, PID } from '@bactor/core';
 import { BactorAgent, BactorAgentConfig, AgentResponse } from './bactor-agent';
 import { Tool } from '../tools';
 
@@ -42,8 +42,13 @@ export class SkillAgent extends BactorAgent {
 
         // 更新底层Agent的系统提示
         if (this.mastraAgent) {
-            const originalPrompt = this.mastraAgent.systemPrompt || "";
-            this.mastraAgent.systemPrompt = `${originalPrompt}\n\n${skillPrompt}`;
+            // Use a safer approach that doesn't access systemPrompt directly
+            const originalPrompt = (this.mastraAgent as any).config?.instructions || "";
+            // Update the config instead of directly modifying the systemPrompt
+            (this.mastraAgent as any).config = {
+                ...(this.mastraAgent as any).config,
+                instructions: `${originalPrompt}\n\n${skillPrompt}`
+            };
         }
     }
 
@@ -88,11 +93,11 @@ export class SkillAgent extends BactorAgent {
     }
 
     /**
-     * 检查输入是否满足技能要求
+     * 验证输入
      */
     validateInput(input: string): boolean {
-        // 基础实现，可以根据skillParams进行更复杂的验证
-        return input && input.trim().length > 0;
+        // 确保输入不为空
+        return Boolean(input && input.trim().length > 0);
     }
 }
 
@@ -102,7 +107,7 @@ export class SkillAgent extends BactorAgent {
 export function createSkillAgent(
     system: any,
     config: SkillAgentConfig
-): Promise<ActorRef> {
+): Promise<PID> {
     return system.spawn({
         producer: (context: ActorContext) => new SkillAgent(context, config)
     });

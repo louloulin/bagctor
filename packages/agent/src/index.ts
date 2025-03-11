@@ -17,7 +17,6 @@ export * from './action';
 export * from './hooks';
 export * from './integration';
 export * from './mastra';
-export * from './run';
 export * from './storage';
 export * from './vector';
 
@@ -31,12 +30,24 @@ export * from './tts';
 export * from './bundler';
 export * from './deployer';
 
-// Export warnings
-export * from './base.warning';
+// Export warnings - re-export explicitly to avoid ambiguity
+import {
+    MastraWarning,
+    WarningLevel,
+    // Don't re-export MastraBase which is already exported from './base'
+} from './base.warning';
+export { MastraWarning, WarningLevel };
 
 // Export Bactor integration components
 export * from './bactor/agent-actor';
 export * from './bactor/agent-system';
 export * from './bactor/bactor-agent';
-export * from './bactor/workflow-actor';
+// Re-export explicitly from workflow-actor to avoid ambiguity with './workflows'
+import {
+    WorkflowActor,
+    WorkflowConfig,
+    WorkflowStep
+    // Don't re-export WorkflowContext which is already exported from './workflows'
+} from './bactor/workflow-actor';
+export { WorkflowActor, WorkflowConfig, WorkflowStep };
 export * from './bactor/tool-factory';

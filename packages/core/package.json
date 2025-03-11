@@ -55,5 +55,8 @@
     "@types/uuid": "^9.0.7",
     "bun-types": "latest",
     "typescript": "^5.3.3"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
   }
 }

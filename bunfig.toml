@@ -1,0 +1,19 @@
+[workspaces]
+enable = true
+
+[install]
+exact = true
+lockfile = true
+peer = true
+
+[build]
+minify = true
+sourcemap = true
+external = ["@grpc/*", "pino", "fastq"]
+
+[test]
+coverage = true
+
+[dev]
+port = 3000
+open = false

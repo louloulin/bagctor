@@ -5,9 +5,10 @@
   "version": "0.0.1",
   "publisher": "bactor",
   "engines": {
-    "vscode": "^1.96.4"
+    "vscode": "^1.96.4",
+    "bun": ">=1.0.0"
   },
-  "type": "commonjs",
+  "type": "module",
   "categories": [
     "Other"
   ],

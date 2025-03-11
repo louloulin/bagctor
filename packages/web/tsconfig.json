@@ -3,15 +3,20 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "module": "esnext",
-    "target": "esnext",
-    "types": ["bun-types"]
+    "module": "NodeNext",
+    "target": "ES2022",
+    "types": [
+      "bun-types"
+    ],
+    "moduleResolution": "NodeNext"
   },
   "include": [
     "src/**/*",
     "src/middleware/**/*"
   ],
   "references": [
-    { "path": "../core" }
+    {
+      "path": "../core"
+    }
   ]
-} 
+}

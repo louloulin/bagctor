@@ -1,29 +1,86 @@
 {
   "name": "@bactor/agent",
   "version": "0.1.0",
-  "description": "MetaGPT-style multi-agent system implementation using Bactor",
+  "description": "Bactor Agent System - AI Agent framework based on Mastra",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "type": "module",
   "scripts": {
-    "build": "rimraf tsconfig.tsbuildinfo && tsc",
-    "test": "bun test",
+    "build": "bun run build:tsc && bun run build:bundle",
+    "dev": "bun run --watch src/index.ts",
+    "test": "jest",
+    "lint": "eslint .",
     "test:llm": "bun test src/tests/llm_*.test.ts",
     "test:watch": "bun test --watch",
     "clean": "rimraf dist",
     "example:agent": "bun run src/examples/agent_demo.ts",
     "example:bus": "bun run src/examples/bus_message_demo.ts",
-    "example:llm": "bun run src/examples/llm_demo.ts"
+    "example:llm": "bun run src/examples/llm_demo.ts",
+    "build:tsc": "tsc",
+    "build:bundle": "bun build src/index.ts --outdir=dist --target=node --format=cjs"
   },
   "dependencies": {
+    "nanoid": "^5.0.4",
+    "openai": "^4.24.1",
     "@bactor/core": "workspace:*",
-    "ai": "^4.1.0",
-    "qwen-ai-provider": "^0.1.0"
+    "qwen-ai-provider": "^0.1.0",
+    "@libsql/client": "^0.14.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.53.0",
+    "@opentelemetry/core": "^1.30.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.55.0",
+    "@opentelemetry/otlp-exporter-base": "^0.57.1",
+    "@opentelemetry/otlp-transformer": "^0.57.1",
+    "@opentelemetry/resources": "^1.28.0",
+    "@opentelemetry/sdk-metrics": "^1.28.0",
+    "@opentelemetry/sdk-node": "^0.55.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.1",
+    "@opentelemetry/sdk-trace-node": "^1.28.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0",
+    "ai": "^4.1.41",
+    "cohere-ai": "^7.15.4",
+    "date-fns": "^3.0.5",
+    "dotenv": "^16.4.7",
+    "fastembed": "^1.14.1",
+    "json-schema": "^0.4.0",
+    "node_modules-path": "^2.0.8",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "radash": "^12.1.0",
+    "sift": "^17.1.3",
+    "xstate": "^5.19.0",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/jest": "^29.5.11",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
     "bun-types": "latest",
     "rimraf": "^5.0.0",
-    "typescript": "^5.0.0"
+    "@ai-sdk/openai": "^1.1.12",
+    "@microsoft/api-extractor": "^7.49.2",
+    "@size-limit/preset-small-lib": "^11.1.4",
+    "@types/babel__core": "^7.20.5",
+    "@types/json-schema": "^7.0.15",
+    "@types/lodash-es": "^4.17.12",
+    "@types/node": "^22.13.1",
+    "@types/pino": "^7.0.5",
+    "@types/qs": "^6.9.15",
+    "eslint": "^9.20.1",
+    "rollup": "^4.30.1",
+    "size-limit": "^11.1.4",
+    "tsup": "^8.3.6",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  },
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.0.0"
+  },
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.ts"
+    }
   }
 }

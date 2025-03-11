@@ -27,5 +27,8 @@
     "autocannon": "^8.0.0",
     "bun-types": "latest",
     "typescript": "^5.3.3"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
   }
 }

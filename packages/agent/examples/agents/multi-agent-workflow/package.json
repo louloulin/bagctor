@@ -1,0 +1,15 @@
+{
+  "name": "examples-multi-agent-workflow",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "pnpx tsx index.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "latest",
+    "@ai-sdk/anthropic": "latest",
+    "@bactor/agent": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "version": "0.0.1"
+}

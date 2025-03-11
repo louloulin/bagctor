@@ -3,9 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*",
-    "packages/plugin/examples/multi-loader-demo",
-    "packages/plugin/examples/multi-loader-demo/plugins/*"
+    "packages/*"
   ],
   "scripts": {
     "build": "bun run build:all",
@@ -41,7 +39,13 @@
     "example:web": "bun run --cwd packages/web example:basic",
     "example:web:middleware": "bun run --cwd packages/web example:middleware",
     "docs": "typedoc",
-    "docs:watch": "typedoc --watch"
+    "docs:watch": "typedoc --watch",
+    "bun-migrate": "find packages -name \"package.json\" -not -path \"*/node_modules/*\" -exec bash -c \"cd \\$(dirname {}) && echo \\\"Migrating: \\$(dirname {})\\\" && jq \\\".type = \\\\\\\"module\\\\\\\" | .engines.bun = \\\\\\\">=1.0.0\\\\\\\"\\\" package.json > package.json.new && mv package.json.new package.json && bun install\" \\;",
+    "fixup-tsconfig": "find packages -name \"tsconfig.json\" -not -path \"*/node_modules/*\" -exec bash -c \"cd \\$(dirname {}) && echo \\\"Updating TSConfig: \\$(dirname {})\\\" && jq \\\".compilerOptions.module = \\\\\\\"NodeNext\\\\\\\" | .compilerOptions.moduleResolution = \\\\\\\"NodeNext\\\\\\\" | .compilerOptions.target = \\\\\\\"ES2022\\\\\\\"\\\" tsconfig.json > tsconfig.json.new && mv tsconfig.json.new tsconfig.json\" \\;",
+    "bun-migrate-cjs": "find packages -name \"package.json\" -not -path \"*/node_modules/*\" -exec bash -c \"cd \\$(dirname {}) && echo \\\"Migrating CJS: \\$(dirname {})\\\" && jq \\\"del(.type) | .engines.bun = \\\\\\\">=1.0.0\\\\\\\" | .exports[\\\\\\\".\\\\\\\"] = {\\\\\\\"require\\\\\\\": \\\\\\\"./dist/index.js\\\\\\\", \\\\\\\"import\\\\\\\": \\\\\\\"./dist/index.mjs\\\\\\\", \\\\\\\"types\\\\\\\": \\\\\\\"./dist/index.d.ts\\\\\\\"}\\\" package.json > package.json.new && mv package.json.new package.json && bun install\" \\;",
+    "fixup-tsconfig-cjs": "find packages -name \"tsconfig.json\" -not -path \"*/node_modules/*\" -exec bash -c \"cd \\$(dirname {}) && echo \\\"Updating TSConfig to CJS: \\$(dirname {})\\\" && jq \\\".compilerOptions.module = \\\\\\\"CommonJS\\\\\\\" | .compilerOptions.moduleResolution = \\\\\\\"Node\\\\\\\" | .compilerOptions.target = \\\\\\\"ES2020\\\\\\\"\\\" tsconfig.json > tsconfig.json.new && mv tsconfig.json.new tsconfig.json\" \\;",
+    "fixup-build-scripts": "find packages -name \"package.json\" -not -path \"*/node_modules/*\" -exec bash -c \"cd \\$(dirname {}) && echo \\\"Updating build scripts to CJS: \\$(dirname {})\\\" && jq \\\".scripts[\\\\\\\"build:bundle\\\\\\\"] = \\\\\\\"bun build src/index.ts --outdir=dist --target=node --format=cjs\\\\\\\"\\\" package.json > package.json.new && mv package.json.new package.json\" \\;",
+    "migrate-to-bun-cjs": "bun run bun-migrate-cjs && bun run fixup-tsconfig-cjs && bun run fixup-build-scripts && bun install"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

@@ -1,19 +1,22 @@
 {
-    "extends": "../../../../../tsconfig.json",
-    "compilerOptions": {
-        "outDir": "./dist",
-        "rootDir": "./src",
-        "composite": true,
-        "types": [
-            "bun-types"
-        ]
-    },
-    "include": [
-        "src/**/*"
+  "extends": "../../../../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true,
+    "types": [
+      "bun-types"
     ],
-    "references": [
-        {
-            "path": "../../../../../packages/core"
-        }
-    ]
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022"
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "references": [
+    {
+      "path": "../../../../../packages/core"
+    }
+  ]
 }

@@ -1,5 +1,5 @@
 import { ActorSystem, Props, PID } from '@bactor/core';
-import { AgentConfig } from './types';
+import { AgentConfig, AgentContext } from './types';
 import { BaseAgent } from './base_agent';
 
 export class AgentSystem {
@@ -15,9 +15,20 @@ export class AgentSystem {
     AgentClass: new (...args: any[]) => T,
     config: AgentConfig
   ): Promise<PID> {
+    // Extract context if it exists in the config
+    const { context, ...cleanConfig } = config as any;
+
     const props: Props = {
       actorClass: AgentClass,
-      actorContext: { config }
+      actorContext: {
+        config: cleanConfig,
+        memory: {
+          shortTerm: new Map(),
+          longTerm: new Map()
+        },
+        // Add task context if provided
+        ...(context ? { task: context.task } : {})
+      }
     };
 
     const pid = await this.system.spawn(props);
@@ -29,8 +40,12 @@ export class AgentSystem {
     return this.agents.get(role);
   }
 
+  async send(target: PID, message: any): Promise<void> {
+    await this.system.send(target, message);
+  }
+
   async stopAgent(role: string): Promise<void> {
-    const pid = this.agents.get(role);
+    const pid = await this.getAgent(role);
     if (pid) {
       await this.system.stop(pid);
       this.agents.delete(role);
@@ -38,9 +53,9 @@ export class AgentSystem {
   }
 
   async stopAll(): Promise<void> {
-    for (const [role, pid] of this.agents) {
-      await this.system.stop(pid);
-    }
+    await Promise.all(
+      Array.from(this.agents.values()).map(pid => this.system.stop(pid))
+    );
     this.agents.clear();
   }
 

@@ -8,12 +8,17 @@
   "scripts": {
     "build": "rimraf tsconfig.tsbuildinfo && tsc",
     "test": "bun test",
+    "test:llm": "bun test src/tests/llm_*.test.ts",
+    "test:watch": "bun test --watch",
     "clean": "rimraf dist",
     "example:agent": "bun run src/examples/agent_demo.ts",
-    "example:bus": "bun run src/examples/bus_message_demo.ts"
+    "example:bus": "bun run src/examples/bus_message_demo.ts",
+    "example:llm": "bun run src/examples/llm_demo.ts"
   },
   "dependencies": {
-    "@bactor/core": "workspace:*"
+    "@bactor/core": "workspace:*",
+    "ai": "^4.1.0",
+    "qwen-ai-provider": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

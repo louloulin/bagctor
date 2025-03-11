@@ -21,3 +21,6 @@ mailbox的队列使用fastq实现，不要更改
 ### agent
 * 底层协议就是基于bactor实现，这个最近基础的实现
 * class,method添加对应注释
+
+
+@README.md 按照整个计划继续实现ai agent功能，同时增加相关的单元测试，完成后 更新 @README.md 文档标记完的功能（ai集成统一使用vercel ai）

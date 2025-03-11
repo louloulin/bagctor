@@ -1,5 +1,6 @@
 import { Message } from '@bactor/core';
 import { AgentConfig } from '../types';
+import { Plan } from '../agents/planner';
 
 export interface AgentMessage extends Message {
   timestamp: number;
@@ -45,7 +46,7 @@ export interface ProductManagerConfig extends AgentConfig {
   };
 }
 
-export type ActionStatus = 
+export type ActionStatus =
   | 'PENDING'
   | 'IN_PROGRESS'
   | 'BLOCKED'
@@ -70,7 +71,7 @@ export interface Action {
   error?: Error;
 }
 
-export type ActionType = 
+export type ActionType =
   | 'ANALYZE_REQUIREMENT'
   | 'CREATE_USER_STORY'
   | 'DESIGN_ARCHITECTURE'
@@ -80,7 +81,12 @@ export type ActionType =
   | 'REVIEW_CODE'
   | 'UPDATE_DOCUMENT'
   | 'TRACK_PROGRESS'
-  | 'MANAGE_RISK';
+  | 'MANAGE_RISK'
+  | 'PROCESS_MESSAGE'
+  | 'DELEGATE_TASK'
+  | 'RETRIEVE_DOCS'
+  | 'CREATE_PLAN'
+  | 'EXECUTE_PLAN';
 
 export interface RequirementAnalysisAction extends Action {
   type: 'ANALYZE_REQUIREMENT';
@@ -172,4 +178,22 @@ export interface APIDesignAction extends Action {
     requirements: string[];
   };
   output?: APISpec[];
+}
+
+export interface CreatePlanAction extends Action {
+  type: 'CREATE_PLAN';
+  input: {
+    tasks: Action[];
+    dependencies?: Map<string, string[]>;
+    priority?: Priority;
+  };
+  output?: Plan;
+}
+
+export interface ExecutePlanAction extends Action {
+  type: 'EXECUTE_PLAN';
+  input: {
+    planId: string;
+  };
+  output?: Plan;
 } 

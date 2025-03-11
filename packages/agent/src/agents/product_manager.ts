@@ -1,7 +1,7 @@
 import { RoleAgent } from './role_agent';
 import { ActorContext } from '@bactor/core';
 import { AgentMessage, AgentConfig, isTaskPayload } from '../types';
-import { 
+import {
   Action,
   RequirementAnalysisAction,
   UserStoryCreationAction,
@@ -35,6 +35,8 @@ export class ProductManager extends RoleAgent {
         return await this.updateRequirements(data);
       case 'PRIORITIZE_STORIES':
         return await this.prioritizeStories(data);
+      case 'ANALYZE_MARKET':
+        return await this.analyzeMarket(data);
       default:
         throw new Error(`Unknown coordination action: ${action}`);
     }
@@ -42,8 +44,11 @@ export class ProductManager extends RoleAgent {
 
   private async handleRequirementAnalysis(action: RequirementAnalysisAction): Promise<RequirementAnalysis> {
     try {
-      // Analyze requirements based on input
-      const { rawRequirement, context, constraints } = action.input;
+      if (!action.metadata) {
+        throw new Error('Invalid requirement analysis request: missing metadata');
+      }
+
+      const { rawRequirement, context, constraints } = action.metadata;
 
       // Perform market analysis
       const marketAnalysis = await this.performMarketAnalysis(rawRequirement);
@@ -52,7 +57,7 @@ export class ProductManager extends RoleAgent {
       const userStories = await this.createInitialUserStories(rawRequirement, context);
 
       // Analyze feasibility
-      const feasibilityAnalysis = await this.analyzeFeasibility(userStories, constraints);
+      const feasibilityAnalysis = await this.analyzeFeasibility(userStories, constraints || []);
 
       const analysis: RequirementAnalysis = {
         userStories,
@@ -60,41 +65,35 @@ export class ProductManager extends RoleAgent {
         feasibilityAnalysis
       };
 
-      action.status = 'COMPLETED';
-      action.output = analysis;
-
       return analysis;
 
     } catch (error) {
-      action.status = 'FAILED';
       if (error instanceof Error) {
-        action.error = error;
-      } else {
-        action.error = new Error(String(error));
+        throw error;
       }
-      throw action.error;
+      throw new Error(String(error));
     }
   }
 
   private async handleUserStoryCreation(action: UserStoryCreationAction): Promise<UserStory[]> {
     try {
-      // Create user stories based on requirement analysis
-      const { requirement, scope } = action.input;
+      if (!action.metadata) {
+        throw new Error('Invalid user story creation request: missing metadata');
+      }
+
+      const { requirement, scope } = action.metadata;
+      if (!requirement) {
+        throw new Error('Invalid user story creation request: missing requirement');
+      }
+
       const userStories = await this.generateUserStories(requirement, scope);
-
-      action.status = 'COMPLETED';
-      action.output = userStories;
-
       return userStories;
 
     } catch (error) {
-      action.status = 'FAILED';
       if (error instanceof Error) {
-        action.error = error;
-      } else {
-        action.error = new Error(String(error));
+        throw error;
       }
-      throw action.error;
+      throw new Error(String(error));
     }
   }
 
@@ -152,5 +151,33 @@ export class ProductManager extends RoleAgent {
       const priorityOrder = { high: 0, medium: 1, low: 2 };
       return priorityOrder[a.priority] - priorityOrder[b.priority];
     });
+  }
+
+  private async analyzeMarket(data: any): Promise<any> {
+    if (!data.market || !data.competitors || !data.targetUsers) {
+      throw new Error('Invalid market analysis request: missing required fields');
+    }
+
+    return {
+      analysis: {
+        marketSize: 'Large',
+        growthRate: '15%',
+        competitors: data.competitors.map((c: string) => ({
+          name: c,
+          strengths: ['Feature A', 'Feature B'],
+          weaknesses: ['Weakness X', 'Weakness Y']
+        })),
+        targetUsers: data.targetUsers.map((u: string) => ({
+          segment: u,
+          needs: ['Need 1', 'Need 2'],
+          painPoints: ['Pain 1', 'Pain 2']
+        }))
+      },
+      recommendations: [
+        'Focus on unique value proposition',
+        'Target underserved segments',
+        'Differentiate through innovation'
+      ]
+    };
   }
 } 

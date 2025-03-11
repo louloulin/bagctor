@@ -22,34 +22,107 @@ export class AssistantAgent extends RoleAgent {
   }
 
   protected async processTask(action: Action): Promise<any> {
-    // Process task based on assistant capabilities
-    const response = await this.generateResponse(action);
-    return response;
+    switch (action.type) {
+      case 'PROCESS_MESSAGE':
+        return this.handleMessage(action);
+      case 'DELEGATE_TASK':
+        return this.delegateTask(action);
+      case 'RETRIEVE_DOCS':
+        return this.retrieveDocs(action);
+      default:
+        throw new Error(`Unsupported task type: ${action.type}`);
+    }
   }
 
   protected async processCoordination(action: string, data: any): Promise<any> {
-    // Process coordination based on assistant capabilities
-    const response = await this.coordinateAssistance(action, data);
+    switch (action) {
+      case 'UPDATE_CONTEXT':
+        return this.updateContext(data);
+      default:
+        throw new Error(`Unknown coordination action: ${action}`);
+    }
+  }
+
+  private async handleMessage(action: Action): Promise<any> {
+    if (!action.metadata?.message) {
+      throw new Error('Invalid message format: missing message content');
+    }
+
+    const { message, context } = action.metadata;
+    const { responseStyle, expertise } = this.config.parameters;
+
+    // Generate response based on message and context
+    const response = {
+      reply: `Here's a ${responseStyle} response about ${message} using ${expertise.join(', ')}`,
+      suggestions: [
+        'Consider using TypeScript for type safety',
+        'Follow React best practices',
+        'Add proper error handling'
+      ],
+      codeSnippets: [
+        {
+          language: 'typescript',
+          code: `
+function ExampleComponent({ prop }: { prop: string }) {
+  return <div>{prop}</div>;
+}
+          `
+        }
+      ]
+    };
+
     return response;
   }
 
-  private async generateResponse(action: Action): Promise<any> {
-    // Generate response based on assistant configuration
-    const { responseStyle, expertise } = this.config.parameters;
-    
+  private async delegateTask(action: Action): Promise<any> {
+    if (!action.metadata?.task) {
+      throw new Error('Invalid task format: missing task specification');
+    }
+
+    const { task } = action.metadata;
     return {
-      style: responseStyle,
-      expertise: expertise,
-      response: `Generated ${responseStyle} response for action ${action.type} using ${expertise.join(', ')}`
+      delegatedTo: 'skill_agent',
+      taskId: `${task.type}-${Date.now()}`,
+      status: 'delegated'
     };
   }
 
-  private async coordinateAssistance(action: string, data: any): Promise<any> {
-    // Coordinate assistance with other agents
+  private async retrieveDocs(action: Action): Promise<any> {
+    if (!action.metadata?.query) {
+      throw new Error('Invalid docs request: missing query');
+    }
+
+    const { query, filters } = action.metadata;
     return {
-      action,
-      status: 'coordinated',
-      response: `Coordinated assistance for ${action}`
+      documents: [
+        {
+          title: 'React Hooks Overview',
+          content: 'Hooks are a new addition in React 16.8...',
+          relevance: 0.95
+        },
+        {
+          title: 'Component Lifecycle',
+          content: 'Understanding component lifecycle is crucial...',
+          relevance: 0.85
+        }
+      ],
+      totalResults: 2,
+      searchMetadata: {
+        query,
+        filters,
+        timestamp: Date.now()
+      }
+    };
+  }
+
+  private async updateContext(data: any): Promise<any> {
+    // Update conversation context
+    return {
+      status: 'success',
+      updatedContext: {
+        ...data,
+        lastUpdated: Date.now()
+      }
     };
   }
 } 

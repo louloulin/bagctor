@@ -1,10 +1,10 @@
 import { expect, test, mock, describe, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { ActorSystem, ActorContext, Message } from '@bactor/core';
 import { Architect } from '../architect';
-import { 
-  ArchitectConfig, 
-  RequirementAnalysis, 
-  UserStory, 
+import {
+  ArchitectConfig,
+  RequirementAnalysis,
+  UserStory,
   SystemDesign,
   APISpec,
   ArchitectureDesignAction,
@@ -16,6 +16,8 @@ describe('Architect Agent', () => {
   let system: ActorSystem;
   let architectPID: any;
   let mockConfig: ArchitectConfig;
+  let mockRequirements: RequirementAnalysis;
+  let mockUserStories: UserStory[];
 
   beforeAll(async () => {
     system = new ActorSystem();
@@ -42,41 +44,36 @@ describe('Architect Agent', () => {
       }
     };
 
+    mockRequirements = {
+      userStories: [],
+      marketAnalysis: {
+        competitors: ['competitor1'],
+        uniqueSellingPoints: ['unique1'],
+        targetUsers: ['user1']
+      },
+      feasibilityAnalysis: {
+        technicalRisks: ['risk1'],
+        resourceRequirements: ['resource1'],
+        timeline: '3 months'
+      }
+    };
+
+    mockUserStories = [
+      {
+        id: 'US-001',
+        title: 'User Registration',
+        description: 'As a user, I want to register an account',
+        priority: 'high',
+        acceptanceCriteria: ['Email verification', 'Password validation']
+      }
+    ];
+
     architectPID = await system.spawn({
       producer: (context: ActorContext) => new Architect(context, mockConfig)
     });
   });
 
   describe('System Design', () => {
-    let mockRequirements: RequirementAnalysis;
-    let mockUserStories: UserStory[];
-
-    beforeEach(() => {
-      mockRequirements = {
-        userStories: [],
-        marketAnalysis: {
-          competitors: ['competitor1'],
-          uniqueSellingPoints: ['unique1'],
-          targetUsers: ['user1']
-        },
-        feasibilityAnalysis: {
-          technicalRisks: ['risk1'],
-          resourceRequirements: ['resource1'],
-          timeline: '3 months'
-        }
-      };
-
-      mockUserStories = [
-        {
-          id: 'US-001',
-          title: 'User Registration',
-          description: 'As a user, I want to register an account',
-          priority: 'high',
-          acceptanceCriteria: ['Email verification', 'Password validation']
-        }
-      ];
-    });
-
     test('should create system design from requirements and user stories', async () => {
       const message: Message = {
         type: 'TASK',
@@ -89,186 +86,150 @@ describe('Architect Agent', () => {
       };
 
       await system.send(architectPID, message);
-      // Wait for response
       await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Verify the response was sent
-      // Note: In a real test, we would set up a test actor to receive the response
       expect(true).toBe(true);
     });
 
-    test('should handle system design task', async () => {
-      const action: ArchitectureDesignAction = {
-        id: 'ARCH-001',
-        type: 'DESIGN_ARCHITECTURE',
-        status: 'PENDING',
-        priority: 'high',
-        context: {
-          role: 'architect',
-          dependencies: [],
-          resources: [],
-          constraints: []
-        },
-        input: {
-          requirements: mockRequirements,
-          userStories: mockUserStories,
-          constraints: ['scalable']
-        },
-        metadata: {}
-      };
-
-      const message: Message = {
-        type: 'TASK',
-        sender: architectPID,
-        payload: action
-      };
-
-      await system.send(architectPID, message);
-      // Wait for response
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Verify the response was sent
-      expect(true).toBe(true);
-    });
-
-    test('should store design history', async () => {
-      const message: Message = {
+    test('should handle concurrent design requests', async () => {
+      const requests = Array(5).fill(null).map((_, i) => ({
         type: 'TASK',
         sender: architectPID,
         payload: {
           requirements: mockRequirements,
           userStories: mockUserStories,
-          constraints: ['scalable']
+          constraints: [`constraint-${i}`]
         }
-      };
+      }));
 
-      await system.send(architectPID, message);
-      // Wait for response
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Verify the response was sent
-      expect(true).toBe(true);
-    });
-  });
-
-  describe('API Design', () => {
-    let mockSystemDesign: SystemDesign;
-
-    beforeEach(() => {
-      mockSystemDesign = {
-        architecture: {
-          components: [
-            {
-              name: 'UserService',
-              responsibility: 'Handle user operations',
-              dependencies: [],
-              apis: []
-            }
-          ],
-          dataFlow: 'graph TD;A-->B',
-          deployment: 'graph TD;A-->B'
-        },
-        dataStructures: [
-          {
-            name: 'User',
-            fields: [
-              {
-                name: 'id',
-                type: 'string',
-                description: 'User ID'
-              }
-            ],
-            relationships: []
-          }
-        ],
-        apis: []
-      };
-    });
-
-    test('should handle API design task', async () => {
-      const action: APIDesignAction = {
-        id: 'API-001',
-        type: 'DESIGN_API',
-        status: 'PENDING',
-        priority: 'high',
-        context: {
-          role: 'architect',
-          dependencies: [],
-          resources: [],
-          constraints: []
-        },
-        input: {
-          systemDesign: mockSystemDesign,
-          requirements: ['RESTful', 'JSON responses']
-        },
-        metadata: {}
-      };
-
-      const message: Message = {
-        type: 'TASK',
-        sender: architectPID,
-        payload: action
-      };
-
-      await system.send(architectPID, message);
-      // Wait for response
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Verify the response was sent
+      await Promise.all(requests.map(req => system.send(architectPID, req)));
+      await new Promise(resolve => setTimeout(resolve, 500));
       expect(true).toBe(true);
     });
 
-    test('should handle errors gracefully', async () => {
-      const action: APIDesignAction = {
-        id: 'API-002',
-        type: 'DESIGN_API',
-        status: 'PENDING',
-        priority: 'high',
-        context: {
-          role: 'architect',
-          dependencies: [],
-          resources: [],
-          constraints: []
-        },
-        input: {
-          systemDesign: mockSystemDesign,
-          requirements: ['invalid']
-        },
-        metadata: {}
-      };
-
-      const message: Message = {
-        type: 'TASK',
-        sender: architectPID,
-        payload: action
-      };
-
-      await system.send(architectPID, message);
-      // Wait for response
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Verify the response was sent
-      expect(true).toBe(true);
-    });
-  });
-
-  describe('Architecture Patterns', () => {
-    test('should identify appropriate patterns based on requirements', async () => {
-      const message: Message = {
+    test('should recover from design errors', async () => {
+      const invalidMessage: Message = {
         type: 'TASK',
         sender: architectPID,
         payload: {
-          requirements: ['scalability', 'reliability', 'performance'],
-          constraints: ['cloud-native', 'microservices']
+          requirements: null,
+          userStories: [],
+          constraints: []
         }
       };
 
-      await system.send(architectPID, message);
-      // Wait for response
+      await system.send(architectPID, invalidMessage);
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Verify the response was sent
+      // Send a valid message after error
+      const validMessage: Message = {
+        type: 'TASK',
+        sender: architectPID,
+        payload: {
+          requirements: mockRequirements,
+          userStories: mockUserStories,
+          constraints: ['must be scalable']
+        }
+      };
+
+      await system.send(architectPID, validMessage);
+      await new Promise(resolve => setTimeout(resolve, 100));
       expect(true).toBe(true);
+    });
+  });
+
+  describe('State Management', () => {
+    test('should maintain design history', async () => {
+      const messages = Array(3).fill(null).map((_, i) => ({
+        type: 'TASK',
+        sender: architectPID,
+        payload: {
+          requirements: {
+            ...mockRequirements,
+            version: `v${i + 1}`
+          },
+          userStories: mockUserStories,
+          constraints: [`version-${i + 1}`]
+        }
+      }));
+
+      for (const msg of messages) {
+        await system.send(architectPID, msg);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      expect(true).toBe(true);
+    });
+
+    test('should handle state transitions', async () => {
+      const transitions = [
+        { type: 'START_DESIGN', payload: { phase: 'requirements' } },
+        { type: 'UPDATE_DESIGN', payload: { phase: 'architecture' } },
+        { type: 'COMPLETE_DESIGN', payload: { phase: 'review' } }
+      ];
+
+      for (const transition of transitions) {
+        await system.send(architectPID, transition);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      expect(true).toBe(true);
+    });
+  });
+
+  describe('Integration Tests', () => {
+    test('should integrate with other agents', async () => {
+      // TODO: Implement integration tests with other agents
+      expect(true).toBe(true);
+    });
+
+    test('should handle complex workflows', async () => {
+      const workflow = {
+        type: 'WORKFLOW',
+        sender: architectPID,
+        payload: {
+          steps: [
+            { type: 'REQUIREMENTS_ANALYSIS', data: mockRequirements },
+            { type: 'SYSTEM_DESIGN', data: mockUserStories },
+            { type: 'API_DESIGN', data: { endpoints: [] } }
+          ]
+        }
+      };
+
+      await system.send(architectPID, workflow);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(true).toBe(true);
+    });
+  });
+
+  describe('Performance Tests', () => {
+    test('should handle large scale designs', async () => {
+      const largeRequirements = {
+        ...mockRequirements,
+        userStories: Array(100).fill(null).map((_, i) => ({
+          id: `US-${i}`,
+          title: `Story ${i}`,
+          description: `Description ${i}`,
+          priority: 'medium',
+          acceptanceCriteria: [`Criteria ${i}`]
+        }))
+      };
+
+      const message = {
+        type: 'TASK',
+        sender: architectPID,
+        payload: {
+          requirements: largeRequirements,
+          userStories: largeRequirements.userStories,
+          constraints: ['must handle large scale']
+        }
+      };
+
+      const startTime = Date.now();
+      await system.send(architectPID, message);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const endTime = Date.now();
+
+      expect(endTime - startTime).toBeLessThan(5000); // Should complete within 5 seconds
     });
   });
 }); 

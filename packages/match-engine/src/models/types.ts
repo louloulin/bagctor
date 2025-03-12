@@ -53,7 +53,7 @@ export interface BaseMatchingEngineMessage extends Message {
   payload: any;
 }
 
-export type MatchingEngineMessageType = 
+export type MatchingEngineMessageType =
   | 'place_order'
   | 'cancel_order'
   | 'order_book_update'
@@ -121,10 +121,10 @@ export interface OrderBookSnapshotMessage extends BaseMatchingEngineMessage {
 }
 
 // 聚合的消息类型
-export type MatchingEngineMessage = 
-  | PlaceOrderMessage 
-  | CancelOrderMessage 
-  | OrderBookUpdateMessage 
-  | TradeExecutedMessage 
+export type MatchingEngineMessage =
+  | PlaceOrderMessage
+  | CancelOrderMessage
+  | OrderBookUpdateMessage
+  | TradeExecutedMessage
   | OrderStatusUpdateMessage
   | OrderBookSnapshotMessage; 

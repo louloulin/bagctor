@@ -2,19 +2,23 @@ import { ActorSystem } from '@bactor/core';
 import { Message } from '@bactor/core';
 import { createRouter, RouterConfig, Actor, ActorContext } from '@bactor/core';
 import { configureLogger } from '@bactor/core';
-import Decimal from 'decimal.js';
-import { MatchingEngineActor } from '../actors/matching_engine_actor';
-import { 
-  Order, 
-  OrderSide, 
-  OrderStatus, 
-  OrderType, 
+import * as DecimalJs from 'decimal.js';
+import { MatchingEngineActor } from '../actors/matching_engine_actor.js';
+import {
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderType,
   PlaceOrderMessage,
   TradeExecutedMessage,
   OrderStatusUpdateMessage,
   OrderBookUpdateMessage,
   MatchingEngineMessage
-} from '../models/types';
+} from '../models/types.js';
+
+// 使用导入的Decimal类型
+const Decimal = DecimalJs.default || DecimalJs;
+type DecimalType = DecimalJs.Decimal;
 
 // 统计处理器Actor
 class StatsHandlerActor extends Actor {
@@ -27,7 +31,7 @@ class StatsHandlerActor extends Actor {
   protected behaviors(): void {
     this.addBehavior('default', async (message: Message) => {
       const msg = message as MatchingEngineMessage;
-      
+
       if (!this.startTime) {
         this.startTime = Date.now();
         this.lastPrintTime = this.startTime;
@@ -72,16 +76,16 @@ class StatsHandlerActor extends Actor {
 }
 
 // 生成随机价格
-function generateRandomPrice(basePrice: number, volatility: number): Decimal {
-  const change = (Math.random() - 0.5) * 2 * volatility;
-  const price = basePrice * (1 + change);
-  return new Decimal(price.toFixed(2));
+function generateRandomPrice(basePrice: number, volatility: number): DecimalType {
+  const randomFactor = 1 + (Math.random() * volatility * 2 - volatility);
+  const price = basePrice * randomFactor;
+  return Decimal(price.toFixed(2));
 }
 
 // 生成随机数量
-function generateRandomQuantity(minQty: number, maxQty: number): Decimal {
+function generateRandomQuantity(minQty: number, maxQty: number): DecimalType {
   const qty = minQty + Math.random() * (maxQty - minQty);
-  return new Decimal(qty.toFixed(4));
+  return Decimal(qty.toFixed(4));
 }
 
 // 生成测试订单
@@ -103,7 +107,7 @@ function generateTestOrders(count: number, basePrice: number = 50000): Order[] {
       type: OrderType.LIMIT,
       price,
       quantity,
-      filledQuantity: new Decimal(0),
+      filledQuantity: Decimal(0),
       status: OrderStatus.NEW,
       timestamp: Date.now(),
       userId: `user${(i % 100) + 1}` // 模拟100个用户
@@ -168,7 +172,7 @@ async function main() {
       type: 'place_order',
       payload: { order }
     };
-    
+
     await system.send(matchingEngine, message);
   }
 

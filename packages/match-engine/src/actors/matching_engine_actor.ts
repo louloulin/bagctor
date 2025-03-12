@@ -1,9 +1,9 @@
 import { Actor, ActorContext, Message, PID } from '@bactor/core';
 import { OrderBook } from '../core/order_book';
-import { 
-  MatchingEngineMessage, 
-  Order, 
-  OrderStatus, 
+import {
+  MatchingEngineMessage,
+  Order,
+  OrderStatus,
   PlaceOrderMessage,
   CancelOrderMessage,
   OrderStatusUpdateMessage,
@@ -44,10 +44,10 @@ export class MatchingEngineActor extends Actor {
   // 处理下单请求
   private async handlePlaceOrder(message: PlaceOrderMessage) {
     const order = message.payload.order;
-    
+
     // 先尝试撮合
     const trades = this.orderBook.match(order);
-    
+
     // 发送成交消息
     for (const trade of trades) {
       const tradeMessage: TradeExecutedMessage = {
@@ -55,7 +55,7 @@ export class MatchingEngineActor extends Actor {
         payload: { trade }
       };
       await this.context.send(this.routerPid, tradeMessage);
-      
+
       // 更新maker订单状态
       const makerOrder = this.orderBook.getOrder(trade.makerOrderId);
       if (makerOrder) {
@@ -70,12 +70,12 @@ export class MatchingEngineActor extends Actor {
         await this.context.send(this.routerPid, statusMessage);
       }
     }
-    
+
     // 如果订单未完全成交，加入订单簿
     if (order.status !== OrderStatus.FILLED) {
       this.orderBook.addOrder(order);
     }
-    
+
     // 发送订单状态更新
     const statusMessage: OrderStatusUpdateMessage = {
       type: 'order_status_update',
@@ -86,7 +86,7 @@ export class MatchingEngineActor extends Actor {
       }
     };
     await this.context.send(this.routerPid, statusMessage);
-    
+
     // 发送订单簿更新
     const snapshot = this.orderBook.getSnapshot();
     const bookMessage: OrderBookUpdateMessage = {
@@ -104,11 +104,11 @@ export class MatchingEngineActor extends Actor {
   private async handleCancelOrder(message: CancelOrderMessage) {
     const { orderId, userId } = message.payload;
     const order = this.orderBook.getOrder(orderId);
-    
+
     if (order && order.userId === userId) {
       this.orderBook.removeOrder(orderId);
       order.status = OrderStatus.CANCELED;
-      
+
       // 发送订单状态更新
       const statusMessage: OrderStatusUpdateMessage = {
         type: 'order_status_update',
@@ -119,7 +119,7 @@ export class MatchingEngineActor extends Actor {
         }
       };
       await this.context.send(this.routerPid, statusMessage);
-      
+
       // 发送订单簿更新
       const snapshot = this.orderBook.getSnapshot();
       const bookMessage: OrderBookUpdateMessage = {

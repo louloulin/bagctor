@@ -3,12 +3,10 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "module": "NodeNext",
     "target": "ES2022",
     "types": [
       "bun-types"
     ],
-    "moduleResolution": "NodeNext"
   },
   "include": [
     "src/**/*",

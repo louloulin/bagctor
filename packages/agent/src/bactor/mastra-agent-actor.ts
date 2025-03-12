@@ -6,45 +6,10 @@
  */
 
 import { Actor, ActorContext, PID, Message } from '@bactor/core';
-// Implement a mock for Mastra Agent until we have the real implementation
-// Comment out the real import and use a mock class
-// import { Agent as MastraAgent } from '@mastra/core';
+// Import the real Agent instead of using a mock
+import { Agent } from '../agent';
 import type { LanguageModelV1 } from 'ai';
 import { v4 as uuidv4 } from 'uuid';
-
-// Mock implementation for MastraAgent
-class MastraAgent {
-    private config: any;
-
-    constructor(config: any) {
-        this.config = config;
-    }
-
-    async generate(content: string, options?: any): Promise<any> {
-        return {
-            text: `Mock response for: ${content}`,
-            toolCalls: []
-        };
-    }
-
-    async streamGenerate(content: string, options?: any): Promise<any> {
-        if (options?.onChunk) {
-            options.onChunk("Streaming ");
-            options.onChunk("mock ");
-            options.onChunk("response ");
-            options.onChunk(`for: ${content}`);
-        }
-
-        if (options?.onFinish) {
-            options.onFinish(`Complete mock response for: ${content}`);
-        }
-
-        return {
-            text: `Complete mock response for: ${content}`,
-            toolCalls: []
-        };
-    }
-}
 
 /**
  * Mastra Agent配置接口
@@ -148,7 +113,7 @@ class ResponseCache {
  * Mastra Agent Actor实现
  */
 export class MastraAgentActor extends Actor {
-    private agent: MastraAgent;
+    private agent: Agent;
     private config: MastraAgentConfig;
     private cache: ResponseCache | null = null;
 
@@ -161,11 +126,10 @@ export class MastraAgentActor extends Actor {
             this.cache = new ResponseCache(this.config.cacheTTL);
         }
 
-        // 创建Mastra Agent实例
-        this.agent = new MastraAgent({
+        // 创建真实的Mastra Agent实例
+        this.agent = new Agent({
             name: this.config.name,
             instructions: this.config.instructions,
-            description: this.config.description,
             model: this.config.model,
             tools: this.config.tools || {},
             memory: this.config.memory,
@@ -222,7 +186,12 @@ export class MastraAgentActor extends Actor {
 
             switch (type) {
                 case MastraAgentMessageType.GENERATE:
-                    const result = await this.agent.generate(content, options);
+                    // 适配实际Agent.generate接口
+                    const result = await this.agent.generate(content, {
+                        ...options,
+                        temperature: options.temperature || 0.7,
+                        runId: options.runId || uuidv4()
+                    });
 
                     // 缓存结果
                     if (this.cache && cacheKey) {
@@ -235,64 +204,99 @@ export class MastraAgentActor extends Actor {
                     };
 
                 case MastraAgentMessageType.STREAM_GENERATE:
-                    // 实现流式生成逻辑
+                    // 处理流式生成逻辑，使用真实Agent的stream方法
                     if (sender) {
                         const chunks: string[] = [];
 
-                        // 创建一个回调函数，将流式结果发送回请求者
-                        const streamHandler = async (chunk: string) => {
-                            chunks.push(chunk);
-                            await this.send(sender, {
-                                type: MastraAgentMessageType.CHUNK,
-                                content: chunk,
-                                payload: {
-                                    timestamp: Date.now()
-                                }
-                            });
+                        // 创建回调函数来处理流式结果
+                        const onChunk = async (chunk: any) => {
+                            if (chunk.type === 'text-delta' && chunk.textDelta) {
+                                chunks.push(chunk.textDelta);
+                                await this.send(sender, {
+                                    type: MastraAgentMessageType.CHUNK,
+                                    content: chunk.textDelta,
+                                    payload: {
+                                        timestamp: Date.now()
+                                    }
+                                });
+                            }
                         };
 
-                        const finishHandler = async (result: string) => {
-                            await this.send(sender, {
-                                type: MastraAgentMessageType.FINISH,
-                                content: result,
-                                payload: {
-                                    timestamp: Date.now()
-                                }
-                            });
-                        };
-
-                        // 开始流式生成
-                        const streamResult = await this.agent.streamGenerate(content, {
+                        // 开始流式生成，适配实际Agent.stream接口
+                        const streamOptions = {
                             ...options,
-                            onChunk: streamHandler,
-                            onFinish: finishHandler
-                        });
+                            temperature: options.temperature || 0.7,
+                            runId: options.runId || uuidv4(),
+                            onFinish: async (finalResult: string) => {
+                                try {
+                                    const parsedResult = JSON.parse(finalResult);
+                                    await this.send(sender, {
+                                        type: MastraAgentMessageType.FINISH,
+                                        content: parsedResult.text,
+                                        payload: {
+                                            timestamp: Date.now(),
+                                            result: parsedResult
+                                        }
+                                    });
+
+                                    if (options.onFinish) {
+                                        options.onFinish(parsedResult.text);
+                                    }
+                                } catch (error) {
+                                    console.error("Error parsing stream result:", error);
+                                    await this.send(sender, {
+                                        type: MastraAgentMessageType.FINISH,
+                                        content: chunks.join(''),
+                                        payload: {
+                                            timestamp: Date.now()
+                                        }
+                                    });
+
+                                    if (options.onFinish) {
+                                        options.onFinish(chunks.join(''));
+                                    }
+                                }
+                            }
+                        };
+
+                        const streamResult = await this.agent.stream(content, streamOptions);
+
+                        // 处理流式结果 - using async iterator properly
+                        try {
+                            for await (const chunk of streamResult.textStream) {
+                                if (chunk) {
+                                    await onChunk(chunk);
+                                }
+                            }
+                        } catch (error) {
+                            console.error("Error processing stream:", error);
+                        }
 
                         // 缓存完整的结果
-                        const fullResult = chunks.join('');
+                        const fullText = chunks.join('');
                         if (this.cache && cacheKey) {
-                            this.cache.set(cacheKey, fullResult);
+                            this.cache.set(cacheKey, { text: fullText });
                         }
 
                         // 发送最终结果
                         return {
                             type: MastraAgentMessageType.RESULT,
-                            ...this.createResponse(true, streamResult)
+                            ...this.createResponse(true, { text: fullText })
                         };
                     }
                     break;
 
                 case MastraAgentMessageType.TOOL_CALL:
-                    // 处理工具调用
+                    // 处理工具调用，使用真实Agent的工具处理能力
                     const { toolName, params } = message;
                     try {
-                        // 假设工具调用已经通过MastraAgent处理
-                        // 这里可以添加自定义逻辑
+                        // 使用工具选择选项调用生成
                         const toolResult = await this.agent.generate(content, {
                             ...options,
+                            runId: options.runId || uuidv4(),
                             toolChoice: {
                                 type: 'tool',
-                                toolName
+                                tool: toolName
                             }
                         });
 

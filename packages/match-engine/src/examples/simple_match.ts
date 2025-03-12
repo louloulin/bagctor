@@ -2,19 +2,23 @@ import { ActorSystem } from '@bactor/core';
 import { Message } from '@bactor/core';
 import { createRouter, RouterConfig, Actor, ActorContext } from '@bactor/core';
 import { configureLogger } from '@bactor/core';
-import Decimal from 'decimal.js';
-import { MatchingEngineActor } from '../actors/matching_engine_actor';
-import { 
-  Order, 
-  OrderSide, 
-  OrderStatus, 
-  OrderType, 
+import * as DecimalJs from 'decimal.js';
+import { MatchingEngineActor } from '../actors/matching_engine_actor.js';
+import {
+  Order,
+  OrderSide,
+  OrderStatus,
+  OrderType,
   PlaceOrderMessage,
   TradeExecutedMessage,
   OrderStatusUpdateMessage,
   OrderBookUpdateMessage,
   MatchingEngineMessage
-} from '../models/types';
+} from '../models/types.js';
+
+// 使用导入的Decimal类型
+const Decimal = DecimalJs.default || DecimalJs;
+type DecimalType = DecimalJs.Decimal;
 
 // 消息处理Actor
 class MessageHandlerActor extends Actor {
@@ -75,9 +79,9 @@ async function main() {
       symbol: 'BTC-USDT',
       side: OrderSide.SELL,
       type: OrderType.LIMIT,
-      price: new Decimal('50000.00'),
-      quantity: new Decimal('1.5'),
-      filledQuantity: new Decimal('0'),
+      price: Decimal('50000.00'),
+      quantity: Decimal('1.5'),
+      filledQuantity: Decimal('0'),
       status: OrderStatus.NEW,
       timestamp: Date.now(),
       userId: 'user1'
@@ -87,9 +91,9 @@ async function main() {
       symbol: 'BTC-USDT',
       side: OrderSide.SELL,
       type: OrderType.LIMIT,
-      price: new Decimal('50100.00'),
-      quantity: new Decimal('2.0'),
-      filledQuantity: new Decimal('0'),
+      price: Decimal('50100.00'),
+      quantity: Decimal('2.0'),
+      filledQuantity: Decimal('0'),
       status: OrderStatus.NEW,
       timestamp: Date.now(),
       userId: 'user2'
@@ -100,9 +104,9 @@ async function main() {
       symbol: 'BTC-USDT',
       side: OrderSide.BUY,
       type: OrderType.LIMIT,
-      price: new Decimal('50000.00'),
-      quantity: new Decimal('1.0'),
-      filledQuantity: new Decimal('0'),
+      price: Decimal('50000.00'),
+      quantity: Decimal('1.0'),
+      filledQuantity: Decimal('0'),
       status: OrderStatus.NEW,
       timestamp: Date.now(),
       userId: 'user3'
@@ -122,15 +126,15 @@ async function main() {
 
   // 发送订单
   console.log('=== Starting Trading Simulation ===');
-  
+
   for (const order of orders) {
     console.log(`\nPlacing order: ${order.orderId} (${order.side} ${order.quantity} BTC @ ${order.price} USDT)`);
-    
+
     const message: PlaceOrderMessage = {
       type: 'place_order',
       payload: { order }
     };
-    
+
     await system.send(matchingEngine, message);
     // 等待一下，让消息能够处理完
     await new Promise(resolve => setTimeout(resolve, 100));

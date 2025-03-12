@@ -9,7 +9,7 @@
   ],
   "compilerOptions": {
     "rootDir": "./src",
-    "composite": true,
+    "composite": false,
     "declaration": true,
     "declarationMap": true,
     "module": "ES2022",
@@ -23,6 +23,9 @@
     "types": [
       "bun-types"
     ],
-    "useDefineForClassFields": true
+    "useDefineForClassFields": true,
+    "isolatedModules": true,
+    "skipDefaultLibCheck": true,
+    "noResolve": true
   }
 }

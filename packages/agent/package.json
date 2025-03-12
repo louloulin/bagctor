@@ -17,7 +17,8 @@
     "example:bus": "bun run src/examples/bus_message_demo.ts",
     "example:llm": "bun run src/examples/llm_demo.ts",
     "build:tsc": "tsc",
-    "build:bundle": "bun build src/index.ts --outdir=dist --target=node --format=cjs --outfile=dist/index.cjs"
+    "build:bundle": "bun build src/index.ts --outdir=dist --target=node --format=cjs --outfile=dist/index.cjs && bun run build:sub-modules",
+    "build:sub-modules": "bun build src/relevance/index.ts --outdir=dist/relevance --target=node --format=esm && cp dist/relevance/index.js dist/relevance/index.cjs && bun build src/vector/index.ts --outdir=dist/vector --target=node --format=esm && cp dist/vector/index.js dist/vector/index.cjs && bun build src/vector/filter/index.ts --outdir=dist/vector/filter --target=node --format=esm && cp dist/vector/filter/index.js dist/vector/filter/index.cjs && bun build src/tools/index.ts --outdir=dist/tools --target=node --format=esm && cp dist/tools/index.js dist/tools/index.cjs && bun build src/utils.ts --outdir=dist --target=node --format=esm && cp dist/utils.js dist/utils.cjs && bun build src/memory/index.ts --outdir=dist/memory --target=node --format=esm && cp dist/memory/index.js dist/memory/index.cjs && bun build src/storage/index.ts --outdir=dist/storage --target=node --format=esm && cp dist/storage/index.js dist/storage/index.cjs"
   },
   "dependencies": {
     "nanoid": "^5.0.4",
@@ -82,6 +83,41 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs",
       "types": "./dist/index.d.ts"
+    },
+    "./relevance": {
+      "import": "./dist/relevance/index.js",
+      "require": "./dist/relevance/index.cjs",
+      "types": "./dist/relevance/index.d.ts"
+    },
+    "./vector": {
+      "import": "./dist/vector/index.js",
+      "require": "./dist/vector/index.cjs",
+      "types": "./dist/vector/index.d.ts"
+    },
+    "./vector/filter": {
+      "import": "./dist/vector/filter/index.js",
+      "require": "./dist/vector/filter/index.cjs",
+      "types": "./dist/vector/filter/index.d.ts"
+    },
+    "./tools": {
+      "import": "./dist/tools/index.js",
+      "require": "./dist/tools/index.cjs",
+      "types": "./dist/tools/index.d.ts"
+    },
+    "./utils": {
+      "import": "./dist/utils.js",
+      "require": "./dist/utils.cjs",
+      "types": "./dist/utils.d.ts"
+    },
+    "./memory": {
+      "import": "./dist/memory/index.js",
+      "require": "./dist/memory/index.cjs",
+      "types": "./dist/memory/index.d.ts"
+    },
+    "./storage": {
+      "import": "./dist/storage/index.js",
+      "require": "./dist/storage/index.cjs",
+      "types": "./dist/storage/index.d.ts"
     }
   }
 }

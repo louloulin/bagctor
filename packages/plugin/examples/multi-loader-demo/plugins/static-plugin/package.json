@@ -1,21 +1,25 @@
 {
-    "name": "greeting-plugin",
-    "version": "1.0.0",
-    "description": "BActor静态加载插件示例",
-    "main": "dist/index.js",
-    "scripts": {
-        "build": "tsc"
-    },
-    "keywords": [
-        "bagctor",
-        "plugin"
-    ],
-    "author": "BActor Team",
-    "license": "MIT",
-    "dependencies": {
-        "@bactor/core": "workspace:*"
-    },
-    "devDependencies": {
-        "typescript": "^5.0.0"
-    }
+  "name": "greeting-plugin",
+  "version": "1.0.0",
+  "description": "BActor静态加载插件示例",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "bagctor",
+    "plugin"
+  ],
+  "author": "BActor Team",
+  "license": "MIT",
+  "dependencies": {
+    "@bactor/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "type": "module",
+  "engines": {
+    "bun": ">=1.0.0"
+  }
 }

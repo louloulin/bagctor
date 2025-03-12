@@ -9,7 +9,7 @@ find packages -type f -name "*.map" -path "*/src/*" -not -path "*/node_modules/*
 find packages -type f -name "*.tsbuildinfo" -not -path "*/node_modules/*" -not -path "*/dist/*" -exec rm {} \;
 
 # 清理各个包的dist目录
-PACKAGES=("core" "agent" "match-engine" "web" "plugin")
+PACKAGES=("core" "agent" "match-engine" "web" "plugin" "rag" "mcp" "memory" "vscode-chat" "stores/pg" "stores/qdrant" "stores/vectorize")
 
 for pkg in "${PACKAGES[@]}"; do
   echo "清理 $pkg 包..."

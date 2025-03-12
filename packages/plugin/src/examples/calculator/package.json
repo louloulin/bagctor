@@ -1,18 +1,22 @@
 {
-    "name": "@bactor/calculator-plugin",
-    "version": "1.0.0",
-    "description": "Calculator plugin for BActor",
-    "main": "dist/index.js",
-    "types": "dist/index.d.ts",
-    "scripts": {
-        "build": "bun build ./src/index.ts --outdir ./dist --target node",
-        "test": "bun test"
-    },
-    "dependencies": {
-        "@bactor/core": "workspace:*"
-    },
-    "devDependencies": {
-        "typescript": "^5.0.0",
-        "bun-types": "latest"
-    }
+  "name": "@bactor/calculator-plugin",
+  "version": "1.0.0",
+  "description": "Calculator plugin for BActor",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target node",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@bactor/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "bun-types": "latest"
+  },
+  "type": "module",
+  "engines": {
+    "bun": ">=1.0.0"
+  }
 }

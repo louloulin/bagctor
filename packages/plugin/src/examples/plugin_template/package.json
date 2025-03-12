@@ -1,27 +1,31 @@
 {
-    "name": "@bactor/plugin-template",
-    "version": "1.0.0",
-    "description": "A template plugin for the Bactor system",
-    "author": "Bactor Team",
-    "license": "MIT",
-    "main": "dist/index.js",
-    "types": "dist/index.d.ts",
-    "scripts": {
-        "build": "tsc",
-        "test": "bun test",
-        "clean": "rimraf dist",
-        "lint": "eslint src --ext .ts",
-        "format": "prettier --write src/**/*.ts"
-    },
-    "dependencies": {
-        "@bactor/core": "workspace:*"
-    },
-    "devDependencies": {
-        "@types/node": "^20.0.0",
-        "bun-types": "latest",
-        "eslint": "^8.0.0",
-        "prettier": "^3.0.0",
-        "rimraf": "^5.0.0",
-        "typescript": "^5.0.0"
-    }
+  "name": "@bactor/plugin-template",
+  "version": "1.0.0",
+  "description": "A template plugin for the Bactor system",
+  "author": "Bactor Team",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "clean": "rimraf dist",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "dependencies": {
+    "@bactor/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "bun-types": "latest",
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
+  },
+  "type": "module",
+  "engines": {
+    "bun": ">=1.0.0"
+  }
 }

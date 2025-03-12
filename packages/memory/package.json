@@ -40,11 +40,12 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "build": "pnpm run check && tsup src/index.ts --format esm,cjs --experimental-dts --clean --treeshake",
-    "build:watch": "pnpm build --watch",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json && bun build src/index.ts --outfile=dist/index.cjs --target=node --format=cjs",
+    "build:watch": "tsc -p tsconfig.json --watch",
     "test:integration": "cd integration-tests && pnpm run test",
     "test": "pnpm test:integration",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
   },
   "keywords": [],
   "author": "",

@@ -19,10 +19,11 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --experimental-dts --clean --treeshake",
-    "build:watch": "pnpm build --watch",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json && bun build src/index.ts --outfile=dist/index.cjs --target=node --format=cjs",
+    "build:watch": "tsc -p tsconfig.json --watch",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
   },
   "keywords": [],
   "author": "",
@@ -41,5 +42,8 @@
     "typescript": "^5.7.3",
     "vitest": "^3.0.4",
     "eslint": "^9.20.1"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
   }
 }

@@ -9,5 +9,8 @@
   "dependencies": {
     "@bactor/agent": "workspace:*",
     "zod": "^3.24.1"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
   }
 }

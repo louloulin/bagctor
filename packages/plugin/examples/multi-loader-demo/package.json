@@ -1,32 +1,36 @@
 {
-    "name": "multi-loader-demo",
-    "version": "1.0.0",
-    "description": "BActor多方式加载插件演示",
-    "main": "dist/index.js",
-    "scripts": {
-        "build": "tsc",
-        "start": "bun run dist/index.js",
-        "dev": "bun run src/index.ts",
-        "build:plugins": "cd plugins/static-plugin && bun run build && cd ../dynamic-plugin && bun run build",
-        "build:all": "bun run build:plugins && bun run build",
-        "clean": "rimraf dist plugins/*/dist"
-    },
-    "keywords": [
-        "bagctor",
-        "plugin",
-        "demo"
-    ],
-    "author": "BActor Team",
-    "license": "MIT",
-    "dependencies": {
-        "@bactor/core": "workspace:*",
-        "fs-extra": "^11.1.1",
-        "path": "^0.12.7"
-    },
-    "devDependencies": {
-        "@types/fs-extra": "^11.0.1",
-        "@types/node": "^18.15.11",
-        "rimraf": "^5.0.0",
-        "typescript": "^5.0.0"
-    }
+  "name": "multi-loader-demo",
+  "version": "1.0.0",
+  "description": "BActor多方式加载插件演示",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "bun run dist/index.js",
+    "dev": "bun run src/index.ts",
+    "build:plugins": "cd plugins/static-plugin && bun run build && cd ../dynamic-plugin && bun run build",
+    "build:all": "bun run build:plugins && bun run build",
+    "clean": "rimraf dist plugins/*/dist"
+  },
+  "keywords": [
+    "bagctor",
+    "plugin",
+    "demo"
+  ],
+  "author": "BActor Team",
+  "license": "MIT",
+  "dependencies": {
+    "@bactor/core": "workspace:*",
+    "fs-extra": "^11.1.1",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.1",
+    "@types/node": "^18.15.11",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
+  },
+  "type": "module",
+  "engines": {
+    "bun": ">=1.0.0"
+  }
 }

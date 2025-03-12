@@ -19,10 +19,11 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --experimental-dts --clean --treeshake",
-    "buld:watch": "pnpm build --watch",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json && bun build src/index.ts --outfile=dist/index.cjs --target=node --format=cjs",
+    "buld:watch": "tsc -p tsconfig.json --watch",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
   },
   "author": "",
   "license": "ISC",
@@ -67,5 +68,8 @@
     "llm",
     "llms",
     "typescript"
-  ]
+  ],
+  "engines": {
+    "bun": ">=1.0.0"
+  }
 }

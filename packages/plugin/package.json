@@ -2,12 +2,18 @@
     "name": "@bactor/plugin",
     "version": "0.1.0",
     "type": "module",
-    "main": "./dist/index.cjs",
+    "main": "./dist/index.js",
     "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "bin": {
         "create-bactor-plugin": "./dist/tools/create_plugin.js",
         "debug-bactor-plugin": "./dist/tools/debug_plugin.js"
+    },
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        }
     },
     "scripts": {
         "build": "rimraf dist && tsc -p tsconfig.json",

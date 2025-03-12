@@ -2,10 +2,11 @@
   "name": "@bactor/agent",
   "version": "0.1.0",
   "description": "Bactor Agent System - AI Agent framework based on Mastra",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "bun run build:tsc && bun run build:bundle",
+    "build": "bun run build:tsc",
     "dev": "bun run --watch src/index.ts",
     "test": "jest",
     "lint": "eslint .",
@@ -15,8 +16,7 @@
     "example:agent": "bun run src/examples/agent_demo.ts",
     "example:bus": "bun run src/examples/bus_message_demo.ts",
     "example:llm": "bun run src/examples/llm_demo.ts",
-    "build:tsc": "tsc",
-    "build:bundle": "bun build src/index.ts --outdir=dist --target=node --format=cjs"
+    "build:tsc": "tsc"
   },
   "dependencies": {
     "nanoid": "^5.0.4",
@@ -78,8 +78,7 @@
   },
   "exports": {
     ".": {
-      "require": "./dist/index.js",
-      "import": "./dist/index.mjs",
+      "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     }
   }

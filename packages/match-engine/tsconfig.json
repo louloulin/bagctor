@@ -4,6 +4,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "target": "ES2022",
+    "module": "ES2022",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true
   },

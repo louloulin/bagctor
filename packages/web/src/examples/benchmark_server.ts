@@ -4,65 +4,6 @@ import { HttpRequest, HttpResponse, HttpContext } from "../types";
 import { Router } from "../router";
 import autocannon from "autocannon";
 
-// Create a simple benchmark server
-const system = new ActorSystem("localhost:50051");
-
-// Create router with benchmark routes
-const router = new Router({});
-
-// Echo endpoint
-router.get("/echo", async (ctx: HttpContext) => {
-  return {
-    status: 200,
-    headers: new Headers({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ message: "Hello from echo!" })
-  };
-});
-
-// CPU intensive endpoint (fibonacci)
-router.get("/cpu/:n", async (ctx: HttpContext) => {
-  const n = parseInt(ctx.params.n) || 10;
-  const fib = (n: number): number => {
-    if (n <= 1) return n;
-    return fib(n - 1) + fib(n - 2);
-  };
-  const result = fib(n);
-  return {
-    status: 200,
-    headers: new Headers({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ n, result })
-  };
-});
-
-// Data endpoint
-router.post("/data", async (ctx: HttpContext) => {
-  const text = await new Response(ctx.request.body).text();
-  const body = JSON.parse(text);
-  return {
-    status: 200,
-    headers: new Headers({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ received: body })
-  };
-});
-
-// Create server with router
-const serverPid = await system.spawn({
-  actorClass: HttpServer,
-  actorContext: {
-    port: 3000,
-    hostname: "localhost",
-    router
-  }
-} as HttpServerProps);
-
-// Start the system
-await system.start();
-
-// Wait for server to start
-await new Promise((resolve) => setTimeout(resolve, 1000));
-
-console.log("Starting benchmark tests...");
-
 // Helper function to run a benchmark scenario
 async function runBenchmark(config: autocannon.Options): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -73,78 +14,129 @@ async function runBenchmark(config: autocannon.Options): Promise<void> {
         return;
       }
 
-      console.log(`\nBenchmark results for ${config.title}:`);
-      console.log("Requests/sec:", results.requests.average);
-      console.log("Latency (ms):", results.latency.average);
-      console.log("Throughput (MB/s):", results.throughput.average / 1024 / 1024);
+      console.log(`=== Results for ${config.title} ===`);
+      console.log(`Latency (avg): ${results.latency.average} ms`);
+      console.log(`Requests/sec: ${results.requests.average}`);
+      console.log(`Throughput: ${results.throughput.average / 1024 / 1024} MB/sec`);
+      console.log("");
+
       resolve();
     });
 
-    autocannon.track(instance, {
-      renderProgressBar: true,
-      renderLatencyTable: true,
-      renderResultsTable: true,
+    instance.on('response', (response: any) => {
+      if (response.statusCode !== 200) {
+        console.error(`Error: ${response.statusCode}`);
+      }
     });
   });
 }
 
-// Define benchmark scenarios
-const scenarios: autocannon.Options[] = [
-  {
-    title: "Echo Endpoint (Low Load)",
-    url: "http://localhost:3000/echo",
-    connections: 10,
-    pipelining: 1,
-    duration: 10
-  },
-  {
-    title: "Echo Endpoint (High Load)",
-    url: "http://localhost:3000/echo",
-    connections: 100,
-    pipelining: 10,
-    duration: 10
-  },
-  {
-    title: "CPU Intensive (Fibonacci)",
-    url: "http://localhost:3000/cpu/20",
-    connections: 10,
-    duration: 10
-  },
-  {
-    title: "POST Data Test",
-    url: "http://localhost:3000/data",
-    method: "POST" as const,
-    body: JSON.stringify({ test: "data" }),
-    headers: {
-      "content-type": "application/json"
-    },
-    connections: 10,
-    duration: 10
-  }
-];
+// Main function - everything happens here
+async function main() {
+  // Create a simple benchmark server
+  const system = new ActorSystem("localhost:50051");
 
-// Run all scenarios sequentially
-async function runAllScenarios() {
-  try {
-    for (const scenario of scenarios) {
-      await runBenchmark(scenario);
+  // Create router with benchmark routes
+  const router = new Router({});
+
+  // Echo endpoint
+  router.get("/echo", async (ctx: HttpContext) => {
+    return {
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ message: "Hello from echo!" })
+    };
+  });
+
+  // CPU intensive endpoint (fibonacci)
+  router.get("/cpu/:n", async (ctx: HttpContext) => {
+    const n = parseInt(ctx.params.n) || 10;
+    const fib = (n: number): number => {
+      if (n <= 1) return n;
+      return fib(n - 1) + fib(n - 2);
+    };
+    const result = fib(n);
+    return {
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ n, result })
+    };
+  });
+
+  // Data endpoint
+  router.post("/data", async (ctx: HttpContext) => {
+    const text = await new Response(ctx.request.body).text();
+    const body = JSON.parse(text);
+    return {
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ received: body })
+    };
+  });
+
+  // Create server with router
+  const serverPid = await system.spawn({
+    actorClass: HttpServer,
+    actorContext: {
+      port: 3000,
+      hostname: "localhost",
+      router
     }
-    console.log("\nAll benchmark scenarios completed!");
+  } as HttpServerProps);
+
+  // Start the system
+  await system.start();
+
+  // Wait for server to start
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+
+  console.log("Starting benchmark tests...");
+
+  try {
+    // Run all benchmark scenarios
+    await runAllScenarios();
+  } finally {
+    // Cleanup and exit
     await system.stop();
-    process.exit(0);
-  } catch (error) {
-    console.error("Error running benchmarks:", error);
-    await system.stop();
-    process.exit(1);
+    console.log("Benchmark completed.");
   }
 }
 
-// Handle process termination
-process.once("SIGINT", async () => {
-  console.log("\nBenchmark interrupted!");
-  await system.stop();
-  process.exit(0);
-});
+async function runAllScenarios() {
+  // Basic echo benchmark
+  await runBenchmark({
+    title: "Echo GET endpoint",
+    url: "http://localhost:3000/echo",
+    method: "GET",
+    duration: 10,
+    connections: 100
+  });
 
-// Start benchmarks
-runAllScenarios(); 
+  // Simple CPU benchmark - lower number for faster tests
+  await runBenchmark({
+    title: "CPU intensive endpoint (small)",
+    url: "http://localhost:3000/cpu/20",
+    method: "GET",
+    duration: 10,
+    connections: 50
+  });
+
+  // Data posting benchmark
+  await runBenchmark({
+    title: "Data POST endpoint",
+    url: "http://localhost:3000/data",
+    method: "POST",
+    body: JSON.stringify({ test: "data", items: [1, 2, 3, 4, 5] }),
+    headers: {
+      "content-type": "application/json"
+    },
+    duration: 10,
+    connections: 100
+  });
+}
+
+// Run the main function
+main().catch(error => {
+  console.error("Benchmark failed:", error);
+  process.exit(1);
+}); 

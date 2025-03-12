@@ -14,7 +14,7 @@
   },
   "scripts": {
     "dev": "bun run src/main.ts",
-    "build": "rimraf tsconfig.tsbuildinfo && tsc -p tsconfig.json && mkdir -p dist/remote && cp -r src/remote/protos dist/remote/ && bun build src/index.ts --outfile=dist/index.cjs --target=node --format=cjs --external @grpc/grpc-js --external @grpc/proto-loader --external pino --external fastq",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json && mkdir -p dist/remote && cp -r src/remote/protos dist/remote/ && bun build src/index.ts --outfile=dist/index.cjs --target=node --format=cjs --external @grpc/grpc-js --external @grpc/proto-loader --external pino --external fastq",
     "test": "bun test",
     "test:perf": "bun test src/tests/performance.test.ts",
     "example:hello": "bun run src/examples/helloworld.ts",
@@ -27,7 +27,7 @@
     "build:mood": "bun build src/examples/multibehaviors.ts --compile --outfile dist/examples/mood --external @grpc/* --external pino --external fastq",
     "check": "bun run scripts/check.ts",
     "compile": "tsc --noEmit",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
     "test:watch": "bun test --watch"
   },
   "dependencies": {

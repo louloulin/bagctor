@@ -12,11 +12,11 @@
   },
   "scripts": {
     "dev": "bun run src/main.ts",
-    "build": "rimraf tsconfig.tsbuildinfo && tsc -p tsconfig.json",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
     "test": "bun test",
     "example:basic": "bun run src/examples/basic_server.ts",
     "example:middleware": "bun run src/examples/middleware_server.ts",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@bactor/core": "workspace:*"

@@ -1,4 +1,5 @@
 {
+  "extends": "../../tsconfig.json",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ES2022",
@@ -10,6 +11,8 @@
     "declaration": true,
     "outDir": "dist",
     "rootDir": "src",
+    "composite": true,
+    "preserveSymlinks": true,
     "types": [
       "node",
       "jest",
@@ -26,5 +29,10 @@
     "node_modules",
     "dist",
     "**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    }
   ]
 }

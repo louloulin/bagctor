@@ -6,17 +6,18 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "bun run build:tsc",
+    "build": "rimraf dist tsconfig.tsbuildinfo && bun run build:tsc && bun run build:bundle",
     "dev": "bun run --watch src/index.ts",
-    "test": "jest",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "lint": "eslint .",
-    "test:llm": "bun test src/tests/llm_*.test.ts",
-    "test:watch": "bun test --watch",
-    "clean": "rimraf dist",
+    "test:llm": "NODE_OPTIONS=--experimental-vm-modules bun test src/tests/llm_*.test.ts",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules bun test --watch",
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
     "example:agent": "bun run src/examples/agent_demo.ts",
     "example:bus": "bun run src/examples/bus_message_demo.ts",
     "example:llm": "bun run src/examples/llm_demo.ts",
-    "build:tsc": "tsc"
+    "build:tsc": "tsc",
+    "build:bundle": "bun build src/index.ts --outdir=dist --target=node --format=cjs --outfile=dist/index.cjs"
   },
   "dependencies": {
     "nanoid": "^5.0.4",
@@ -79,6 +80,7 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
       "types": "./dist/index.d.ts"
     }
   }

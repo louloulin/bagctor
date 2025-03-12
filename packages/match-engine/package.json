@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "bun run src/main.ts",
-    "build": "rimraf tsconfig.tsbuildinfo && tsc -p tsconfig.json",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
     "test": "bun test",
     "example:simple": "bun run src/examples/simple_match.ts",
     "example:benchmark": "bun run src/examples/benchmark_match.ts",
@@ -22,7 +22,7 @@
     "benchmark": "bun run build:benchmark && ./dist/examples/benchmark_match",
     "check": "bun run scripts/check.ts",
     "compile": "tsc --noEmit",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@bactor/core": "workspace:*",

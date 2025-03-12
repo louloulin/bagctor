@@ -2,7 +2,7 @@ import { ActorSystem } from '@bactor/core';
 import { Message } from '@bactor/core';
 import { createRouter, RouterConfig, Actor, ActorContext } from '@bactor/core';
 import { configureLogger } from '@bactor/core';
-import * as DecimalJs from 'decimal.js';
+import Decimal from 'decimal.js';
 import { MatchingEngineActor } from '../actors/matching_engine_actor.js';
 import {
   Order,
@@ -17,8 +17,7 @@ import {
 } from '../models/types.js';
 
 // 使用导入的Decimal类型
-const Decimal = DecimalJs.default || DecimalJs;
-type DecimalType = DecimalJs.Decimal;
+type DecimalType = Decimal;
 
 // 统计处理器Actor
 class StatsHandlerActor extends Actor {

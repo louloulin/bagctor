@@ -1,48 +1,32 @@
-# Bird Checker Agent
+# Bird Checker Example
 
 A simple example agent to determine if an image contains a bird.
 
 ## Prerequisites
 
-- Node.js v20.0+
-- pnpm (recommended) or npm
-- Anthropic API key
+- Node.js (>=18)
+- Bun (recommended)
+- OpenAI API key
 
-## Getting Started
+## Installation
 
-1. Clone the repository and navigate to the project directory:
+1. Clone the repository
+2. Install dependencies:
 
-   ```bash
-   git clone https://github.com/mastra-ai/mastra
-   cd examples/basics/agents/bird-checker
-   ```
+```bash
+bun install
+```
 
-2. Copy the environment variables file and add your Anthropic API key and Unsplash access token:
+## Running the Example
 
-   ```bash
-   cp .env.example .env
-   ```
+1. Set your OpenAI API key in `.env`:
 
-   Then edit `.env` and add your Anthropic API key:
+```bash
+OPENAI_API_KEY=your-api-key
+```
 
-   ```env
-   ANTHROPIC_API_KEY=sk-your-api-key-here
-   ```
+2. Start the example:
 
-   Finally add your Unsplash access token:
-
-   ```env
-   ANTHROPIC_API_KEY=sk-your-api-key-here
-   ```
-
-3. Install dependencies:
-
-   ```
-   pnpm install
-   ```
-
-4. Run the example:
-
-   ```bash
-   pnpm start
-   ```
+```bash
+bun start
+```

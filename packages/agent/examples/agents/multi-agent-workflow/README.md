@@ -1,14 +1,14 @@
-# Multi-Agent Workflow
+# Multi-agent Workflow
 
 A sequential agentic workflow that calls two agents to create blog post content.
 
 ## Prerequisites
 
-- Node.js v20.0+
-- pnpm (recommended) or npm
-- Anthropic API key
+- Node.js (>=18)
+- Bun (recommended)
+- OpenAI API key
 
-## Getting Started
+## Installation
 
 1. Clone the repository and navigate to the project directory:
 
@@ -17,27 +17,28 @@ A sequential agentic workflow that calls two agents to create blog post content.
    cd examples/basics/agents/agents-as-tools
    ```
 
-2. Copy the environment variables file and add your Anthropic and OpenAI API keys:
+2. Copy the environment variables file and add your OpenAI API key:
 
    ```bash
    cp .env.example .env
    ```
 
-   Then edit `.env` and add your Anthropic API key and your OpenAI API key:
+   Then edit `.env` and add your OpenAI API key:
 
    ```env
-   ANTHROPIC_API_KEY=sk-your-api-key-here
-   OPENAI_API_KEY=sk-your-api-key-here
+   OPENAI_API_KEY=your-api-key
    ```
 
 3. Install dependencies:
 
-   ```
-   pnpm install
+   ```bash
+   bun install
    ```
 
-4. Run the example:
+## Running the Example
+
+1. Start the example:
 
    ```bash
-   pnpm start
+   bun start
    ```

@@ -34,7 +34,73 @@ bagctor/
 │       │   └── types.ts  # Agent system types
 │       └── package.json
 ├── package.json        # Workspace management
-└── bun.workspace.ts    # Bun workspace configuration
+├── turbo.json          # Turborepo configuration
+└── bunfig.toml         # Bun configuration
+```
+
+## Development Setup
+
+This project uses [Bun](https://bun.sh) as the JavaScript runtime and package manager, combined with [Turborepo](https://turbo.build) for optimized monorepo management.
+
+### Prerequisites
+
+- Install Bun: `curl -fsSL https://bun.sh/install | bash`
+
+### Getting Started
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/bagctor.git
+cd bagctor
+```
+
+2. Install dependencies:
+```bash
+bun install
+```
+
+3. Build all packages:
+```bash
+bun run build
+```
+
+### Development Workflow
+
+- Start development mode for all packages:
+```bash
+bun run dev
+```
+
+- Run tests:
+```bash
+bun run test
+```
+
+- Clean build artifacts:
+```bash
+bun run clean
+```
+
+- Run a specific example:
+```bash
+bun run example:match
+# or
+bun run example:web
+```
+
+### Using the Helper Script
+
+For operations not covered by Turborepo, you can use the helper script:
+
+```bash
+# Run a specific command in all packages
+bun scripts/turbo-helper.js run-all <command>
+
+# Clean all packages
+bun scripts/turbo-helper.js clean-all
+
+# Show help
+bun scripts/turbo-helper.js help
 ```
 
 ## Core Features

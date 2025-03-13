@@ -1,0 +1,79 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "globalDependencies": [
+        "**/.env.*local"
+    ],
+    "globalEnv": [
+        "PATH",
+        "NODE_ENV",
+        "BUN_RUNTIME"
+    ],
+    "tasks": {
+        "build": {
+            "dependsOn": [
+                "^build"
+            ],
+            "outputs": [
+                "dist/**",
+                "**/*.d.ts"
+            ],
+            "cache": true,
+            "inputs": [
+                "src/**/*.ts",
+                "src/**/*.tsx",
+                "src/**/*.js",
+                "tsconfig.json",
+                "package.json"
+            ]
+        },
+        "build:tsc": {
+            "dependsOn": [
+                "^build"
+            ],
+            "outputs": [
+                "dist/**/*.js",
+                "dist/**/*.d.ts"
+            ],
+            "cache": true
+        },
+        "build:bundle": {
+            "dependsOn": [
+                "build:tsc"
+            ],
+            "outputs": [
+                "dist/**/*.cjs",
+                "dist/**/*.mjs"
+            ],
+            "cache": true
+        },
+        "test": {
+            "dependsOn": [
+                "build"
+            ],
+            "inputs": [
+                "src/**/*.ts",
+                "src/**/*.tsx",
+                "test/**/*.ts",
+                "test/**/*.tsx"
+            ],
+            "outputs": [],
+            "cache": true
+        },
+        "dev": {
+            "cache": false,
+            "persistent": true
+        },
+        "clean": {
+            "cache": false
+        },
+        "example:*": {
+            "dependsOn": [
+                "build"
+            ],
+            "cache": false
+        },
+        "lint": {
+            "outputs": []
+        }
+    }
+}

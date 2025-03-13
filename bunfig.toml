@@ -5,6 +5,8 @@ enable = true
 exact = true
 lockfile = true
 peer = true
+production = false
+registry = "https://registry.npmjs.org/"
 
 [build]
 minify = true
@@ -17,3 +19,9 @@ coverage = true
 [dev]
 port = 3000
 open = false
+
+[typescript]
+prefer-types = true
+
+[turbo]
+enabled = true

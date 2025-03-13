@@ -27,7 +27,7 @@ const spawn = (cmd: string, args: ReadonlyArray<string>) =>
 
 let output: RollupOutput['output'] | null = null;
 beforeAll(async () => {
-  await spawn('pnpm', ['build']);
+  await spawn('bun', ['run', 'build']);
 
   const bundler = await rollup({
     logLevel: 'silent',

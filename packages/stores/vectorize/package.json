@@ -20,7 +20,7 @@
   "scripts": {
     "build": "bun run rimraf dist tsconfig.tsbuildinfo && bun build ./src/index.ts --outdir=./dist --target=node --format=esm --external '*' && bun build ./src/index.ts --outfile=./dist/index.cjs --target=node --format=cjs --external '*'",
     "build:watch": "bun build ./src/index.ts --outdir=./dist --target=node --format=esm --watch --external '*'",
-    "test": "vitest run",
+    "test": "bun test",
     "lint": "eslint .",
     "clean": "bun run rimraf dist tsconfig.tsbuildinfo"
   },

@@ -43,7 +43,7 @@
     "build": "bun run rimraf dist tsconfig.tsbuildinfo && bun build ./src/index.ts --outdir=./dist --target=node --format=esm --external '*' && bun build ./src/index.ts --outfile=./dist/index.cjs --target=node --format=cjs --external '*'",
     "build:esm": "bun run rimraf dist tsconfig.tsbuildinfo && bun build ./src/index.ts --outdir=./dist --target=node --format=esm --external '*'",
     "build:watch": "bun build ./src/index.ts --outdir=./dist --target=node --format=esm --watch --external '*'",
-    "test:integration": "cd integration-tests && pnpm run test",
+    "test:integration": "cd integration-tests && bun run test",
     "test": "bun run vitest run",
     "lint": "eslint .",
     "clean": "bun run rimraf dist tsconfig.tsbuildinfo"

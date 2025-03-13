@@ -1,12 +1,11 @@
 import { cohere } from '@ai-sdk/cohere';
 import { CohereRelevanceScorer } from '@bactor/agent/relevance';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, mock } from 'bun:test';
 
 import { rerank } from '.';
 
-vi.spyOn(CohereRelevanceScorer.prototype, 'getRelevanceScore').mockImplementation(async () => {
-  return 1;
-});
+const mockGetRelevanceScore = mock(() => Promise.resolve(1));
+CohereRelevanceScorer.prototype.getRelevanceScore = mockGetRelevanceScore;
 
 const getScoreSpreads = (results1: any, results2: any) => {
   const scoreSpread1 = Math.max(...results1.map((r: any) => r.score)) - Math.min(...results1.map((r: any) => r.score));
@@ -15,10 +14,6 @@ const getScoreSpreads = (results1: any, results2: any) => {
 };
 
 describe('rerank', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('should throw an error if weights do not add up to 1', async () => {
     const results = [
       { id: '1', metadata: { text: 'Test result 1' }, score: 0.5 },

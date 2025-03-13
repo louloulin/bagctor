@@ -22,7 +22,7 @@
     "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json && bun build src/index.ts --outfile=dist/index.cjs --target=browser --format=cjs",
     "build:esm": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
     "build:watch": "tsc -p tsconfig.json --watch",
-    "test": "vitest run",
+    "test": "bun test",
     "lint": "eslint .",
     "clean": "rimraf dist tsconfig.tsbuildinfo"
   },

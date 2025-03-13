@@ -22,9 +22,9 @@ export enum PersistenceStrategy {
 }
 
 export enum ReplayStrategy {
-    FROM_BEGINNING = 'FROM_BEGINNING',
-    FROM_LAST_CHECKPOINT = 'FROM_LAST_CHECKPOINT',
-    CUSTOM = 'CUSTOM'
+    SEQUENTIAL = 'SEQUENTIAL',
+    PARALLEL = 'PARALLEL',
+    BATCH = 'BATCH'
 }
 
 export interface MessageEnvelope {

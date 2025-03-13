@@ -21,6 +21,7 @@
     "@bactor/common": "workspace:*",
     "fastq": "^1.15.0",
     "pino": "^8.17.0",
+    "pino-pretty": "13.0.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

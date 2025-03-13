@@ -1,49 +1,53 @@
 /// <reference types="bun-types" />
 import { expect, test, describe } from 'bun:test';
-import { Actor, PID, Props, ActorContext, ActorSystem } from '@bactor/core';
+import { Actor, Props, ActorContext, ActorSystem, DefaultMailbox } from '@bactor/core';
+import { PID, Message } from '@bactor/common';
 import { MiddlewareManager } from '../src/middleware/manager';
 import { LoggerMiddleware, CorsMiddleware, AuthMiddleware } from '../src/middleware/common';
 import { HttpRequest } from '../src/types';
 
-// Mock ActorContext
-class MockActorContext implements ActorContext {
-  self: PID;
-  pid: PID;
-  system: ActorSystem;
-  mailbox: any[] = [];
-  children: Map<string, PID> = new Map();
-  parent?: PID;
-  behaviors: Map<string, any> = new Map();
-  currentBehavior?: string;
-
+// Mock ActorSystem for testing
+class MockActorSystem extends ActorSystem {
   constructor() {
-    this.self = {
-      id: 'test',
-      send: async (message: any) => {
-        if (message.type === 'middleware.add') {
-          return { type: 'ok' };
-        }
-        return { type: 'middleware.result', payload: { handled: false } };
-      }
-    };
-    this.pid = this.self;
-    this.system = {
-      spawn: async () => ({ id: 'spawned' }),
-      stop: async () => {},
-      send: async () => ({ type: 'middleware.result', payload: { handled: false } })
-    } as any;
+    super();
   }
 
-  async send(target: PID, message: any): Promise<any> {
+  async send(pid: PID, message: Message): Promise<any> {
+    return { type: 'middleware.result', payload: { handled: false } };
+  }
+
+  async spawn(props: Props): Promise<PID> {
+    return { id: 'spawned' };
+  }
+}
+
+// Mock ActorContext
+class MockActorContext extends ActorContext {
+  private _selfPid: PID;
+
+  constructor() {
+    const pid = { id: 'test' };
+    const system = new MockActorSystem();
+    super(pid, system, DefaultMailbox);
+    this._selfPid = pid;
+  }
+
+  get self(): PID {
+    return this._selfPid;
+  }
+
+  async send(target: PID, message: Message): Promise<any> {
     if (message.type === 'middleware.add') {
       return { type: 'ok' };
     }
     return { type: 'middleware.result', payload: { handled: false } };
   }
+
   async spawn(props: Props): Promise<PID> {
     return { id: 'spawned' };
   }
-  async stop(pid: PID): Promise<void> {}
+
+  async stop(pid: PID): Promise<void> { }
 }
 
 // Test classes to access protected methods
@@ -84,28 +88,25 @@ describe('Middleware Tests', () => {
       const authPID = { id: 'auth' } as PID;
 
       // Add middlewares
-      await manager.getContext().self.send({
+      await manager.getContext().send(manager.getContext().self, {
         type: 'middleware.add',
         payload: loggerPID
       });
 
-      await manager.getContext().self.send({
+      await manager.getContext().send(manager.getContext().self, {
         type: 'middleware.add',
         payload: authPID
       });
 
-      // Create test request
-      const request: HttpRequest = {
+      // Process request
+      const request = {
         method: 'GET',
         url: '/test',
-        headers: new Headers({
-          'Authorization': 'Bearer demo-token'
-        }),
+        headers: new Headers(),
         state: new Map()
-      };
+      } as HttpRequest;
 
-      // Process request
-      const response = await manager.getContext().self.send({
+      const response = await manager.getContext().send(manager.getContext().self, {
         type: 'middleware.process',
         payload: request
       });

@@ -1,3 +1,5 @@
+import { PID, Message } from '@bactor/common';
+
 // Forward declarations to avoid circular dependencies
 export type Actor = any;
 export type ActorContext = any;
@@ -20,21 +22,8 @@ export interface MessageDispatcher {
   schedule(runner: () => Promise<void>): void;
 }
 
-export interface Message {
-  type: string;
-  payload?: any;
-  sender?: PID;
-  // Additional properties for router messages
-  index?: number;
-  content?: string;
-  routee?: PID;
-  messageId?: string;  // Optional field for tracking message flow
-}
-
-export interface PID {
-  id: string;
-  address?: string;  // Format: "host:port", e.g., "localhost:50051"
-}
+// Re-export Message and PID from common
+export { Message, PID };
 
 export interface Props {
   // Class-based actor
@@ -48,6 +37,15 @@ export interface Props {
   address?: string;
   actorContext?: any;
 }
+
+// Concrete implementation for runtime use
+export const Props = {
+  create: (options: Partial<Props> = {}): Props => {
+    return {
+      ...options
+    };
+  }
+};
 
 export enum SupervisorDirective {
   Resume,

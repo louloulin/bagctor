@@ -1,12 +1,12 @@
 import { expect, test, mock, beforeEach, afterEach, describe } from "bun:test";
-import { ClusterManager } from "../../core/cluster/cluster_manager";
+import { ClusterManager } from "@bactor/cluster";
 import {
     ClusterConfig,
     NodeStatus,
     ReconnectionStrategy,
     MembershipProtocol,
     ClusterEventType
-} from "../../core/cluster/types";
+} from "@bactor/cluster";
 
 describe('ClusterManager', () => {
     let clusterManager: ClusterManager;
@@ -41,7 +41,7 @@ describe('ClusterManager', () => {
         expect(registeredNode?.status).toBe(NodeStatus.ACTIVE);
     });
 
-    test('should update node heartbeat', () => {
+    test('should update node heartbeat', async () => {
         const nodeInfo = {
             id: 'node1',
             address: 'localhost:8080',
@@ -52,7 +52,7 @@ describe('ClusterManager', () => {
         const initialHeartbeat = clusterManager.getNodeInfo(nodeInfo.id)?.lastHeartbeat;
 
         // Wait a bit before updating heartbeat
-        new Promise(resolve => setTimeout(resolve, 10));
+        await new Promise(resolve => setTimeout(resolve, 10));
 
         clusterManager.updateNodeHeartbeat(nodeInfo.id);
         const updatedHeartbeat = clusterManager.getNodeInfo(nodeInfo.id)?.lastHeartbeat;
@@ -105,8 +105,9 @@ describe('ClusterManager', () => {
             setTimeout(resolve, (defaultConfig.failureDetectionThreshold * 2) + 100)
         );
 
+        // Node should be removed from the cluster after being marked as dead
         const node = clusterManager.getNodeInfo(nodeInfo.id);
-        expect(node?.status).toBe(NodeStatus.DEAD);
+        expect(node).toBeUndefined();
         expect(deadEventReceived).toBe(true);
     });
 

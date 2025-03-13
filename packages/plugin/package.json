@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@bactor/core": "workspace:*",
+    "@bactor/common": "workspace:*",
     "chokidar": "^3.5.3",
     "debug": "^4.3.4",
     "fs-extra": "^11.2.0",

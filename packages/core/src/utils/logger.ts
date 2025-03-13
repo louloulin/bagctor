@@ -166,6 +166,11 @@ export class LoggerManager {
 const loggerManager = LoggerManager.getInstance();
 export const logger = loggerManager.getLogger();
 
+// Export configuration methods
+export const configureLogger = (config: Partial<LoggerConfig>) => {
+  loggerManager.updateConfig(config);
+};
+
 // Export convenience methods with trace context
 export const log = {
   trace: (msg: string, ...args: any[]) => {
@@ -197,11 +202,6 @@ export const log = {
 // Create child loggers with context
 export const createLogger = (context: string) => {
   return loggerManager.getLogger(context);
-};
-
-// Export configuration methods
-export const configureLogger = (config: Partial<LoggerConfig>) => {
-  loggerManager.updateConfig(config);
 };
 
 // Export trace context methods

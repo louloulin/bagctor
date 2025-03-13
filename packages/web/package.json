@@ -19,7 +19,8 @@
     "clean": "rimraf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@bactor/core": "workspace:*"
+    "@bactor/core": "workspace:*",
+    "@bactor/common": "workspace:*"
   },
   "devDependencies": {
     "@types/autocannon": "^7.12.6",

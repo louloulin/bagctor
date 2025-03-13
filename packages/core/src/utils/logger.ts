@@ -76,7 +76,7 @@ export class LoggerManager {
 
   private getDefaultConfig(): LoggerConfig {
     return {
-      level: process.env.LOG_LEVEL || 'info',
+      level: process.env.NODE_ENV === 'test' ? 'error' : 'info',
       enabled: true,
       prettyPrint: true,
       customLevels: {
@@ -135,7 +135,7 @@ export class LoggerManager {
         target: 'pino-pretty',
         options: {
           colorize: true,
-          translateTime: 'HH:MM:ss Z',
+          translateTime: 'HH:MM:ss UTC',
           ignore: 'pid,hostname',
         },
       };

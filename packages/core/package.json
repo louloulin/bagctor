@@ -13,9 +13,14 @@
   "scripts": {
     "dev": "tsc -p tsconfig.json --watch",
     "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
-    "test": "bun test",
-    "clean": "rimraf dist tsconfig.tsbuildinfo",
-    "test:watch": "bun test --watch"
+    "test": "NODE_ENV=test bun test src/tests/**/*.test.ts --config ./test.config.ts",
+    "test:watch": "NODE_ENV=test bun test src/tests/**/*.test.ts --config ./test.config.ts --watch",
+    "test:coverage": "NODE_ENV=test bun test src/tests/**/*.test.ts --config ./test.config.ts --coverage",
+    "test:ci": "NODE_ENV=test bun test src/tests/**/*.test.ts --config ./test.config.ts --coverage --bail",
+    "test:unit": "NODE_ENV=test bun test src/tests/unit/**/*.test.ts --config ./test.config.ts",
+    "test:integration": "NODE_ENV=test bun test src/tests/integration/**/*.test.ts --config ./test.config.ts",
+    "test:performance": "NODE_ENV=test bun test src/tests/performance/**/*.test.ts --config ./test.config.ts --timeout 10000",
+    "clean": "rimraf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@bactor/common": "workspace:*",

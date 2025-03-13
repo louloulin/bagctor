@@ -1,4 +1,4 @@
-# Bagctor
+# Bagtor
 
 Bagctor (Bactor + AI Agent) is a hybrid framework that combines the Actor model with AI Agent capabilities, designed for building intelligent, distributed systems. It seamlessly integrates traditional actor-based concurrency with modern AI agent architectures, enabling the development of scalable, reactive, and intelligent applications.
 

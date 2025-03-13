@@ -4,18 +4,24 @@ import { ActorSystem } from './system';
 
 export class ActorContext implements IActorContext {
   private mailbox: IMailbox;
+  protected system: ActorSystem;
   private children: Map<string, PID> = new Map();
   private parent?: PID;
   private supervisorStrategy?: SupervisorStrategy;
-  
+  private pid: PID;
+
   constructor(
-    private pid: PID,
-    private system: ActorSystem,
-    mailboxType?: new () => IMailbox,
-    supervisorStrategy?: SupervisorStrategy
+    pid: PID,
+    system: ActorSystem,
+    mailboxType: new () => IMailbox = DefaultMailbox,
+    supervisorStrategy?: SupervisorStrategy,
+    parent?: PID
   ) {
-    this.mailbox = mailboxType ? new mailboxType() : new DefaultMailbox();
+    this.pid = pid;
+    this.system = system;
+    this.mailbox = new mailboxType();
     this.supervisorStrategy = supervisorStrategy;
+    this.parent = parent;
   }
 
   get self(): PID {
@@ -98,5 +104,9 @@ export class ActorContext implements IActorContext {
         }
         break;
     }
+  }
+
+  postMessage(message: Message): void {
+    this.mailbox.postUserMessage(message);
   }
 } 

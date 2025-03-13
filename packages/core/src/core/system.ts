@@ -151,19 +151,18 @@ export class ActorSystem {
     }
 
     // Local message sending
-    const actor = this.actors.get(pid.id);
-    if (actor) {
-      try {
-        await actor.receive(message);
-      } catch (error) {
-        await this.handleActorError(pid, error as Error);
-      }
-    } else {
-      this.deadLetters.push(message);
-      // Notify all message handlers about the dead letter
-      for (const handler of this.messageHandlers) {
-        await handler(message);
-      }
+    const context = this.contexts.get(pid.id);
+    if (context) {
+      // 使用邮箱进行消息传递，而不是直接调用 receive
+      context.mailbox.postUserMessage(message);
+      return;
+    }
+
+    // Handle dead letters
+    this.deadLetters.push(message);
+    // Notify all message handlers about the dead letter
+    for (const handler of this.messageHandlers) {
+      await handler(message);
     }
   }
 

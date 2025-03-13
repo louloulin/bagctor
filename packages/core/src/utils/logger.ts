@@ -23,7 +23,7 @@ export class TraceContext {
   private static instance: TraceContext;
   private store: Map<string, any> = new Map();
 
-  private constructor() {}
+  private constructor() { }
 
   static getInstance(): TraceContext {
     if (!TraceContext.instance) {
@@ -92,7 +92,7 @@ export class LoggerManager {
 
   updateConfig(newConfig: Partial<LoggerConfig>): void {
     this.config = { ...this.config, ...newConfig };
-    
+
     // Clear existing loggers
     this.loggers.clear();
     this.baseLogger = undefined;
@@ -135,7 +135,7 @@ export class LoggerManager {
         target: 'pino-pretty',
         options: {
           colorize: true,
-          translateTime: 'SYS:standard',
+          translateTime: 'HH:MM:ss Z',
           ignore: 'pid,hostname',
         },
       };

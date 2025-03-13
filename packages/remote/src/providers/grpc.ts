@@ -1,8 +1,8 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import { Message } from '../../core/types';
+import { Message } from '@bactor/common';
 import { TransportProvider, GrpcTransportOptions } from '../transport';
-import { log } from '../../utils/logger';
+import { log } from '@bactor/common';
 import { join } from 'path';
 
 /**

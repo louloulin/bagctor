@@ -1,9 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Message, PID, Props } from './types';
+import { log } from '../utils/logger';
 import { Actor } from './actor';
 import { ActorContext } from './context';
-import { ActorClient } from '../remote/client';
-import { ActorServer } from '../remote/server';
+import type { ActorClient, ActorServer, RemoteActorFactory } from '@bactor/common';
+import { Message, PID, Props } from './types';
+import { DefaultMailbox } from './mailbox';
+import { DefaultDispatcher } from './dispatcher';
 
 export class ActorSystem {
   private actors: Map<string, Actor> = new Map();
@@ -13,10 +15,12 @@ export class ActorSystem {
   private server?: ActorServer;
   private actorClasses: Map<string, new (context: ActorContext) => Actor> = new Map();
   private messageHandlers: Set<(message: Message) => Promise<void>> = new Set();
+  private remoteFactory?: RemoteActorFactory;
 
-  constructor(protected address?: string) {
-    if (address) {
-      this.server = new ActorServer(address);
+  constructor(protected address?: string, remoteFactory?: RemoteActorFactory) {
+    this.remoteFactory = remoteFactory;
+    if (address && remoteFactory) {
+      this.server = remoteFactory.createServer(address);
     }
   }
 
@@ -26,7 +30,7 @@ export class ActorSystem {
       for (const [name, actorClass] of this.actorClasses) {
         this.server.registerActor(name, actorClass);
       }
-      await this.server.start();
+      await this.server.start(0); // Port will be determined by the server implementation
     }
   }
 
@@ -200,8 +204,11 @@ export class ActorSystem {
   private async getOrCreateClient(address: string): Promise<ActorClient> {
     let client = this.remoteClients.get(address);
     if (!client) {
-      client = new ActorClient(address);
-      await client.connect();
+      if (!this.remoteFactory) {
+        throw new Error('Remote factory not configured');
+      }
+      client = this.remoteFactory.createClient(address);
+      await client.connect(address);
       this.remoteClients.set(address, client);
     }
     return client;

@@ -16,9 +16,9 @@ import { gossipsub } from '@chainsafe/libp2p-gossipsub';
 import { identify } from '@libp2p/identify';
 // @ts-ignore
 import { multiaddr } from '@multiformats/multiaddr';
-import { Message } from '../../core/types';
+import { Message } from '@bactor/common';
 import { TransportProvider, Libp2pTransportOptions } from '../transport';
-import { log } from '../../utils/logger';
+import { log } from '@bactor/common';
 
 const PROTOCOL = '/bactor/1.0.0';
 const TOPIC = 'bactor-messages';

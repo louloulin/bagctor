@@ -1,25 +1,19 @@
-// Core types and interfaces
-export type { Props, PID, Message } from './core/types';
-
-// Core implementations
+// Core functionality
 export { Actor } from './core/actor';
-export { ActorSystem } from './core/system';
 export { ActorContext } from './core/context';
+export { ActorSystem } from './core/system';
+export { Message, PID, Props } from './core/types';
 export { PropsBuilder } from './core/props';
 export { DefaultMailbox, PriorityMailbox } from './core/mailbox';
 export { DefaultDispatcher, ThreadPoolDispatcher, ThroughputDispatcher } from './core/dispatcher';
-
-// Router functionality
-export { createRouter } from './core/router';
 export type { RouterConfig, RouterType, IRouter } from './core/router';
-export { BroadcastRouter, RoundRobinRouter, RandomRouter } from './core/router';
+export { BroadcastRouter, RoundRobinRouter, RandomRouter, createRouter } from './core/router';
 
-// Logger functionality
-export { configureLogger, createLogger, log, trace } from './utils/logger';
+// Utilities
+export { log, configureLogger, createLogger, trace } from './utils/logger';
 export type { LoggerConfig } from './utils/logger';
 
-// Remote functionality
-export { ActorClient } from './remote/client';
-export { ActorServer } from './remote/server';
-export type { TransportProvider as RemoteTransport } from './remote/transport';
-export { RemoteActorSystem } from './remote/remote_actor_system'; 
+// Messaging
+export * from './core/messaging/types';
+export * from './core/messaging/delivery_tracker';
+export * from './core/messaging/memory_message_store'; 

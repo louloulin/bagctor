@@ -1,4 +1,4 @@
-import { Message } from '../core/types';
+import { Message } from '@bactor/common';
 
 /**
  * Base interface for transport providers
@@ -116,4 +116,11 @@ export class TransportProviderRegistry {
     }
     return provider as new (options: T) => TransportProvider;
   }
+}
+
+export interface Transport {
+  connect(address: string): Promise<void>;
+  disconnect(): Promise<void>;
+  send(message: Message): Promise<void>;
+  receive(): AsyncIterator<Message>;
 } 

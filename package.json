@@ -5,7 +5,13 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "packages/stores/*"
+    "packages/stores/*",
+    "packages/agent/examples/*",
+    "packages/agent/examples/agents/*",
+    "packages/agent/examples/workflows/*"
+  ],
+  "trustedDependencies": [
+    "canvas"
   ],
   "scripts": {
     "build": "turbo run build",
@@ -34,7 +40,8 @@
   },
   "dependencies": {
     "@libp2p/plaintext": "^2.0.13",
-    "lru-cache": "^11.0.2"
+    "lru-cache": "^11.0.2",
+    "qwen-ai-provider": "0.1.0"
   },
   "packageManager": "bun@1.0.28"
 }

@@ -1,10 +1,10 @@
-# Bagctor
+# Bactor
 
-Bagctor (Bactor + AI Agent) 是一个混合框架，将 Actor 模型与 AI Agent 能力相结合，用于构建智能分布式系统。它无缝集成了传统的基于 Actor 的并发模型和现代 AI 代理架构，使开发者能够构建可扩展的、响应式的、智能化的应用程序。
+Bactor (actor + AI Agent) 是一个混合框架，将 Actor 模型与 AI Agent 能力相结合，用于构建智能分布式系统。它无缝集成了传统的基于 Actor 的并发模型和现代 AI 代理架构，使开发者能够构建可扩展的、响应式的、智能化的应用程序。
 
 ## 概述
 
-Bagctor 提供两个主要组件：
+Bactor 提供两个主要组件：
 1. 用于处理并发和分布式的强大 Actor 系统
 2. 基于 Actor 模型的 AI Agent 框架，用于协调智能代理
 
@@ -37,7 +37,7 @@ bagctor/
 
 ## 核心功能
 
-### @bagctor/core
+### @bactor/core
 
 核心 Actor 系统提供以下功能：
 

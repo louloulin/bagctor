@@ -510,130 +510,140 @@ private async sendBatchRemote(address: string, targets: PID[], message: Message)
 
 ### 5.3 长期优化 (高收益/高成本)
 
-#### A. 重构消息处理流水线 [PLANNED]
+#### A. 重构消息处理流水线 [PHASE 3]
 
-设计完整的消息流水线，从发送到处理，每个环节都优化：
-
-```typescript
-// 发送阶段 - 不阻塞发送方
-send(pid: PID, message: Message): void {
-  const target = this.lookupTarget(pid);
-  if (target) {
-    target.enqueue(message);
-  } else {
-    this.handleDeadLetter(message, pid);
-  }
-}
-
-// 入队阶段 - 高效队列和背压处理
-enqueue(message: Message): void {
-  if (this.mailbox.isFull() && this.mailboxConfig.backpressureStrategy === 'drop') {
-    this.metrics.incrementDropped();
-    return;
-  }
-  
-  this.mailbox.push(message);
-  this.scheduleProcessing();
-}
-
-// 调度阶段 - 智能调度和批处理
-private scheduleProcessing(): void {
-  if (this.processingScheduled) return;
-  this.processingScheduled = true;
-  
-  this.dispatcher.schedule(() => {
-    this.processingScheduled = false;
-    
-    // 批量处理多条消息
-    const batch = this.mailbox.takeBatch(this.batchSize);
-    if (batch.length === 0) return;
-    
-    // 预处理所有消息
-    batch.forEach(msg => this.prepareMessage(msg));
-    
-    // 分发处理
-    return this.processBatch(batch);
-  });
-}
-
-// 处理阶段 - 高效分发和错误处理
-private async processBatch(batch: Message[]): Promise<void> {
-  for (const message of batch) {
-    try {
-      await this.dispatchToHandler(message);
-    } catch (error) {
-      this.supervisorStrategy.handleError(error, message);
-    }
-  }
-}
-
-// 分发阶段 - 缓存行为和直接调用
-private dispatchToHandler(message: Message): Promise<void> {
-  // 有类型信息的分发比查找Map更高效
-  switch (message.type) {
-    case 'TYPE_A': return this.handleTypeA(message);
-    case 'TYPE_B': return this.handleTypeB(message);
-    default: return this.dispatchByBehavior(message);
-  }
-}
-```
-
-**预期收益**:
-- 端到端优化整个消息流程
-- 各个环节解耦，便于独立优化
-- 提高系统整体吞吐量和响应时间
-- 更好的错误隔离和恢复能力
-
-#### D. 路由优化 [IMPLEMENTED]
-
-优化路由策略和实现，提高消息分发效率：
+实现一个高效的消息处理管道，优化消息流从发送到处理的过程。
 
 ```typescript
-export class OptimizedRouter extends Router {
-  // 快速路径优化
-  async route(message: Message): Promise<void> {
-    // 单个路由目标的快速路径
-    if (this.routees.length === 1) {
-      await this.sendToRoutee(this.routees[0], message);
-      return;
-    }
-    
-    // 优化的互斥锁获取
-    if (this.tryOptimisticRoute(message)) {
-      return;
-    }
-    
-    // 回退到常规路由
-    await this.standardRoute(message);
-  }
+// 消息处理管道 - 处理消息的路由、中间件处理和批处理
+export class MessagePipeline {
+  private readonly config: Required<MessagePipelineConfig>;
+  private readonly middlewareChain: MiddlewareChain;
+  private readonly deadLetterTarget: DeadLetterTarget;
   
-  // 一致性哈希优化
-  private buildConsistentHashRing(): void {
-    // 使用预排序的键和二分查找加速查找过程
-    this.sortedKeys = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
-  }
+  // 缓存已解析的目标，提高路由性能
+  private readonly targetCache = new Map<string, MessageTarget>();
   
-  // 减少消息复制开销
-  private async sendToRoutee(routee: PID, message: Message): Promise<void> {
-    // 最小化消息对象创建
-    const routedMessage: Message = {
-      type: message.type,
-      payload: message.payload,
-      // 仅在需要时添加其他字段
-      ...(message.sender && { sender: message.sender })
+  constructor(
+    private readonly system: ActorSystem,
+    config?: MessagePipelineConfig,
+    middlewareChain?: MiddlewareChain
+  ) {
+    // 默认配置
+    this.config = {
+      maxBatchSize: 100,
+      enableBatchProcessing: true,
+      maxConcurrentBatches: 10,
+      bufferLimit: 10000,
+      routingTimeoutMs: 5000,
+      ...config
     };
     
-    await this.system.send(routee, routedMessage);
+    this.middlewareChain = middlewareChain || new MiddlewareChain();
+    this.deadLetterTarget = new DeadLetterTarget(system);
+  }
+
+  // 发送单个消息到目标
+  async send(target: PID, message: Message): Promise<boolean> {
+    // 应用中间件处理
+    const processedMessage = this.middlewareChain.processSend(message, target);
+    if (!processedMessage) return false;
+    
+    // 查找目标并发送消息
+    const messageTarget = await this.lookupTarget(target);
+    if (!messageTarget) {
+      this.middlewareChain.processDeadLetter(processedMessage, target);
+      return await this.deadLetterTarget.send(processedMessage);
+    }
+    
+    return await messageTarget.send(processedMessage);
+  }
+  
+  // 批量发送消息到多个目标
+  async sendBatch(targets: PID[], messages: Message[]): Promise<boolean[]> {
+    // 对消息按目标分组，提高批处理效率
+    const batches = this.createTargetBatches(targets, messages);
+    
+    // 并行处理批次，但限制并发数
+    const results = new Array(targets.length).fill(false);
+    
+    for (const batch of batches.values()) {
+      const { target, indices, batchMessages } = batch;
+      
+      // 查找目标并发送批量消息
+      const messageTarget = await this.lookupTarget(target);
+      if (!messageTarget) continue;
+      
+      // 处理消息通过中间件并批量发送
+      const batchResults = await messageTarget.sendBatch(batchMessages);
+      
+      // 更新结果
+      for (let i = 0; i < indices.length; i++) {
+        results[indices[i]] = batchResults[i];
+      }
+    }
+    
+    return results;
   }
 }
 ```
 
-**预期收益**:
-- 减少路由策略选择和执行中的锁争用
-- 优化单路由和广播情况下的特殊路径
-- 使用二分搜索加速一致性哈希路由
-- 减少消息路由中不必要的对象创建和日志记录
-- 为路由提供预计算的缓存优化
+特点:
+1. 完全解耦消息发送和处理
+2. 支持消息中间件拦截和处理
+3. 优化的批处理性能 
+4. 目标缓存提高路由效率
+5. 死信处理和错误恢复
+6. 完整的指标收集
+
+#### B. 消息中间件系统 [IMPLEMENTED]
+
+增加一个中间件系统，用于消息拦截、转换和监控。
+
+```typescript
+/**
+ * 消息中间件接口，允许拦截和处理消息
+ */
+export interface MessageMiddleware {
+  onSend?(message: Message, target: PID): Message | null;
+  onReceive?(message: Message, target: PID): Message | null;
+  onDeadLetter?(message: Message, target: PID): void;
+  onError?(error: Error, message: Message, target: PID): void;
+}
+
+/**
+ * 中间件链 - 管理多个中间件的执行
+ */
+export class MiddlewareChain {
+  private middlewares: MessageMiddleware[] = [];
+  
+  add(middleware: MessageMiddleware): this {
+    this.middlewares.push(middleware);
+    return this;
+  }
+  
+  processSend(message: Message, target: PID): Message | null {
+    let processedMessage = message;
+    
+    for (const middleware of this.middlewares) {
+      if (middleware.onSend) {
+        const result = middleware.onSend(processedMessage, target);
+        if (!result) return null;
+        processedMessage = result;
+      }
+    }
+    
+    return processedMessage;
+  }
+}
+```
+
+常用中间件:
+1. 日志中间件 - 记录消息传递
+2. 指标中间件 - 收集性能数据
+3. 重试中间件 - 自动重试失败消息
+4. 验证中间件 - 验证消息格式和内容
+5. 安全中间件 - 加密和认证
 
 ## 6. 实施路线图
 
@@ -673,9 +683,9 @@ export class OptimizedRouter extends Router {
    - 优化远程消息批处理
    - 提升Router批处理能力
 
-### 第三阶段：架构优化 (1-2月)
+### 第三阶段：架构优化 [PHASE 3]
 
-1. **消息处理流水线**
+1. **消息处理管道**
    - 重构整体消息流程
    - 优化每个处理环节
    - 提高端到端性能

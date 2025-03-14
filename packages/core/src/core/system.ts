@@ -6,6 +6,8 @@ import type { ActorClient, ActorServer, RemoteActorFactory } from '@bactor/commo
 import { Message, PID, Props } from './types';
 import { DefaultMailbox } from './mailbox';
 import { DefaultDispatcher } from './dispatcher';
+import { MessagePipeline } from './messaging/pipeline';
+import { LoggingMiddleware, MetricsMiddleware } from './messaging/middleware';
 
 // 扩展Message类型以支持请求-响应模式和批处理
 declare module '@bactor/common' {
@@ -19,6 +21,20 @@ declare module '@bactor/common' {
   }
 }
 
+/**
+ * ActorSystem配置选项
+ */
+export interface ActorSystemConfig {
+  /** 是否启用优化的消息处理管道 */
+  useMessagePipeline?: boolean;
+  /** 是否启用消息处理指标收集 */
+  enableMetrics?: boolean;
+  /** 是否启用消息处理日志 */
+  enableMessageLogging?: boolean;
+  /** 日志级别 */
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';
+}
+
 export class ActorSystem {
   private actors: Map<string, Actor> = new Map();
   private contexts: Map<string, ActorContext> = new Map();
@@ -30,11 +46,47 @@ export class ActorSystem {
   private remoteFactory?: RemoteActorFactory;
   private responseHandlers: Map<string, { resolve: (value: any) => void; reject: (error: any) => void }> = new Map();
 
-  constructor(protected address?: string, remoteFactory?: RemoteActorFactory) {
+  // 消息处理管道相关属性
+  private messagePipeline?: MessagePipeline;
+  private readonly config: Required<ActorSystemConfig>;
+
+  constructor(protected address?: string, remoteFactory?: RemoteActorFactory, config?: ActorSystemConfig) {
     this.remoteFactory = remoteFactory;
     if (address && remoteFactory) {
       this.server = remoteFactory.createServer(address);
     }
+
+    // 初始化默认配置
+    this.config = {
+      useMessagePipeline: false,
+      enableMetrics: false,
+      enableMessageLogging: false,
+      logLevel: 'info',
+      ...config
+    };
+
+    // 如果启用了消息管道，则创建它
+    if (this.config.useMessagePipeline) {
+      this.initMessagePipeline();
+    }
+  }
+
+  /**
+   * 初始化消息处理管道
+   */
+  private initMessagePipeline(): void {
+    this.messagePipeline = new MessagePipeline(this);
+
+    // 添加中间件
+    if (this.config.enableMessageLogging) {
+      this.messagePipeline.addMiddleware(new LoggingMiddleware(this.config.logLevel));
+    }
+
+    if (this.config.enableMetrics) {
+      this.messagePipeline.addMiddleware(new MetricsMiddleware());
+    }
+
+    log.info('消息处理管道已初始化');
   }
 
   async start(): Promise<void> {
@@ -83,6 +135,11 @@ export class ActorSystem {
     // Stop the server if it exists
     if (this.server) {
       await this.server.stop();
+    }
+
+    // 清理消息管道相关资源
+    if (this.messagePipeline) {
+      this.messagePipeline.clearTargetCache();
     }
 
     // Clear all maps and collections
@@ -151,9 +208,16 @@ export class ActorSystem {
 
   /**
    * 发送消息到指定Actor
-   * 优化版：解耦发送与处理，非阻塞式消息传递
+   * 优化版：使用消息处理管道进行高效处理
    */
   async send(pid: PID, message: Message): Promise<void> {
+    // 如果启用了消息管道，则使用消息管道发送
+    if (this.config.useMessagePipeline && this.messagePipeline) {
+      await this.messagePipeline.send(pid, message);
+      return;
+    }
+
+    // 否则，使用原有实现
     // 处理远程消息发送
     if (pid.address && pid.address !== this.address) {
       const client = await this.getOrCreateClient(pid.address);
@@ -331,9 +395,18 @@ export class ActorSystem {
 
   /**
    * 批量发送消息到多个目标Actor
-   * 按地址分组优化远程消息传输
+   * 优化版：使用消息处理管道进行高效批处理
    */
   async sendBatch(targets: PID[], message: Message): Promise<void> {
+    // 如果启用了消息管道，则使用消息管道发送
+    if (this.config.useMessagePipeline && this.messagePipeline) {
+      // 为每个目标创建相同的消息
+      const messages = targets.map(() => ({ ...message }));
+      await this.messagePipeline.sendBatch(targets, messages);
+      return;
+    }
+
+    // 否则使用原有实现
     if (targets.length === 0) return;
 
     // 按地址分组目标
@@ -483,5 +556,43 @@ export class ActorSystem {
       // 等待当前批次完成后再处理下一批次
       await Promise.all(sendPromises);
     }
+  }
+
+  /**
+   * 获取消息处理指标
+   */
+  getMessageMetrics() {
+    if (this.messagePipeline) {
+      return this.messagePipeline.getMetrics();
+    }
+    return null;
+  }
+
+  /**
+   * 添加自定义消息中间件
+   */
+  addMessageMiddleware(middleware: any): void {
+    if (this.messagePipeline) {
+      this.messagePipeline.addMiddleware(middleware);
+    } else {
+      log.warn('消息管道未启用，无法添加中间件');
+    }
+  }
+
+  /**
+   * 启用消息处理管道
+   */
+  enableMessagePipeline(): void {
+    if (!this.messagePipeline) {
+      this.config.useMessagePipeline = true;
+      this.initMessagePipeline();
+    }
+  }
+
+  /**
+   * 禁用消息处理管道
+   */
+  disableMessagePipeline(): void {
+    this.config.useMessagePipeline = false;
   }
 } 

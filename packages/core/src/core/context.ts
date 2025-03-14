@@ -1,27 +1,34 @@
-import { Message, PID, Props, IMailbox, ActorContext as IActorContext, SupervisorStrategy, SupervisorDirective } from './types';
+import { Message, PID, Props, IMailbox, ActorContext as IActorContext, SupervisorStrategy, SupervisorDirective, MessageInvoker, MessageDispatcher } from './types';
 import { DefaultMailbox } from './mailbox';
 import { ActorSystem } from './system';
+import { DefaultDispatcher } from './dispatcher';
 
-export class ActorContext implements IActorContext {
+export class ActorContext implements IActorContext, MessageInvoker {
   private mailbox: IMailbox;
   protected system: ActorSystem;
   private children: Map<string, PID> = new Map();
   private parent?: PID;
   private supervisorStrategy?: SupervisorStrategy;
   private pid: PID;
+  private dispatcher: MessageDispatcher;
 
   constructor(
     pid: PID,
     system: ActorSystem,
     mailboxType: new () => IMailbox = DefaultMailbox,
     supervisorStrategy?: SupervisorStrategy,
-    parent?: PID
+    parent?: PID,
+    dispatcher: MessageDispatcher = new DefaultDispatcher()
   ) {
     this.pid = pid;
     this.system = system;
     this.mailbox = new mailboxType();
     this.supervisorStrategy = supervisorStrategy;
     this.parent = parent;
+    this.dispatcher = dispatcher;
+
+    // 注册消息处理器
+    this.mailbox.registerHandlers(this, this.dispatcher);
   }
 
   get self(): PID {
@@ -138,6 +145,44 @@ export class ActorContext implements IActorContext {
           });
         }
         break;
+    }
+  }
+
+  // 实现MessageInvoker接口
+  async invokeSystemMessage(message: Message): Promise<void> {
+    const actor = this.system.getActor(this.pid.id);
+    if (!actor) return;
+
+    // 处理系统消息
+    if (message.type === '$system.restart') {
+      await actor.preRestart(message.payload?.reason);
+      await actor.postRestart(message.payload?.reason);
+    } else if (message.type === '$system.stop') {
+      await actor.postStop();
+    } else if (message.type === '$system.failure') {
+      await this.handleFailure(message.payload.child, message.payload.error);
+    }
+  }
+
+  async invokeUserMessage(message: Message): Promise<void> {
+    const actor = this.system.getActor(this.pid.id);
+    if (!actor) return;
+
+    try {
+      await actor.receive(message);
+    } catch (error) {
+      await this.system.handleActorError(this.pid, error as Error);
+    }
+  }
+
+  async invoke(message: Message): Promise<void> {
+    // 根据消息类型调用相应的处理方法
+    if (message.type && (message.type === '$system.restart' ||
+      message.type === '$system.stop' ||
+      message.type.startsWith('system'))) {
+      await this.invokeSystemMessage(message);
+    } else {
+      await this.invokeUserMessage(message);
     }
   }
 } 

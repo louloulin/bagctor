@@ -61,9 +61,63 @@ export abstract class Router extends Actor {
   protected abstract createStrategy(): IRoutingStrategy;
 
   async route(message: Message): Promise<void> {
-    const messageId = Math.random().toString(36).substring(7);
-    log.info(`[Router ${this.context?.self?.id}] Starting to route message ${messageId} of type ${message.type}`);
+    // Skip generating IDs and detailed logging in production for better performance
+    const isDebugEnabled = process.env.NODE_ENV !== 'production';
+    const messageId = isDebugEnabled ? Math.random().toString(36).substring(7) : '';
 
+    if (isDebugEnabled) {
+      log.info(`[Router ${this.context?.self?.id}] Starting to route message ${messageId} of type ${message.type}`);
+    }
+
+    // Fast path for empty routee lists
+    if (this.routees.length === 0) {
+      log.error(`[Router ${this.context?.self?.id}] No routees available for routing message`);
+      return;
+    }
+
+    // Try to acquire the mutex without blocking for better performance
+    // Only use the full mutex acquisition if we need to
+    let directRouting = false;
+    if (this.routees.length === 1) {
+      // Fast path for single routee
+      directRouting = true;
+      await this.sendToRoutee(this.routees[0], message, messageId);
+      return;
+    }
+
+    // Use a more optimistic approach for mutex acquisition
+    if (this.mutex.tryAcquire()) {
+      try {
+        const selected = await this.strategy.selectRoutee(message, [...this.routees]);
+
+        if (Array.isArray(selected)) {
+          if (isDebugEnabled) {
+            log.info(`[Router ${this.context?.self?.id}] Broadcasting to ${selected.length} routees`);
+          }
+
+          // Use Promise.all but avoid creating too many promises at once for large broadcasts
+          const batchSize = 50;
+          for (let i = 0; i < selected.length; i += batchSize) {
+            const batch = selected.slice(i, i + batchSize);
+            await Promise.all(batch.map(routee =>
+              this.sendToRoutee(routee, message, messageId)));
+          }
+        } else {
+          if (isDebugEnabled) {
+            log.info(`[Router ${this.context?.self?.id}] Sending to single routee ${selected.id}`);
+          }
+          await this.sendToRoutee(selected, message, messageId);
+        }
+      } catch (error) {
+        log.error(`[Router ${this.context?.self?.id}] Error routing message:`, error);
+      } finally {
+        // Release the mutex without directly reassigning it
+        this.mutex.release();
+      }
+      return;
+    }
+
+    // Slow path with full mutex acquisition
     const release = await this.mutex.acquire();
     try {
       if (this.routees.length === 0) {
@@ -90,26 +144,26 @@ export abstract class Router extends Actor {
       log.error(`[Router ${this.context?.self?.id}] Error routing message ${messageId}:`, error);
     } finally {
       release();
-      log.info(`[Router ${this.context?.self?.id}] Completed routing message ${messageId}`);
+      if (isDebugEnabled) {
+        log.info(`[Router ${this.context?.self?.id}] Completed routing message ${messageId}`);
+      }
     }
   }
 
   private async sendToRoutee(routee: PID, message: Message, messageId: string): Promise<void> {
     try {
+      // Create a minimal copy of the message for routing
       const routedMessage: Message = {
-        ...message,
-        routee,
-        sender: message.sender || this.context?.self,
-        type: message.type === 'router.broadcast' ? message.type : `routed.${message.type}`,
-        messageId
+        type: message.type,
+        payload: message.payload,
+        // Only include other fields if they exist
+        ...(message.sender && { sender: message.sender }),
+        ...(message.metadata && { metadata: message.metadata })
       };
 
-      log.info(`[Router ${this.context?.self?.id}] Sending message ${messageId} of type ${routedMessage.type} to routee ${routee.id}`);
-      await this.context.send(routee, routedMessage);
-      log.info(`[Router ${this.context?.self?.id}] Successfully sent message ${messageId} to routee ${routee.id}`);
+      await this.system.send(routee, routedMessage);
     } catch (error) {
-      log.error(`[Router ${this.context?.self?.id}] Error sending message ${messageId} to routee ${routee.id}:`, error);
-      throw error;
+      log.error(`[Router] Error sending to routee ${routee.id}:`, error);
     }
   }
 
@@ -166,35 +220,87 @@ export class RoundRobinStrategy implements IRoutingStrategy {
   private current: number = 0;
   private readonly mutex = new Mutex();
 
+  // Cached last selected index for fast-path selection
+  private lastSelectedIndex: number = -1;
+  private consecutiveSelections: number = 0;
+  private readonly MAX_CONSECUTIVE_FAST_PATH = 5;
+
   async selectRoutee(message: Message, routees: PID[]): Promise<PID> {
+    // Fast path: If the message is part of a sequence or for small routee pools
+    // skip mutex acquisition for better performance
+    if (routees.length <= 3 ||
+      (this.lastSelectedIndex >= 0 &&
+        this.consecutiveSelections < this.MAX_CONSECUTIVE_FAST_PATH)) {
+      this.current = (this.current + 1) % routees.length;
+      this.lastSelectedIndex = this.current;
+      this.consecutiveSelections++;
+      return routees[this.current];
+    }
+
+    // Slow path with mutex for concurrent access
     const release = await this.mutex.acquire();
     try {
-      log.info(`[RoundRobinStrategy] Current index before selection: ${this.current}`);
-      const selected = routees[this.current];
       this.current = (this.current + 1) % routees.length;
-      log.info(`[RoundRobinStrategy] Selected routee ${selected.id} (index: ${this.current - 1}), next index: ${this.current}`);
-      return selected;
+      this.lastSelectedIndex = this.current;
+      this.consecutiveSelections = 1;
+      return routees[this.current];
     } finally {
       release();
     }
   }
 }
 
-// Mutex implementation for proper synchronization
+// Mutex implementation with less overhead
 class Mutex {
   private mutex = Promise.resolve();
+  private locked = false;
 
   async acquire(): Promise<() => void> {
-    let resolveMutex: () => void;
-    const newMutex = new Promise<void>((resolve) => {
-      resolveMutex = resolve;
+    let resolve: () => void;
+    // Create a new promise that will be resolved when the mutex is released
+    const promise = new Promise<void>((res) => {
+      resolve = res;
     });
 
-    const oldMutex = this.mutex;
-    this.mutex = newMutex;
+    // Chain the current operation to the existing mutex chain
+    const previousMutex = this.mutex;
+    this.mutex = this.mutex.then(() => promise);
+    this.locked = true;
 
-    await oldMutex;
-    return resolveMutex!;
+    // Wait for our turn
+    await previousMutex;
+
+    // Return a function that releases the mutex when called
+    return () => {
+      this.locked = false;
+      resolve!();
+    };
+  }
+
+  // New method: Try to acquire the mutex without waiting
+  tryAcquire(): boolean {
+    if (!this.locked) {
+      let resolve: () => void;
+      const promise = new Promise<void>((res) => {
+        resolve = res;
+      });
+      this.mutex = promise;
+      this.locked = true;
+
+      // Create a release function that will be called after a short delay
+      setTimeout(() => {
+        this.locked = false;
+        resolve!();
+      }, 0);
+
+      return true;
+    }
+    return false;
+  }
+
+  // Explicitly release the mutex
+  release(): void {
+    this.locked = false;
   }
 }
 
@@ -202,33 +308,44 @@ export class RandomStrategy implements IRoutingStrategy {
   private readonly buffer: Uint32Array;
   private bufferIndex: number;
 
+  // Add a cache of recent random values to avoid frequent crypto operations
+  private recentRandomValues: number[] = [];
+  private readonly CACHE_SIZE = 100;
+
   constructor() {
-    // Initialize a buffer for random values
-    this.buffer = new Uint32Array(1024);
+    this.buffer = new Uint32Array(1000);
     this.bufferIndex = this.buffer.length;
+    this.refillRandomBuffer();
+  }
+
+  private refillRandomBuffer(): void {
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      crypto.getRandomValues(this.buffer);
+    } else {
+      // Fallback for environments without crypto
+      for (let i = 0; i < this.buffer.length; i++) {
+        this.buffer[i] = Math.floor(Math.random() * 0xFFFFFFFF);
+      }
+    }
+    this.bufferIndex = 0;
   }
 
   async selectRoutee(message: Message, routees: PID[]): Promise<PID> {
-    // Refill buffer if needed
+    // Use a random number from our pre-computed buffer
     if (this.bufferIndex >= this.buffer.length) {
-      crypto.getRandomValues(this.buffer);
-      this.bufferIndex = 0;
+      this.refillRandomBuffer();
     }
 
-    // Use modulo bias correction
-    const range = routees.length;
-    const min = (-range >>> 0) % range;
-    let value;
+    const randomValue = this.buffer[this.bufferIndex++];
+    const index = randomValue % routees.length;
 
-    do {
-      value = this.buffer[this.bufferIndex++];
-    } while (value < min);
+    // Cache this random value for potential reuse
+    if (this.recentRandomValues.length >= this.CACHE_SIZE) {
+      this.recentRandomValues.shift();
+    }
+    this.recentRandomValues.push(index);
 
-    const index = value % range;
-    const selectedRoutee = routees[index];
-
-    log.info(`[RandomStrategy] Selected routee ${selectedRoutee.id} (index: ${index})`);
-    return selectedRoutee;
+    return routees[index];
   }
 }
 
@@ -244,104 +361,98 @@ export class ConsistentHashStrategy implements IRoutingStrategy {
   private readonly hashRing = new Map<number, PID>();
   private readonly hashFn: (message: Message) => string | number;
 
+  // Cache for recent message hash values
+  private readonly hashCache = new Map<string, number>();
+  private readonly MAX_CACHE_SIZE = 1000;
+
+  // Sorted ring keys for faster lookup
+  private sortedKeys: number[] = [];
+
   constructor(config?: RouterConfig) {
-    if (config?.routingConfig?.virtualNodeCount) {
-      this.virtualNodes = config.routingConfig.virtualNodeCount;
-    }
-    this.hashFn = config?.routingConfig?.hashFunction ?? ((message: Message) => {
-      // Use both message type and content for better distribution
-      const key = `${message.type}-${message.content}-${Date.now()}`;
-      log.info(`[ConsistentHashStrategy] Generated hash key: ${key}`);
-      return key;
+    this.virtualNodes = config?.routingConfig?.virtualNodeCount || 100;
+
+    // Use the custom hash function if provided, or default to a simple one
+    this.hashFn = config?.routingConfig?.hashFunction || ((message: Message) => {
+      return typeof message.payload === 'object' && message.payload !== null
+        ? JSON.stringify(message.payload)
+        : String(message.payload);
     });
-    log.info(`[ConsistentHashStrategy] Initialized with ${this.virtualNodes} virtual nodes`);
   }
 
   async selectRoutee(message: Message, routees: PID[]): Promise<PID> {
-    this.buildHashRing(routees);
-
-    const messageKey = this.hashFn(message);
-    const messageHash = typeof messageKey === 'string' ?
-      this.hashString(messageKey) :
-      Math.abs(messageKey);
-
-    log.info(`[ConsistentHashStrategy] Message hash details:`, {
-      key: messageKey,
-      hash: messageHash
-    });
-
-    const hashes = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
-    if (hashes.length === 0) {
-      throw new Error('No routees available');
+    // Rebuild the hash ring if routees have changed
+    if (this.hashRing.size === 0 || this.hashRing.size !== routees.length * this.virtualNodes) {
+      this.buildHashRing(routees);
     }
 
-    // Find the first hash greater than or equal to the message hash
-    let selectedHash = hashes.find(hash => hash >= messageHash);
+    // Generate a hash key for the message
+    const messageKey = `${message.type}-${JSON.stringify(message.payload).slice(0, 100)}`;
 
-    // If no such hash exists, wrap around to the first hash
-    if (!selectedHash) {
-      selectedHash = hashes[0];
+    // Use cached hash if available
+    let hash: number;
+    if (this.hashCache.has(messageKey)) {
+      hash = this.hashCache.get(messageKey)!;
+    } else {
+      const hashInput = this.hashFn(message);
+      hash = typeof hashInput === 'string' ? this.hashString(hashInput) : Number(hashInput);
+
+      // Cache the hash for future use
+      if (this.hashCache.size < this.MAX_CACHE_SIZE) {
+        this.hashCache.set(messageKey, hash);
+      }
     }
 
-    const selectedRoutee = this.hashRing.get(selectedHash)!;
+    // Find the appropriate node in the hash ring using binary search (much faster)
+    const routee = this.findRouteeInRing(hash);
+    return routee;
+  }
 
-    log.info(`[ConsistentHashStrategy] Selection details:`, {
-      messageHash,
-      selectedHash,
-      routeeId: selectedRoutee.id,
-      wrapAround: !selectedHash
-    });
+  private findRouteeInRing(hash: number): PID {
+    // Binary search for the closest key greater than or equal to the hash
+    let left = 0;
+    let right = this.sortedKeys.length - 1;
 
-    return selectedRoutee;
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      if (this.sortedKeys[mid] < hash) {
+        left = mid + 1;
+      } else {
+        right = mid - 1;
+      }
+    }
+
+    // If we've gone past the end, wrap around to the beginning
+    const index = left === this.sortedKeys.length ? 0 : left;
+    return this.hashRing.get(this.sortedKeys[index])!;
   }
 
   private buildHashRing(routees: PID[]): void {
     this.hashRing.clear();
-    log.info(`[ConsistentHashStrategy] Building hash ring for ${routees.length} routees`);
-
-    // Use a prime number for better distribution
-    const PRIME_MULTIPLIER = 16777619;
 
     for (const routee of routees) {
       for (let i = 0; i < this.virtualNodes; i++) {
-        // Use a better virtual node key generation
-        const virtualNodeKey = `${routee.id}-${i}-${PRIME_MULTIPLIER * (i + 1)}`;
-        const hash = this.hashString(virtualNodeKey);
+        const key = `${routee.id}-${i}`;
+        const hash = this.hashString(key);
         this.hashRing.set(hash, routee);
-
-        if (i === 0 || i === this.virtualNodes - 1) {
-          log.info(`[ConsistentHashStrategy] Virtual node details:`, {
-            routeeId: routee.id,
-            virtualNodeIndex: i,
-            key: virtualNodeKey,
-            hash: hash
-          });
-        }
       }
     }
 
-    const hashes = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
-    log.info(`[ConsistentHashStrategy] Hash ring built:`, {
-      totalNodes: this.hashRing.size,
-      uniqueRoutees: new Set(Array.from(this.hashRing.values()).map(r => r.id)).size,
-      hashRange: {
-        min: hashes[0],
-        max: hashes[hashes.length - 1]
-      }
-    });
+    // Pre-compute sorted keys for binary search
+    this.sortedKeys = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
   }
 
+  // Optimized hash function with FNV-1a for better distribution and speed
   private hashString(str: string): number {
-    // FNV-1a hash algorithm
-    let hash = 0x811c9dc5; // FNV offset basis
-    const prime = 0x01000193; // FNV prime
+    const FNV_PRIME = 0x01000193;
+    const FNV_OFFSET_BASIS = 0x811c9dc5;
 
+    let hash = FNV_OFFSET_BASIS;
     for (let i = 0; i < str.length; i++) {
       hash ^= str.charCodeAt(i);
-      hash = Math.imul(hash, prime);
+      hash = Math.imul(hash, FNV_PRIME);
     }
 
-    return Math.abs(hash);
+    return hash >>> 0; // Convert to unsigned 32-bit integer
   }
 }
 
@@ -352,16 +463,51 @@ export class WeightedRoundRobinStrategy implements IRoutingStrategy {
   private readonly gcd: number;
   private readonly mutex = new Mutex();
 
+  // Pre-computed selection plan for faster routing
+  private readonly selectionPlan: number[] = [];
+  private planIndex: number = 0;
+
   constructor(weights: Map<string, number>) {
     this.weights = weights;
     this.gcd = this.calculateGCD(Array.from(weights.values()));
     this.currentWeight = Math.max(...Array.from(weights.values()));
-    console.log(`[WeightedRoundRobinStrategy] Initialized with GCD: ${this.gcd}, max weight: ${this.currentWeight}`);
+
+    // Pre-compute a weighted selection plan
+    this.precomputeSelectionPlan(Array.from(weights.entries()));
+  }
+
+  private precomputeSelectionPlan(weightEntries: [string, number][]): void {
+    const totalWeight = weightEntries.reduce((sum, [_, weight]) => sum + weight, 0);
+    const maxWeight = Math.max(...weightEntries.map(([_, w]) => w));
+
+    // Build a selection plan based on the weights
+    let remainingWeight = totalWeight;
+    while (remainingWeight > 0) {
+      for (let i = 0; i < weightEntries.length; i++) {
+        const [_, weight] = weightEntries[i];
+        if (weight >= this.currentWeight) {
+          this.selectionPlan.push(i);
+          remainingWeight -= weight;
+        }
+      }
+      this.currentWeight = this.currentWeight - this.gcd;
+      if (this.currentWeight <= 0) {
+        this.currentWeight = maxWeight;
+      }
+    }
   }
 
   async selectRoutee(message: Message, routees: PID[]): Promise<PID> {
     const release = await this.mutex.acquire();
     try {
+      // If we have a precomputed plan, use it
+      if (this.selectionPlan.length > 0) {
+        this.planIndex = (this.planIndex + 1) % this.selectionPlan.length;
+        const selectedIndex = this.selectionPlan[this.planIndex] % routees.length;
+        return routees[selectedIndex];
+      }
+
+      // Fallback to original algorithm if no plan available
       let attempts = 0;
       while (true) {
         attempts++;
@@ -371,14 +517,10 @@ export class WeightedRoundRobinStrategy implements IRoutingStrategy {
           if (this.currentWeight <= 0) {
             this.currentWeight = Math.max(...Array.from(this.weights.values()));
           }
-          console.log(`[WeightedRoundRobinStrategy] Updated current weight to ${this.currentWeight}`);
         }
 
         const routeeWeight = this.weights.get(routees[this.current].id) || 0;
-        console.log(`[WeightedRoundRobinStrategy] Checking routee ${routees[this.current].id} with weight ${routeeWeight}`);
-
         if (routeeWeight >= this.currentWeight) {
-          console.log(`[WeightedRoundRobinStrategy] Selected routee ${routees[this.current].id} after ${attempts} attempts`);
           return routees[this.current];
         }
       }

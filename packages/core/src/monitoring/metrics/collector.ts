@@ -302,6 +302,11 @@ export class MetricRegistry {
         return Array.from(this.metrics.values());
     }
 
+    // 通过名称获取所有匹配的指标
+    getMetricsByName(name: string): Metric[] {
+        return this.getAllMetrics().filter(metric => metric.name === name);
+    }
+
     // 生成指标ID
     private getMetricId(name: string, tags: MetricTags): string {
         const sortedTags = Object.entries(tags)

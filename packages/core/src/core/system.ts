@@ -7,10 +7,15 @@ import { Message, PID, Props } from './types';
 import { DefaultMailbox } from './mailbox';
 import { DefaultDispatcher } from './dispatcher';
 
-// 扩展Message类型以支持请求-响应模式
+// 扩展Message类型以支持请求-响应模式和批处理
 declare module '@bactor/common' {
   interface Message {
     responseId?: string;
+    recipient?: PID;
+  }
+
+  interface ActorClient {
+    sendBatchMessage?(actorIds: string[], message: Message): Promise<void>;
   }
 }
 
@@ -145,8 +150,8 @@ export class ActorSystem {
   }
 
   /**
-   * 向指定的Actor发送消息
-   * 优化版本：默认完全解耦发送和处理过程，提高吞吐量
+   * 发送消息到指定Actor
+   * 优化版：解耦发送与处理，非阻塞式消息传递
    */
   async send(pid: PID, message: Message): Promise<void> {
     // 处理远程消息发送
@@ -256,10 +261,24 @@ export class ActorSystem {
     }
   }
 
-  private async handleActorError(pid: PID, error: Error): Promise<void> {
+  // 公开处理Actor错误方法，供Context调用
+  async handleActorError(pid: PID, error: Error): Promise<void> {
+    log.error(`Actor ${pid.id} encountered an error:`, error);
     const context = this.contexts.get(pid.id);
-    if (context) {
-      await context.handleFailure(pid, error);
+
+    if (!context) {
+      return;
+    }
+
+    // Let the parent handle the failure according to its supervision strategy
+    if (context.getParent()) {
+      await this.send(context.getParent()!, {
+        type: '$system.failure',
+        payload: { child: pid, error }
+      });
+    } else {
+      // Root actor - use default strategy (restart)
+      await this.restart(pid, error);
     }
   }
 
@@ -307,6 +326,162 @@ export class ActorSystem {
   async broadcast(message: Message): Promise<void> {
     for (const handler of this.messageHandlers) {
       await handler(message);
+    }
+  }
+
+  /**
+   * 批量发送消息到多个目标Actor
+   * 按地址分组优化远程消息传输
+   */
+  async sendBatch(targets: PID[], message: Message): Promise<void> {
+    if (targets.length === 0) return;
+
+    // 按地址分组目标
+    const localTargets: PID[] = [];
+    const remoteTargetsByAddress = new Map<string, PID[]>();
+
+    for (const target of targets) {
+      if (!target.address || target.address === this.address) {
+        localTargets.push(target);
+      } else {
+        if (!remoteTargetsByAddress.has(target.address)) {
+          remoteTargetsByAddress.set(target.address, []);
+        }
+        remoteTargetsByAddress.get(target.address)!.push(target);
+      }
+    }
+
+    // 并行处理本地和远程消息
+    const promises: Promise<void>[] = [];
+
+    // 处理本地消息
+    if (localTargets.length > 0) {
+      promises.push(this.sendBatchLocal(localTargets, message));
+    }
+
+    // 处理远程消息
+    for (const [address, addressTargets] of remoteTargetsByAddress.entries()) {
+      promises.push(this.sendBatchRemote(address, addressTargets, message));
+    }
+
+    await Promise.all(promises);
+  }
+
+  /**
+   * 批量发送消息到本地Actor
+   * 优化版：大批量时进行分组并行处理，避免阻塞主线程
+   */
+  private async sendBatchLocal(targets: PID[], message: Message): Promise<void> {
+    // 针对小批量消息的快速路径
+    if (targets.length <= 50) {
+      for (const target of targets) {
+        const context = this.contexts.get(target.id);
+        if (context) {
+          if (message.type === 'error' || message.type.startsWith('system')) {
+            context.postSystemMessage(message);
+          } else {
+            context.postMessage(message);
+          }
+        } else {
+          this.deadLetters.push({ ...message, recipient: target });
+        }
+      }
+      return Promise.resolve();
+    }
+
+    // 针对大批量消息的优化路径 - 分组并行处理
+    const batchSize = 50; // 每批次处理50个目标
+    const batches: PID[][] = [];
+
+    // 按照batchSize分组
+    for (let i = 0; i < targets.length; i += batchSize) {
+      batches.push(targets.slice(i, i + batchSize));
+    }
+
+    // 对系统消息使用更高优先级
+    const isSystemMessage = message.type === 'error' || message.type.startsWith('system');
+
+    // 对分组进行并行处理
+    const batchPromises = batches.map(async (batchTargets) => {
+      // 对系统消息和用户消息进行分组，以便优先处理系统消息
+      if (isSystemMessage) {
+        // 系统消息优先处理
+        for (const target of batchTargets) {
+          const context = this.contexts.get(target.id);
+          if (context) {
+            context.postSystemMessage(message);
+          } else {
+            this.deadLetters.push({ ...message, recipient: target });
+          }
+        }
+      } else {
+        // 用户消息
+        for (const target of batchTargets) {
+          const context = this.contexts.get(target.id);
+          if (context) {
+            context.postMessage(message);
+          } else {
+            this.deadLetters.push({ ...message, recipient: target });
+          }
+        }
+      }
+    });
+
+    // 等待所有批次完成
+    await Promise.all(batchPromises);
+    return Promise.resolve();
+  }
+
+  /**
+   * 批量发送消息到远程Actor
+   * 优化版：增加重试和速率限制
+   */
+  private async sendBatchRemote(address: string, targets: PID[], message: Message): Promise<void> {
+    const client = await this.getOrCreateClient(address);
+    // 准备发送者信息，确保始终设置address和id
+    const sender: PID = message.sender ? {
+      id: message.sender.id || '',
+      address: this.address || ''
+    } : { id: '', address: this.address || '' };
+
+    // 尝试批量发送
+    if (client.sendBatchMessage) {
+      try {
+        await client.sendBatchMessage(
+          targets.map(t => t.id),
+          { ...message, sender }
+        );
+        return;
+      } catch (error) {
+        // 如果批量发送失败，回退到单条消息发送
+        console.warn(`Batch message send to ${address} failed, falling back to individual messages:`, error);
+      }
+    }
+
+    // 回退到单条消息发送 - 使用更小的批次和并行控制
+    const MAX_CONCURRENT = 10; // 最大并行发送数
+    const targetChunks: string[][] = [];
+    const targetIds = targets.map(t => t.id);
+
+    // 将目标分成较小的批次，每批最多10个
+    for (let i = 0; i < targetIds.length; i += MAX_CONCURRENT) {
+      targetChunks.push(targetIds.slice(i, i + MAX_CONCURRENT));
+    }
+
+    // 对每个批次并行发送
+    for (const chunk of targetChunks) {
+      const sendPromises = chunk.map(targetId =>
+        client.sendMessage(
+          targetId,
+          { ...message, sender }
+        ).catch(err => {
+          console.error(`Failed to send message to ${address}/${targetId}:`, err);
+          return Promise.resolve(); // 防止一个消息失败导致整个批次失败
+        })
+      );
+
+      // 等待当前批次完成后再处理下一批次
+      await Promise.all(sendPromises);
     }
   }
 } 

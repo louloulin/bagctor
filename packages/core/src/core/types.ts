@@ -8,6 +8,7 @@ export type ActorContext = any;
 export interface MessageInvoker {
   invokeSystemMessage(msg: Message): Promise<void>;
   invokeUserMessage(msg: Message): Promise<void>;
+  invoke(msg: Message): Promise<void>;
 }
 
 export interface IMailbox {

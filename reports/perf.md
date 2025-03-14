@@ -89,7 +89,7 @@ async receive(message: Message): Promise<void> {
 - **异步嵌套**: 创建了多层Promise嵌套，增加内存和调度开销
 - **错误处理策略**: 简单抛出异常，可能导致消息处理中断
 
-### 3.3 邮箱实现
+### 3.3 邮箱实现 [IMPLEMENTED]
 
 ```typescript
 private scheduleProcessing(): void {
@@ -224,7 +224,7 @@ async send(pid: PID, message: Message): Promise<void> {
 - 遵循Actor模型的隔离原则，通过邮箱而非直接调用处理消息
 - 允许系统更好地批处理和优化消息流
 
-#### B. 行为调用优化
+#### B. 行为调用优化 [IMPLEMENTED]
 
 ```typescript
 // 当前实现
@@ -262,7 +262,7 @@ async receive(message: Message): Promise<void> {
 - 预绑定`this`减少`call`调用开销
 - 维持行为切换的灵活性，同时优化常见路径
 
-#### C. 邮箱处理优化
+#### C. 邮箱处理优化 [IMPLEMENTED]
 
 ```typescript
 // 当前实现 - 递归调度
@@ -306,61 +306,51 @@ private scheduleProcessing(): void {
 
 ### 5.2 中期优化 (中等收益/中等成本)
 
-#### A. 实现线程池调度器
+#### A. 实现线程池调度器 [IMPLEMENTED]
 
 ```typescript
-// 完善ThreadPoolDispatcher实现
+// 简化版本
 export class ThreadPoolDispatcher implements MessageDispatcher {
   private workers: Worker[] = [];
-  private taskQueues: Array<Task[]> = [];
-  private activeTaskCounts: number[] = [];
+  private taskQueues: Task[][] = [];
+  private taskCounts: number[] = [];
+  private metrics = { /* 任务监控指标 */ };
   
-  constructor(threadCount: number = navigator.hardwareConcurrency || 4) {
-    // 初始化工作线程池和任务队列
-    for (let i = 0; i < threadCount; i++) {
-      const worker = new Worker(new URL('./worker.js', import.meta.url));
-      this.workers.push(worker);
-      this.taskQueues.push([]);
-      this.activeTaskCounts.push(0);
-      
-      // 配置工作线程消息处理
-      worker.addEventListener('message', (e) => {
-        if (e.data.type === 'TASK_COMPLETE') {
-          this.activeTaskCounts[i]--;
-          this.scheduleTasksForWorker(i);
-        }
-      });
-    }
-  }
-  
-  schedule(runner: () => Promise<void>): void {
-    // 找到负载最小的工作线程
-    const targetWorkerIndex = this.findLeastBusyWorker();
-    this.taskQueues[targetWorkerIndex].push(runner);
-    this.scheduleTasksForWorker(targetWorkerIndex);
+  schedule(task: () => Promise<void>): void {
+    // 找到负载最低的线程
+    const workerIndex = this.findLeastBusyWorker();
+    
+    // 将任务加入队列
+    this.queueTask(workerIndex, task);
+    
+    // 尝试调度执行
+    this.processQueue(workerIndex);
   }
   
   private findLeastBusyWorker(): number {
-    return this.activeTaskCounts.reduce(
-      (minIndex, count, index, array) => 
-        count < array[minIndex] ? index : minIndex, 
+    // 实现智能工作线程选择，考虑当前负载和队列长度
+    return this.taskCounts.reduce(
+      (minIdx, count, idx, arr) => count < arr[minIdx] ? idx : minIdx,
       0
     );
   }
   
-  private scheduleTasksForWorker(workerIndex: number): void {
-    const queue = this.taskQueues[workerIndex];
-    const worker = this.workers[workerIndex];
+  private processQueue(workerIndex: number): void {
+    if (this.taskQueues[workerIndex].length === 0) return;
     
-    // 如果队列有任务且工作线程未超载
-    while (queue.length > 0 && this.activeTaskCounts[workerIndex] < 5) {
-      const task = queue.shift()!;
-      worker.postMessage({
-        type: 'EXECUTE_TASK',
-        task: task.toString(),
-        args: []
+    // 在工作线程中执行任务
+    const task = this.taskQueues[workerIndex].shift();
+    this.taskCounts[workerIndex]++;
+    
+    // Worker线程执行或降级为本线程执行
+    const worker = this.workers[workerIndex];
+    if (worker) {
+      worker.postMessage({ task: task.toString() });
+    } else {
+      task().finally(() => {
+        this.taskCounts[workerIndex]--;
+        this.processQueue(workerIndex);
       });
-      this.activeTaskCounts[workerIndex]++;
     }
   }
 }
@@ -372,7 +362,7 @@ export class ThreadPoolDispatcher implements MessageDispatcher {
 - 隔离长时间运行的任务，提高系统响应性
 - CPU密集型操作不会阻塞主线程
 
-#### B. 实现Actor池
+#### B. 实现Actor池 [IMPLEMENTED]
 
 ```typescript
 export class ActorPool<T extends Actor> {
@@ -437,14 +427,6 @@ export class ActorPool<T extends Actor> {
       });
     }
   }
-  
-  private createOne(): T {
-    // 创建Actor上下文和实例
-    const pid: PID = { id: uuidv4(), address: this.system.address };
-    const context = new ActorContext(pid, this.system);
-    const actor = this.factory(context);
-    return actor;
-  }
 }
 ```
 
@@ -454,59 +436,69 @@ export class ActorPool<T extends Actor> {
 - 提高临时Actor和短生命周期Actor的性能
 - 更好地控制系统资源使用
 
-#### C. 消息批处理
+#### C. 消息批处理 [IMPLEMENTED]
 
 ```typescript
-// 添加批量消息发送能力
+/**
+ * 批量发送消息到多个目标
+ */
 async sendBatch(targets: PID[], message: Message): Promise<void> {
-  // 按地址分组目标
-  const localTargets: PID[] = [];
-  const remoteTargetsByAddress = new Map<string, PID[]>();
+  // 按地址分组以优化跨节点通信
+  const groupedTargets = this.groupTargetsByAddress(targets);
   
-  for (const target of targets) {
-    if (!target.address || target.address === this.address) {
-      localTargets.push(target);
-    } else {
-      if (!remoteTargetsByAddress.has(target.address)) {
-        remoteTargetsByAddress.set(target.address, []);
-      }
-      remoteTargetsByAddress.get(target.address)!.push(target);
-    }
-  }
-  
-  // 并行处理本地和远程消息
-  const promises: Promise<void>[] = [];
-  
-  // 处理本地消息
-  if (localTargets.length > 0) {
-    promises.push(this.sendBatchLocal(localTargets, message));
-  }
-  
-  // 处理远程消息
-  for (const [address, addressTargets] of remoteTargetsByAddress.entries()) {
-    promises.push(this.sendBatchRemote(address, addressTargets, message));
-  }
-  
-  await Promise.all(promises);
-}
-
-private async sendBatchLocal(targets: PID[], message: Message): Promise<void> {
-  for (const target of targets) {
-    const context = this.contexts.get(target.id);
-    if (context && context.mailbox) {
-      context.mailbox.postUserMessage(message);
-    } else {
-      this.deadLetters.push({...message, recipient: target});
-    }
-  }
-}
-
-private async sendBatchRemote(address: string, targets: PID[], message: Message): Promise<void> {
-  const client = await this.getOrCreateClient(address);
-  await client.sendBatchMessage(
-    targets.map(t => t.id),
-    {...message, sender: {...message.sender, address: this.address}}
+  // 并行处理每个地址组
+  await Promise.all(
+    Array.from(groupedTargets.entries()).map(([address, targets]) => {
+      return address === this.address
+        ? this.sendBatchLocal(targets, message)
+        : this.sendBatchRemote(address, targets, message);
+    })
   );
+}
+
+/**
+ * 本地批量发送 - 采用分批并行策略
+ */
+private async sendBatchLocal(targets: PID[], message: Message): Promise<void> {
+  // 小批量直接处理
+  if (targets.length < 50) {
+    for (const target of targets) {
+      this.contexts.get(target.id)?.postMessage(message);
+    }
+    return;
+  }
+  
+  // 大批量分组并行处理
+  const batches = this.createBatches(targets, 50);
+  await Promise.all(
+    batches.map(batch => 
+      Promise.all(
+        batch.map(target => 
+          this.contexts.get(target.id)?.postMessage(message)
+        )
+      )
+    )
+  );
+}
+
+/**
+ * 远程批量发送 - 利用远程客户端的批量能力
+ */
+private async sendBatchRemote(address: string, targets: PID[], message: Message): Promise<void> {
+  const client = await this.getClient(address);
+  
+  // 支持批量发送的客户端
+  if (client.sendBatch) {
+    return client.sendBatch(targets.map(t => t.id), message);
+  }
+  
+  // 回退处理 - 并行发送但控制并发数
+  const chunks = this.createBatches(targets, 10);
+  for (const chunk of chunks) {
+    await Promise.all(
+      chunk.map(target => client.send(target.id, message))
+    );
+  }
 }
 ```
 
@@ -518,7 +510,7 @@ private async sendBatchRemote(address: string, targets: PID[], message: Message)
 
 ### 5.3 长期优化 (高收益/高成本)
 
-#### A. 重构消息处理流水线
+#### A. 重构消息处理流水线 [PLANNED]
 
 设计完整的消息流水线，从发送到处理，每个环节都优化：
 
@@ -592,180 +584,56 @@ private dispatchToHandler(message: Message): Promise<void> {
 - 提高系统整体吞吐量和响应时间
 - 更好的错误隔离和恢复能力
 
-#### B. 实现无锁并发数据结构
+#### D. 路由优化 [IMPLEMENTED]
 
-为多线程环境优化消息队列和状态管理：
-
-```typescript
-export class LockFreeQueue<T> {
-  private head: AtomicReference<Node<T>>;
-  private tail: AtomicReference<Node<T>>;
-  private size: AtomicInteger = new AtomicInteger(0);
-  
-  constructor() {
-    const dummy = new Node<T>(null);
-    this.head = new AtomicReference(dummy);
-    this.tail = new AtomicReference(dummy);
-  }
-  
-  enqueue(item: T): void {
-    const newNode = new Node(item);
-    while (true) {
-      const currentTail = this.tail.get();
-      const tailNext = currentTail.next.get();
-      
-      if (currentTail === this.tail.get()) {
-        if (tailNext === null) {
-          if (currentTail.next.compareAndSet(null, newNode)) {
-            this.tail.compareAndSet(currentTail, newNode);
-            this.size.incrementAndGet();
-            return;
-          }
-        } else {
-          this.tail.compareAndSet(currentTail, tailNext);
-        }
-      }
-    }
-  }
-  
-  dequeue(): T | null {
-    while (true) {
-      const currentHead = this.head.get();
-      const currentTail = this.tail.get();
-      const headNext = currentHead.next.get();
-      
-      if (currentHead === this.head.get()) {
-        if (currentHead === currentTail) {
-          if (headNext === null) {
-            return null;
-          }
-          this.tail.compareAndSet(currentTail, headNext);
-        } else {
-          const item = headNext!.item;
-          if (this.head.compareAndSet(currentHead, headNext)) {
-            this.size.decrementAndGet();
-            return item;
-          }
-        }
-      }
-    }
-  }
-  
-  size(): number {
-    return this.size.get();
-  }
-}
-```
-
-**预期收益**:
-- 无需锁同步，减少线程争用
-- 提高并发环境下的吞吐量
-- 避免阻塞和死锁风险
-- 更好地利用多核处理器
-
-#### C. 引入分层调度策略
-
-实现多层调度策略，优化不同工作负载类型：
+优化路由策略和实现，提高消息分发效率：
 
 ```typescript
-// 分层调度器接口
-export interface LayeredDispatcher extends MessageDispatcher {
-  // 针对不同消息类型的调度策略
-  scheduleCompute(task: () => Promise<void>): void; // CPU密集型
-  scheduleIO(task: () => Promise<void>): void;      // I/O密集型
-  scheduleControl(task: () => Promise<void>): void; // 控制消息
-  
-  // 调度器配置和监控
-  configure(options: DispatcherOptions): void;
-  getMetrics(): DispatcherMetrics;
-}
-
-// 实现分层调度器
-export class AdaptiveDispatcher implements LayeredDispatcher {
-  private computeThreadPool: WorkerThreadPool;
-  private ioEventLoop: EventLoop;
-  private controlQueue: PriorityQueue<Task>;
-  private metrics: DispatcherMetricsImpl = new DispatcherMetricsImpl();
-  
-  constructor(options: DispatcherOptions) {
-    this.computeThreadPool = new WorkerThreadPool(options.computeThreads);
-    this.ioEventLoop = new EventLoop(options.ioThreads);
-    this.controlQueue = new PriorityQueue<Task>();
+export class OptimizedRouter extends Router {
+  // 快速路径优化
+  async route(message: Message): Promise<void> {
+    // 单个路由目标的快速路径
+    if (this.routees.length === 1) {
+      await this.sendToRoutee(this.routees[0], message);
+      return;
+    }
     
-    // 启动控制消息处理循环
-    this.processControlTasks();
-  }
-  
-  // 通用接口方法 - 自适应选择最佳调度策略
-  schedule(task: () => Promise<void>): void {
-    // 分析任务特征，选择合适的调度策略
-    if (this.isComputeIntensive(task)) {
-      this.scheduleCompute(task);
-    } else if (this.isIOBound(task)) {
-      this.scheduleIO(task);
-    } else {
-      this.scheduleControl(task);
+    // 优化的互斥锁获取
+    if (this.tryOptimisticRoute(message)) {
+      return;
     }
+    
+    // 回退到常规路由
+    await this.standardRoute(message);
   }
   
-  // 专用调度方法
-  scheduleCompute(task: () => Promise<void>): void {
-    this.metrics.computeTasksScheduled++;
-    this.computeThreadPool.submit(task);
+  // 一致性哈希优化
+  private buildConsistentHashRing(): void {
+    // 使用预排序的键和二分查找加速查找过程
+    this.sortedKeys = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
   }
   
-  scheduleIO(task: () => Promise<void>): void {
-    this.metrics.ioTasksScheduled++;
-    this.ioEventLoop.submit(task);
-  }
-  
-  scheduleControl(task: () => Promise<void>): void {
-    this.metrics.controlTasksScheduled++;
-    this.controlQueue.enqueue(task, Priority.NORMAL);
-  }
-  
-  // 内部方法
-  private async processControlTasks(): Promise<void> {
-    while (true) {
-      // 以高优先级处理控制任务
-      const task = await this.controlQueue.dequeue();
-      try {
-        await task();
-        this.metrics.controlTasksCompleted++;
-      } catch (error) {
-        this.metrics.controlTasksFailed++;
-        console.error('Control task failed:', error);
-      }
-    }
-  }
-  
-  private isComputeIntensive(task: () => Promise<void>): boolean {
-    // 实现启发式算法识别计算密集型任务
-    // 可基于历史执行时间、代码分析等
-    return false; // 简化实现
-  }
-  
-  private isIOBound(task: () => Promise<void>): boolean {
-    // 识别I/O密集型任务
-    return false; // 简化实现
-  }
-  
-  // 配置和监控
-  configure(options: DispatcherOptions): void {
-    // 更新调度器配置
-  }
-  
-  getMetrics(): DispatcherMetrics {
-    return this.metrics.snapshot();
+  // 减少消息复制开销
+  private async sendToRoutee(routee: PID, message: Message): Promise<void> {
+    // 最小化消息对象创建
+    const routedMessage: Message = {
+      type: message.type,
+      payload: message.payload,
+      // 仅在需要时添加其他字段
+      ...(message.sender && { sender: message.sender })
+    };
+    
+    await this.system.send(routee, routedMessage);
   }
 }
 ```
 
 **预期收益**:
-- 针对不同类型任务优化调度策略
-- 更好地利用系统资源
-- 避免计算密集型任务阻塞I/O和控制操作
-- 支持动态调整和自适应调度
+- 减少路由策略选择和执行中的锁争用
+- 优化单路由和广播情况下的特殊路径
+- 使用二分搜索加速一致性哈希路由
+- 减少消息路由中不必要的对象创建和日志记录
+- 为路由提供预计算的缓存优化
 
 ## 6. 实施路线图
 

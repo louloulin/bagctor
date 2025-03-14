@@ -14,6 +14,7 @@ export class DefaultDispatcher implements MessageDispatcher {
 interface Task {
   runner: () => Promise<void>;
   id: number;
+  createdAt: number;
 }
 
 export class ThreadPoolDispatcher implements MessageDispatcher {
@@ -22,9 +23,31 @@ export class ThreadPoolDispatcher implements MessageDispatcher {
   private activeTaskCounts: number[] = [];
   private nextTaskId: number = 0;
   private isWorkerEnvironment: boolean;
+  private taskResolutionMap: Map<number, (result: any) => void> = new Map();
+  private taskRejectionMap: Map<number, (error: any) => void> = new Map();
+  private maxConcurrentTasksPerWorker: number;
+  private metrics = {
+    tasksScheduled: 0,
+    tasksCompleted: 0,
+    tasksFailed: 0,
+    avgTaskDuration: 0,
+    totalTaskDuration: 0,
+    // 添加更多指标以支持自适应调度
+    workerUtilization: new Array<number>(),
+    queueWaitTimes: new Array<number>(),
+    taskLatencies: new Array<number>(),
+    lastAdaptiveAdjustment: Date.now()
+  };
 
-  constructor(threadCount: number = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4) {
+  constructor(
+    private threadCount: number = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4,
+    maxConcurrentTasksPerWorker: number = 5
+  ) {
     this.isWorkerEnvironment = typeof Worker !== 'undefined';
+    this.maxConcurrentTasksPerWorker = maxConcurrentTasksPerWorker;
+
+    // 初始化指标跟踪数组
+    this.metrics.workerUtilization = new Array(threadCount).fill(0);
 
     // 初始化工作线程池和任务队列
     for (let i = 0; i < threadCount; i++) {
@@ -40,11 +63,14 @@ export class ThreadPoolDispatcher implements MessageDispatcher {
           // 配置工作线程消息处理
           worker.addEventListener('message', (e) => {
             if (e.data && e.data.type === 'TASK_COMPLETE') {
-              this.onTaskComplete(i, e.data.taskId);
+              this.onTaskComplete(i, e.data.taskId, e.data.success, e.data.result, e.data.error, e.data.executionTime);
+            } else if (e.data && e.data.type === 'WORKER_READY') {
+              // Worker初始化完成
+              console.log(`Worker ${i} is ready`);
             }
           });
         } catch (error) {
-          log.error('Failed to create worker:', error);
+          console.error('Failed to create worker:', error);
           // 降级到单线程模拟模式
           this.isWorkerEnvironment = false;
         }
@@ -53,27 +79,47 @@ export class ThreadPoolDispatcher implements MessageDispatcher {
 
     // 如果不是Worker环境，使用模拟线程
     if (!this.isWorkerEnvironment) {
-      log.warn('Running ThreadPoolDispatcher in single-threaded simulation mode');
+      console.warn('Running ThreadPoolDispatcher in single-threaded simulation mode');
       // 初始化任务处理循环
       for (let i = 0; i < threadCount; i++) {
         this.simulateWorker(i);
       }
     }
+
+    // 启动自适应调度优化器
+    this.startAdaptiveScheduling();
   }
 
+  /**
+   * 调度任务执行
+   * 优化版：返回Promise以支持任务完成通知
+   */
   schedule(runner: () => Promise<void>): void {
+    this.metrics.tasksScheduled++;
     const taskId = this.nextTaskId++;
-    const task: Task = { runner, id: taskId };
 
-    // 找到负载最小的工作线程
-    const targetWorkerIndex = this.findLeastBusyWorker();
-    this.taskQueues[targetWorkerIndex].push(task);
+    // 找到最佳工作线程 - 组合负载和队列长度考虑
+    const workerIndex = this.findOptimalWorker();
 
-    // 安排任务执行
-    this.scheduleTasksForWorker(targetWorkerIndex);
+    // 创建任务对象
+    const task: Task = {
+      runner,
+      id: taskId,
+      createdAt: Date.now()
+    };
+
+    // 将任务添加到队列
+    this.taskQueues[workerIndex].push(task);
+
+    // 触发任务调度
+    this.scheduleTasksForWorker(workerIndex);
   }
 
+  /**
+   * 查找负载最小的工作线程
+   */
   private findLeastBusyWorker(): number {
+    // 使用reduce找到活跃任务数最少的工作线程
     return this.activeTaskCounts.reduce(
       (minIndex, count, index, array) =>
         count < array[minIndex] ? index : minIndex,
@@ -81,58 +127,259 @@ export class ThreadPoolDispatcher implements MessageDispatcher {
     );
   }
 
+  /**
+   * 查找最优的工作线程
+   * 考虑活跃任务数和队列长度的综合评分
+   */
+  private findOptimalWorker(): number {
+    // 如果有闲置工作线程，优先使用
+    const idleWorkerIndex = this.activeTaskCounts.findIndex(count => count === 0);
+    if (idleWorkerIndex >= 0) {
+      return idleWorkerIndex;
+    }
+
+    // 否则，计算综合评分（活跃任务数 * 权重 + 队列长度 * (1-权重)）
+    const ACTIVE_TASK_WEIGHT = 0.7; // 活跃任务数权重
+    const scores = this.activeTaskCounts.map((count, index) => {
+      const queueLength = this.taskQueues[index].length;
+      return count * ACTIVE_TASK_WEIGHT + queueLength * (1 - ACTIVE_TASK_WEIGHT);
+    });
+
+    // 返回评分最低的工作线程索引
+    return scores.reduce(
+      (minIndex, score, index, array) =>
+        score < array[minIndex] ? index : minIndex,
+      0
+    );
+  }
+
+  /**
+   * 为特定工作线程调度指定任务
+   */
+  private scheduleTaskForWorker(workerIndex: number, taskId: number): void {
+    // 查找指定的任务
+    const taskIndex = this.taskQueues[workerIndex].findIndex(t => t.id === taskId);
+    if (taskIndex === -1) return;
+
+    // 从队列中移除任务
+    const task = this.taskQueues[workerIndex].splice(taskIndex, 1)[0];
+    this.activeTaskCounts[workerIndex]++;
+
+    // 记录等待时间
+    const waitTime = Date.now() - task.createdAt;
+    this.metrics.queueWaitTimes.push(waitTime);
+
+    // 限制历史数据长度
+    if (this.metrics.queueWaitTimes.length > 100) {
+      this.metrics.queueWaitTimes.shift();
+    }
+
+    const startTime = Date.now();
+
+    if (this.isWorkerEnvironment && this.workers[workerIndex]) {
+      // 在真实Worker中执行
+      const worker = this.workers[workerIndex];
+      const taskFunction = task.runner.toString();
+      worker.postMessage({
+        type: 'EXECUTE_TASK',
+        taskId: task.id,
+        taskFunction,
+        startTime
+      });
+    } else {
+      // 在模拟模式下执行
+      task.runner()
+        .then(result => {
+          const executionTime = Date.now() - startTime;
+          this.onTaskComplete(workerIndex, task.id, true, result, null, executionTime);
+        })
+        .catch(error => {
+          const executionTime = Date.now() - startTime;
+          this.onTaskComplete(workerIndex, task.id, false, null, error, executionTime);
+        });
+    }
+  }
+
+  /**
+   * 为指定工作线程调度任务
+   */
   private scheduleTasksForWorker(workerIndex: number): void {
     const queue = this.taskQueues[workerIndex];
 
-    // 如果队列有任务且工作线程未超载
-    if (queue.length > 0 && this.activeTaskCounts[workerIndex] < 5) {
-      const task = queue[0]; // 查看但不移除
+    // 如果队列为空或工作线程已满载，直接返回
+    if (queue.length === 0 ||
+      this.activeTaskCounts[workerIndex] >= this.maxConcurrentTasksPerWorker) {
+      return;
+    }
 
-      // 根据环境执行任务
-      if (this.isWorkerEnvironment && this.workers[workerIndex]) {
-        this.taskQueues[workerIndex].shift(); // 现在移除任务
-        this.activeTaskCounts[workerIndex]++;
+    const task = queue.shift()!;
+    this.activeTaskCounts[workerIndex]++;
 
-        // 发送任务到Worker执行
-        this.workers[workerIndex].postMessage({
-          type: 'EXECUTE_TASK',
-          taskId: task.id,
-          taskFunction: task.runner.toString() // 注意：这是简化版，实际需要序列化函数
+    const startTime = Date.now();
+
+    if (this.isWorkerEnvironment && this.workers[workerIndex]) {
+      // 在真实Worker中执行
+      const worker = this.workers[workerIndex];
+      const taskFunction = task.runner.toString();
+      worker.postMessage({
+        type: 'EXECUTE_TASK',
+        taskId: task.id,
+        taskFunction,
+        startTime
+      });
+    } else {
+      // 在模拟模式下执行
+      task.runner()
+        .then(result => {
+          const executionTime = Date.now() - startTime;
+          this.onTaskComplete(workerIndex, task.id, true, result, null, executionTime);
+        })
+        .catch(error => {
+          const executionTime = Date.now() - startTime;
+          this.onTaskComplete(workerIndex, task.id, false, null, error, executionTime);
         });
-      } else {
-        // 单线程模式下，任务处理在simulateWorker中处理
-      }
     }
   }
 
-  private onTaskComplete(workerIndex: number, taskId: number): void {
+  /**
+   * 处理任务完成事件
+   */
+  private onTaskComplete(
+    workerIndex: number,
+    taskId: number,
+    success: boolean = true,
+    result: any = null,
+    error: any = null,
+    executionTime: number = 0
+  ): void {
     this.activeTaskCounts[workerIndex]--;
-    // 安排下一个任务
+
+    // 更新性能指标
+    if (success) {
+      this.metrics.tasksCompleted++;
+      if (this.taskResolutionMap.has(taskId)) {
+        this.taskResolutionMap.get(taskId)!(result);
+        this.taskResolutionMap.delete(taskId);
+      }
+    } else {
+      this.metrics.tasksFailed++;
+      console.error('Task failed:', error);
+      if (this.taskRejectionMap.has(taskId)) {
+        this.taskRejectionMap.get(taskId)!(error);
+        this.taskRejectionMap.delete(taskId);
+      }
+    }
+
+    // 记录执行时间
+    if (executionTime > 0) {
+      this.metrics.taskLatencies.push(executionTime);
+      // 限制历史数据长度
+      if (this.metrics.taskLatencies.length > 100) {
+        this.metrics.taskLatencies.shift();
+      }
+
+      // 更新平均执行时间
+      const totalExecutionTime = this.metrics.totalTaskDuration + executionTime;
+      const totalTasks = this.metrics.tasksCompleted + this.metrics.tasksFailed;
+      this.metrics.totalTaskDuration = totalExecutionTime;
+      this.metrics.avgTaskDuration = totalTasks > 0 ? totalExecutionTime / totalTasks : 0;
+    }
+
+    // 更新工作线程利用率
+    this.metrics.workerUtilization[workerIndex] = this.activeTaskCounts[workerIndex] / this.maxConcurrentTasksPerWorker;
+
+    // 调度下一个任务
     this.scheduleTasksForWorker(workerIndex);
   }
 
+  /**
+   * 在单线程环境中模拟Worker
+   */
   private async simulateWorker(workerIndex: number): Promise<void> {
     while (true) {
-      // 等待队列中有任务
-      while (this.taskQueues[workerIndex].length === 0) {
-        await new Promise(resolve => setTimeout(resolve, 10));
+      // 检查队列中是否有任务
+      if (this.taskQueues[workerIndex].length > 0 &&
+        this.activeTaskCounts[workerIndex] < this.maxConcurrentTasksPerWorker) {
+        this.scheduleTasksForWorker(workerIndex);
       }
 
-      // 处理下一个任务
-      if (this.taskQueues[workerIndex].length > 0) {
-        const task = this.taskQueues[workerIndex].shift()!;
-        this.activeTaskCounts[workerIndex]++;
-
-        try {
-          await task.runner();
-        } catch (error) {
-          log.error(`Error executing task ${task.id} in simulated worker ${workerIndex}:`, error);
-        } finally {
-          this.activeTaskCounts[workerIndex]--;
-          // 不需要显式安排下一个任务，循环会继续
-        }
-      }
+      // 暂停一小段时间，避免过度占用CPU
+      await new Promise(resolve => setTimeout(resolve, 5));
     }
+  }
+
+  /**
+   * 启动自适应调度优化
+   */
+  private startAdaptiveScheduling(): void {
+    // 每10秒进行一次调度参数调整
+    setInterval(() => {
+      this.adaptSchedulingParameters();
+    }, 10000);
+  }
+
+  /**
+   * 自适应调整调度参数
+   */
+  private adaptSchedulingParameters(): void {
+    // 当前时间
+    const now = Date.now();
+
+    // 计算自上次调整以来的时间
+    const timeSinceLastAdjustment = now - this.metrics.lastAdaptiveAdjustment;
+    if (timeSinceLastAdjustment < 5000) {
+      return; // 至少间隔5秒才进行调整
+    }
+
+    // 分析队列等待时间
+    const avgWaitTime = this.metrics.queueWaitTimes.length > 0
+      ? this.metrics.queueWaitTimes.reduce((sum, time) => sum + time, 0) / this.metrics.queueWaitTimes.length
+      : 0;
+
+    // 分析任务执行时间
+    const avgTaskLatency = this.metrics.taskLatencies.length > 0
+      ? this.metrics.taskLatencies.reduce((sum, time) => sum + time, 0) / this.metrics.taskLatencies.length
+      : 0;
+
+    // 计算工作线程平均利用率
+    const avgUtilization = this.metrics.workerUtilization.reduce((sum, util) => sum + util, 0) / this.threadCount;
+
+    // 根据指标调整maxConcurrentTasksPerWorker
+    if (avgUtilization > 0.8 && avgWaitTime > 100) {
+      // 工作线程过载，减少每个工作线程的并发任务数
+      this.maxConcurrentTasksPerWorker = Math.max(1, this.maxConcurrentTasksPerWorker - 1);
+    } else if (avgUtilization < 0.5 && avgWaitTime < 20) {
+      // 工作线程负载低，增加每个工作线程的并发任务数
+      this.maxConcurrentTasksPerWorker++;
+    }
+
+    // 更新调整时间
+    this.metrics.lastAdaptiveAdjustment = now;
+  }
+
+  /**
+   * 获取调度器指标
+   */
+  getMetrics() {
+    // 计算当前队列中的任务总数
+    const queuedTasks = this.taskQueues.reduce((sum, queue) => sum + queue.length, 0);
+
+    return {
+      ...this.metrics,
+      activeWorkers: this.threadCount,
+      queueLengths: this.taskQueues.map(q => q.length),
+      activeTasks: this.activeTaskCounts,
+      totalQueued: queuedTasks,
+      totalActive: this.activeTaskCounts.reduce((sum, count) => sum + count, 0),
+      maxConcurrentTasksPerWorker: this.maxConcurrentTasksPerWorker,
+      avgWaitTime: this.metrics.queueWaitTimes.length > 0
+        ? this.metrics.queueWaitTimes.reduce((sum, time) => sum + time, 0) / this.metrics.queueWaitTimes.length
+        : 0,
+      avgTaskLatency: this.metrics.taskLatencies.length > 0
+        ? this.metrics.taskLatencies.reduce((sum, time) => sum + time, 0) / this.metrics.taskLatencies.length
+        : 0,
+      avgUtilization: this.metrics.workerUtilization.reduce((sum, util) => sum + util, 0) / this.threadCount
+    };
   }
 }
 

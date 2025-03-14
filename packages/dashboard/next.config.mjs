@@ -1,9 +1,8 @@
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-const { NextConfig } = require("next");
-
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   /* config options here */
+  reactStrictMode: true,
+  swcMinify: true,
 };
 
 export default nextConfig;

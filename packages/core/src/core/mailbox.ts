@@ -175,9 +175,9 @@ export class DefaultMailbox implements IMailbox {
 
     this.processingScheduled = true;
 
+    // 使用微任务而非新Promise，减少开销
     queueMicrotask(() => {
       this.processingScheduled = false;
-
       this.processMailbox();
     });
   }
@@ -189,90 +189,61 @@ export class DefaultMailbox implements IMailbox {
 
     this.processing = true;
 
-    this.processNextBatch().catch(error => {
-      console.error('Error processing mailbox:', error);
+    // 使用dispatcher调度处理批量消息
+    this.dispatcher.schedule(async () => {
+      try {
+        await this.processNextBatch();
+      } catch (error) {
+        console.error('Error processing mailbox:', error);
+      } finally {
+        this.processing = false;
 
-      this.processing = false;
-
-      if (!this.isEmpty() && !this.suspended && !this.error) {
-        this.scheduleProcessing();
+        // 如果还有消息需要处理，继续调度
+        if (!this.isEmpty() && !this.suspended && !this.error) {
+          this.scheduleProcessing();
+        }
       }
     });
   }
 
   private async processNextBatch(): Promise<void> {
     try {
-      if (this.isEmpty() || this.suspended || this.error) {
-        this.processing = false;
+      if (this.isEmpty() || this.suspended || this.error || !this.invoker) {
         return;
       }
 
-      // 处理单个系统消息 - 系统消息始终优先处理
-      if (!this.systemMailbox.isEmpty()) {
+      const startTime = Date.now();
+      let processedCount = 0;
+
+      // 1. 优先处理系统消息
+      while (!this.systemMailbox.isEmpty() && processedCount < this.batchSize) {
         const message = this.systemMailbox.shift();
         if (message) {
-          try {
-            await this.processMessage(message);
-          } catch (error: unknown) {
-            // 如果处理系统消息失败，设置错误状态但允许后续系统消息继续处理
-            this.error = error instanceof Error ? error : new Error(String(error));
-            this.suspended = true;
-            this.processing = false;
-            return;
-          }
-
-          // 立即安排下一个批次的处理，不要等待 - 保持响应性
-          this.processing = false;
-          if (!this.isEmpty() && !this.suspended && !this.error) {
-            this.scheduleProcessing();
-          }
-          return;
+          await this.invoker.invoke(message);
+          processedCount++;
         }
       }
 
-      // 处理用户消息 - 每次处理小批量增加响应性
-      const currentBatchSize = Math.min(
-        this.batchSize,
-        this.userMailbox.length()
-      );
-
-      if (currentBatchSize > 0) {
-        // 直接用索引访问当前批次的消息，无需额外创建数组
-        let processed = 0;
-
-        while (processed < currentBatchSize && !this.userMailbox.isEmpty() && !this.suspended && !this.error) {
-          const message = this.userMailbox.shift();
-          if (!message) break;
-
-          try {
-            await this.processMessage(message);
-            processed++;
-          } catch (error: unknown) {
-            this.error = error instanceof Error ? error : new Error(String(error));
-            this.suspended = true;
-            this.processing = false;
-            return;
-          }
+      // 2. 处理用户消息，但不超过批次大小
+      while (!this.userMailbox.isEmpty() && processedCount < this.batchSize) {
+        const message = this.userMailbox.shift();
+        if (message) {
+          await this.invoker.invoke(message);
+          processedCount++;
         }
 
-        this.lastBatchTime = Date.now();
+        // 检查是否已经超过了单批次的最大处理时间 (10ms)
+        if (Date.now() - startTime > 10 && processedCount > 0) {
+          break;
+        }
       }
 
-      // 继续处理或结束
-      if (!this.isEmpty() && !this.suspended && !this.error) {
-        // 使用queueMicrotask替代嵌套Promise，减少开销
-        queueMicrotask(() => this.processNextBatch());
-      } else {
-        this.processing = false;
-      }
+      // 更新批次处理时间指标
+      this.lastBatchTime = Date.now() - startTime;
     } catch (error: unknown) {
       this.error = error instanceof Error ? error : new Error(String(error));
-      console.error('Error in mailbox batch processing:', error);
-      this.processing = false;
-
-      if (!this.isEmpty() && !this.suspended) {
-        this.scheduleProcessing();
-      }
+      this.suspended = true;
+      throw error;
     }
   }
 

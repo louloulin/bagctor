@@ -128,11 +128,21 @@ export class PluginLoader {
                     throw new Error(`Unsupported plugin type: ${metadata.type}`);
             }
 
+            // 获取actor的PID（如果可用）
+            let actorPid = undefined;
+            if (actor && actor instanceof Actor) {
+                // 通过spawn方法获取actor的PID
+                actorPid = await context.spawn({
+                    producer: () => actor!
+                });
+            }
+
             return {
                 metadata,
                 status: 'installed',
                 config: config || metadata.config,
                 actor,
+                actorPid,
                 process,
                 worker
             };

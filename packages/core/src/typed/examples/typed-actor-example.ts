@@ -72,45 +72,39 @@ class GreeterActor extends TypedActor<GreeterState, GreeterMessages> {
     // 设置消息处理器
     setupMessageHandlers(): void {
         // 处理greet消息
-        this.onMessage('greet', greetValidator,
-            (msg: Message<'greet', GreeterMessages>, ctx: ActorContext<GreeterMessages>) => {
-                const { name } = msg.payload;
-                console.log(`${this.state.greeting}, ${name}!`);
+        this.on('greet',
+            (payload: GreeterMessages['greet'], ctx: MessageContext) => {
+                const { name } = payload;
+                console.log(`${this.state.data.greeting}, ${name}!`);
 
                 // 更新状态
                 this.setState({
-                    greeting: this.state.greeting,
-                    greetingCount: this.state.greetingCount + 1
+                    greeting: this.state.data.greeting,
+                    greetingCount: this.state.data.greetingCount + 1
                 });
             });
 
         // 处理changeGreeting消息
-        this.onMessage('changeGreeting', changeGreetingValidator,
-            (msg: Message<'changeGreeting', GreeterMessages>, ctx: ActorContext<GreeterMessages>) => {
-                const { greeting } = msg.payload;
+        this.on('changeGreeting',
+            (payload: GreeterMessages['changeGreeting'], ctx: MessageContext) => {
+                const { greeting } = payload;
 
                 // 更新状态
                 this.setState({
                     greeting,
-                    greetingCount: this.state.greetingCount
+                    greetingCount: this.state.data.greetingCount
                 });
 
                 console.log(`Greeting changed to: ${greeting}`);
             });
 
         // 处理getStats请求
-        this.onMessage('getStats', null,
-            (msg: Message<'getStats', GreeterMessages>, ctx: ActorContext<GreeterMessages>) => {
+        this.on('getStats',
+            (payload: GreeterMessages['getStats'], ctx: MessageContext) => {
                 // 发送响应
-                if (msg.sender) {
-                    ctx.sendMessage(msg.sender, {
-                        type: 'stats',
-                        payload: { greetingCount: this.state.greetingCount },
-                        metadata: {
-                            correlationId: msg.metadata?.correlationId,
-                            isResponse: true,
-                            timestamp: Date.now()
-                        }
+                if (ctx.sender && ctx.self) {
+                    this.context.send(ctx.sender, 'stats', {
+                        greetingCount: this.state.data.greetingCount
                     });
                 }
             });

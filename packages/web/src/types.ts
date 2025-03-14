@@ -18,11 +18,12 @@ export interface RouteParams {
   [key: string]: string;
 }
 
-export interface HttpContext extends ActorContext {
+export interface HttpContext {
   request: HttpRequest;
   params: RouteParams;
   query: URLSearchParams;
   state: Map<string, any>;
+  actorContext: ActorContext;
 }
 
 export type HttpHandler = (c: HttpContext) => Promise<HttpResponse> | HttpResponse;

@@ -249,7 +249,13 @@ export class PluginManager extends Actor {
                     hasActor: !!plugin.actor,
                     forwardedMessage
                 });
-                await this.context.send(plugin.actor, forwardedMessage);
+
+                // 使用pluginActorPid属性替代直接访问actor.context.self
+                if (!plugin.actorPid) {
+                    throw new Error(`Plugin ${pluginId} has no valid PID`);
+                }
+
+                await this.context.send(plugin.actorPid, forwardedMessage);
                 log.info('Message forwarded successfully');
             } else {
                 throw new Error(`Plugin ${pluginId} has no actor instance`);

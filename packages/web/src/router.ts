@@ -1,11 +1,12 @@
 import { Actor, Props } from '@bactor/core';
 import { HttpContext, HttpHandler, HttpRequest, HttpResponse, Route, RouteParams } from './types';
+import { ActorContext } from '@bactor/core';
 
 export class Router extends Actor {
   private routes: Route[] = [];
 
-  constructor(props: Props) {
-    super(props);
+  constructor(context: ActorContext) {
+    super(context);
   }
 
   protected behaviors(): void {
@@ -84,11 +85,11 @@ export class Router extends Actor {
 
       console.log('[Router] Found matching route:', route.pattern);
       const context: HttpContext = {
-        ...this.context,
         request,
         params,
         query: searchParams,
-        state: request.state
+        state: new Map(),
+        actorContext: this.context
       };
 
       try {

@@ -1,4 +1,4 @@
-import { Actor, Props, PID } from '@bactor/core';
+import { Actor, Props, PID, ActorContext } from '@bactor/core';
 import { HttpRequest, HttpResponse } from '../types';
 
 export interface MiddlewareContext {
@@ -20,40 +20,40 @@ export interface MiddlewareProps extends Props {
 
 export interface MiddlewareMessage {
   type: 'process';
-  context: MiddlewareContext;
+  payload: MiddlewareContext;
   sender?: PID;
 }
 
 export abstract class MiddlewareActor extends Actor {
   protected name: string;
 
-  constructor(props: MiddlewareProps) {
-    super(props);
-    this.name = props.actorContext?.name || 'middleware';
+  constructor(context: ActorContext) {
+    super(context);
+    this.name = 'middleware';
   }
 
   protected behaviors(): void {
     this.addBehavior('default', async (msg) => {
       console.log(`[${this.name}] Received message:`, msg.type, 'from:', msg.sender?.id);
-      
+
       if (msg.type === 'process') {
         try {
           console.log(`[${this.name}] Processing request from:`, msg.sender?.id);
           console.log(`[${this.name}] Request:`, {
-            method: (msg as MiddlewareMessage).context.request.method,
-            url: (msg as MiddlewareMessage).context.request.url,
-            headers: Object.fromEntries((msg as MiddlewareMessage).context.request.headers.entries()),
-            state: Object.fromEntries((msg as MiddlewareMessage).context.state.entries())
+            method: (msg as MiddlewareMessage).payload.request.method,
+            url: (msg as MiddlewareMessage).payload.request.url,
+            headers: Object.fromEntries((msg as MiddlewareMessage).payload.request.headers.entries()),
+            state: Object.fromEntries((msg as MiddlewareMessage).payload.state.entries())
           });
-          
-          const result = await this.process((msg as MiddlewareMessage).context);
+
+          const result = await this.process((msg as MiddlewareMessage).payload);
           console.log(`[${this.name}] Processing complete`);
           console.log(`[${this.name}] Result:`, {
             handled: result.handled,
             response: result.context.response,
             state: Object.fromEntries(result.context.state.entries())
           });
-          
+
           if (msg.sender) {
             console.log(`[${this.name}] Sending result back to:`, msg.sender.id);
             try {
@@ -69,7 +69,7 @@ export abstract class MiddlewareActor extends Actor {
               await this.context.send(msg.sender, {
                 type: 'middleware.result',
                 payload: {
-                  context: (msg as MiddlewareMessage).context,
+                  context: (msg as MiddlewareMessage).payload,
                   handled: false
                 },
                 sender: this.context.self
@@ -85,7 +85,7 @@ export abstract class MiddlewareActor extends Actor {
               await this.context.send(msg.sender, {
                 type: 'middleware.result',
                 payload: {
-                  context: (msg as MiddlewareMessage).context,
+                  context: (msg as MiddlewareMessage).payload,
                   handled: false
                 },
                 sender: this.context.self

@@ -9,7 +9,6 @@ import { log } from '../utils/logger';
 class WorkerActor extends Actor {
     constructor(context: ActorContext) {
         super(context);
-        this.initialize();
     }
 
     protected behaviors(): void {

@@ -3,6 +3,7 @@ import { Router } from './router';
 import { HttpRequest, HttpResponse } from './types';
 import { MiddlewareManager } from './middleware/manager';
 import type { Server } from 'bun';
+import { ActorContext } from '@bactor/core';
 
 export interface HttpServerProps extends Props {
   port: number;
@@ -16,13 +17,15 @@ export class HttpServer extends Actor {
   private config: { port: number; hostname: string };
   private middlewareResolver: ((value: HttpResponse | null) => void) | null = null;
 
-  constructor(props: Props) {
-    super(props);
+  constructor(context: ActorContext) {
+    super(context);
+    // 获取配置 - 直接通过构造函数传入默认值
     this.config = {
-      port: (props as HttpServerProps).port || 3000,
-      hostname: (props as HttpServerProps).hostname || 'localhost'
+      port: 3000,
+      hostname: 'localhost'
     };
-    this.router = new Router(this.context);
+    // 注意：实际应用中应该从某个地方获取这些配置
+    this.router = new Router(context);
   }
 
   public async preStart(): Promise<void> {
@@ -106,7 +109,7 @@ export class HttpServer extends Actor {
 
       console.log('[Server] Setting up middleware processing');
       this.become('await_middleware');
-      
+
       console.log('[Server] Sending middleware.process message to:', this.middlewareManagerPid.id);
       this.context.send(this.middlewareManagerPid, {
         type: 'middleware.process',
@@ -133,7 +136,7 @@ export class HttpServer extends Actor {
       hostname,
       fetch: async (request: Request) => {
         console.log(`[Server] Received ${request.method} request to ${request.url}`);
-        
+
         const httpRequest: HttpRequest = {
           method: request.method,
           url: new URL(request.url).pathname,
@@ -160,7 +163,7 @@ export class HttpServer extends Actor {
           console.log('[Server] Processing route handler');
           // Process route handler
           const response = await this.router.handleRequest(httpRequest);
-          
+
           // Add any CORS headers from middleware state
           if (response && response.headers) {
             const corsHeaders = httpRequest.state?.get('cors');

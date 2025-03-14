@@ -37,10 +37,14 @@ class MockActorContext extends ActorContext {
   }
 
   async send(target: PID, message: Message): Promise<any> {
-    if (message.type === 'middleware.add') {
-      return { type: 'ok' };
-    }
-    return { type: 'middleware.result', payload: { handled: false } };
+    console.log(`[MockActorContext] Sending message to ${target.id}:`, message);
+    // 在实际测试中，这里会返回一个模拟的响应
+    return {
+      type: 'middleware.result',
+      payload: {
+        handled: false
+      }
+    };
   }
 
   async spawn(props: Props): Promise<PID> {
@@ -70,9 +74,12 @@ class TestAuthMiddleware extends AuthMiddleware {
 }
 
 class TestMiddlewareManager extends MiddlewareManager {
+  private mockContext: MockActorContext;
+
   constructor() {
-    super({});
-    (this as any).context = new MockActorContext();
+    const mockContext = new MockActorContext();
+    super(mockContext);
+    this.mockContext = mockContext;
   }
 
   public getContext() {
@@ -111,17 +118,19 @@ describe('Middleware Tests', () => {
         payload: request
       });
 
-      expect(response).toBeDefined();
-      expect(response.type).toBe('middleware.result');
-      expect(response.payload.handled).toBe(false);
+      // 先将返回值转换为unknown，再转为预期的类型
+      const typedResponse = (response as unknown) as { type: string, payload: { handled: boolean } };
+      expect(typedResponse).toBeDefined();
+      expect(typedResponse.type).toBe('middleware.result');
+      expect(typedResponse.payload.handled).toBe(false);
     });
   });
 
   describe('Common Middleware', () => {
     test('LoggerMiddleware should not handle request', async () => {
-      const logger = new TestLoggerMiddleware({
-        actorContext: { name: 'test-logger' }
-      });
+      // 创建一个MockActorContext并传递给中间件
+      const mockContext = new MockActorContext();
+      const logger = new TestLoggerMiddleware(mockContext);
 
       const context = {
         request: {
@@ -139,9 +148,9 @@ describe('Middleware Tests', () => {
     });
 
     test('CorsMiddleware should handle OPTIONS request', async () => {
-      const cors = new TestCorsMiddleware({
-        actorContext: { name: 'test-cors' }
-      });
+      // 创建一个MockActorContext并传递给中间件
+      const mockContext = new MockActorContext();
+      const cors = new TestCorsMiddleware(mockContext);
 
       const context = {
         request: {
@@ -160,9 +169,9 @@ describe('Middleware Tests', () => {
     });
 
     test('AuthMiddleware should handle unauthorized request', async () => {
-      const auth = new TestAuthMiddleware({
-        actorContext: { name: 'test-auth' }
-      });
+      // 创建一个MockActorContext并传递给中间件
+      const mockContext = new MockActorContext();
+      const auth = new TestAuthMiddleware(mockContext);
 
       const context = {
         request: {
@@ -180,9 +189,9 @@ describe('Middleware Tests', () => {
     });
 
     test('AuthMiddleware should pass valid token', async () => {
-      const auth = new TestAuthMiddleware({
-        actorContext: { name: 'test-auth' }
-      });
+      // 创建一个MockActorContext并传递给中间件
+      const mockContext = new MockActorContext();
+      const auth = new TestAuthMiddleware(mockContext);
 
       const context = {
         request: {

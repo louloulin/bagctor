@@ -1,17 +1,17 @@
 import { beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
-import { log } from "../utils/logger";
+import { log, configureLogger } from "../utils/logger";
 
 // 禁用测试期间的常规日志输出
 beforeAll(() => {
-    // 保存原始的日志级别
-    const originalLogLevel = log.level;
+    // 保存原始日志配置，我们将使用闭包来存储
+    let originalLogConfig = { level: "info" }; // 假设默认级别是info
 
     // 设置更高的日志级别，只显示错误
-    log.level = "error";
+    configureLogger({ level: "error" });
 
     // 测试完成后恢复
     afterAll(() => {
-        log.level = originalLogLevel;
+        configureLogger(originalLogConfig);
     });
 });
 

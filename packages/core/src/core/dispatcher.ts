@@ -141,25 +141,215 @@ export class ThroughputDispatcher implements MessageDispatcher {
   private processing = false;
   private processedInWindow = 0;
   private windowStartTime = Date.now();
-  private readonly targetInterval: number;
+  private targetInterval: number;
   private processingTimeout: any = null;
 
+  // 用于backpressure监控
+  private queueSizeHistory: number[] = [];
+  private latencyHistory: number[] = [];
+  private lastAdaptiveAdjustment = Date.now();
+  private currentThroughput: number;
+  private overloadDetected = false;
+
+  // 监控数据
+  private totalProcessed = 0;
+  private totalLatency = 0;
+  private maxQueueSize = 0;
+  private adaptiveAdjustments = 0;
+
   constructor(
-    private readonly throughput: number = 300,
+    private readonly initialThroughput: number = 300,
     private readonly batchSize: number = 30,
-    private readonly windowSize: number = 1000 // 1 second window
+    private readonly windowSize: number = 1000, // 1 second window
+    private readonly maxQueueThreshold: number = 1000, // 队列长度阈值，超过此值触发backpressure
+    private readonly adaptiveInterval: number = 5000, // 自适应调整间隔（毫秒）
+    private readonly adaptiveEnabled: boolean = true,
+    private readonly historySize: number = 10, // 历史数据点数量
+    private readonly minThroughput: number = 50, // 最小吞吐量
+    private readonly maxThroughput: number = 1000 // 最大吞吐量
   ) {
+    // 初始化吞吐量
+    this.currentThroughput = initialThroughput;
+
     // 计算任务之间的目标间隔时间
-    this.targetInterval = this.windowSize / this.throughput;
+    this.targetInterval = this.windowSize / this.currentThroughput;
+
+    // 初始化历史数据
+    for (let i = 0; i < this.historySize; i++) {
+      this.queueSizeHistory.push(0);
+      this.latencyHistory.push(0);
+    }
   }
 
   schedule(runner: () => Promise<void>): void {
+    // 应用backpressure策略
+    if (this.queue.length > this.maxQueueThreshold) {
+      // 记录过载状态
+      this.overloadDetected = true;
+
+      // 可以在此处抛出异常或采取其他措施
+      // 现在我们只是记录警告并继续尝试处理
+      console.warn(`Backpressure triggered: Queue size (${this.queue.length}) exceeded threshold (${this.maxQueueThreshold})`);
+
+      // 尝试立即调整吞吐量以应对负载
+      this.adjustThroughputImmediately();
+    }
+
+    // 更新最大队列大小统计
+    this.maxQueueSize = Math.max(this.maxQueueSize, this.queue.length);
+
+    // 添加任务到队列
     this.queue.push(runner);
 
     // 如果未在处理中，启动处理队列
     if (!this.processing) {
       this.processQueue();
     }
+  }
+
+  /**
+   * 获取调度器当前状态信息
+   */
+  getStats() {
+    return {
+      queueSize: this.queue.length,
+      currentThroughput: this.currentThroughput,
+      processedTotal: this.totalProcessed,
+      averageLatency: this.totalProcessed > 0 ? this.totalLatency / this.totalProcessed : 0,
+      maxQueueSize: this.maxQueueSize,
+      overloadDetected: this.overloadDetected,
+      adaptiveAdjustments: this.adaptiveAdjustments
+    };
+  }
+
+  /**
+   * 重置调度器状态
+   */
+  reset(): void {
+    // 清除队列
+    this.queue = [];
+
+    // 重置处理状态
+    this.processing = false;
+    this.processedInWindow = 0;
+    this.windowStartTime = Date.now();
+
+    // 重置监控数据
+    this.totalProcessed = 0;
+    this.totalLatency = 0;
+    this.maxQueueSize = 0;
+    this.adaptiveAdjustments = 0;
+    this.overloadDetected = false;
+
+    // 恢复初始吞吐量
+    this.currentThroughput = this.initialThroughput;
+    this.targetInterval = this.windowSize / this.currentThroughput;
+
+    // 清除处理超时
+    if (this.processingTimeout) {
+      clearTimeout(this.processingTimeout);
+      this.processingTimeout = null;
+    }
+
+    // 重置历史数据
+    this.queueSizeHistory = Array(this.historySize).fill(0);
+    this.latencyHistory = Array(this.historySize).fill(0);
+  }
+
+  /**
+   * 紧急情况下立即调整吞吐量
+   */
+  private adjustThroughputImmediately(): void {
+    // 在过载情况下减少吞吐量，否则增加
+    if (this.overloadDetected) {
+      // 减少吞吐量，最低至minThroughput
+      this.currentThroughput = Math.max(this.minThroughput, this.currentThroughput * 0.8);
+    } else if (this.queue.length < this.maxQueueThreshold * 0.5) {
+      // 队列长度低于阈值的50%时，增加吞吐量，但不超过最大值
+      this.currentThroughput = Math.min(this.maxThroughput, this.currentThroughput * 1.2);
+    }
+
+    // 重新计算时间间隔
+    this.targetInterval = this.windowSize / this.currentThroughput;
+
+    // 记录调整次数
+    this.adaptiveAdjustments++;
+
+    // 记录时间
+    this.lastAdaptiveAdjustment = Date.now();
+  }
+
+  /**
+   * 基于历史数据进行自适应调整
+   */
+  private adaptiveThroughputControl(): void {
+    if (!this.adaptiveEnabled) return;
+
+    const now = Date.now();
+
+    // 检查是否到达自适应调整的时间间隔
+    if (now - this.lastAdaptiveAdjustment < this.adaptiveInterval) return;
+
+    // 计算队列大小趋势
+    const queueSizeTrend = this.calculateTrend(this.queueSizeHistory);
+
+    // 计算延迟趋势
+    const latencyTrend = this.calculateTrend(this.latencyHistory);
+
+    // 根据趋势调整吞吐量
+    if (queueSizeTrend > 0.2 || latencyTrend > 0.2) {
+      // 队列大小或延迟增加趋势明显，减少吞吐量
+      this.currentThroughput = Math.max(this.minThroughput, this.currentThroughput * 0.9);
+      console.log(`Adaptive control: Decreasing throughput to ${this.currentThroughput}`);
+    } else if (queueSizeTrend < -0.2 && latencyTrend < 0.1) {
+      // 队列大小减少且延迟没有明显增加，增加吞吐量
+      this.currentThroughput = Math.min(this.maxThroughput, this.currentThroughput * 1.1);
+      console.log(`Adaptive control: Increasing throughput to ${this.currentThroughput}`);
+    }
+
+    // 重新计算时间间隔
+    this.targetInterval = this.windowSize / this.currentThroughput;
+
+    // 记录调整次数
+    this.adaptiveAdjustments++;
+
+    // 更新调整时间
+    this.lastAdaptiveAdjustment = now;
+  }
+
+  /**
+   * 计算数据趋势（正值表示上升，负值表示下降）
+   */
+  private calculateTrend(data: number[]): number {
+    if (data.length < 2) return 0;
+
+    // 使用简单线性回归计算趋势
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumXX = 0;
+
+    for (let i = 0; i < data.length; i++) {
+      sumX += i;
+      sumY += data[i];
+      sumXY += i * data[i];
+      sumXX += i * i;
+    }
+
+    const n = data.length;
+    const denominator = n * sumXX - sumX * sumX;
+
+    // 避免除以零
+    if (denominator === 0) return 0;
+
+    // 计算斜率
+    const slope = (n * sumXY - sumX * sumY) / denominator;
+
+    // 归一化斜率
+    const averageY = sumY / n;
+    if (averageY === 0) return 0;
+
+    return slope / averageY;
   }
 
   private async processQueue(): Promise<void> {
@@ -172,106 +362,109 @@ export class ThroughputDispatcher implements MessageDispatcher {
       this.processingTimeout = null;
     }
 
+    // 设置处理标志
     this.processing = true;
 
     try {
-      // 最大处理次数，防止无限循环
-      let processCount = 0;
-      const maxProcessCount = 1000; // 合理限制循环次数
+      // 检查是否需要重置窗口计数器
+      const now = Date.now();
+      const elapsedTime = now - this.windowStartTime;
 
-      while (this.queue.length > 0 && processCount < maxProcessCount) {
-        processCount++;
-        const now = Date.now();
+      if (elapsedTime >= this.windowSize) {
+        // 计算实际吞吐量并记录
+        const actualThroughput = (this.processedInWindow / elapsedTime) * 1000;
 
-        // 检查是否需要重置时间窗口
-        if (now >= this.windowStartTime + this.windowSize) {
-          this.windowStartTime = now;
-          this.processedInWindow = 0;
-        }
+        // 更新历史数据
+        this.updateHistory(this.queue.length, elapsedTime);
 
-        // 计算当前窗口中还能处理多少任务
-        const remainingInWindow = this.throughput - this.processedInWindow;
-        if (remainingInWindow <= 0) {
-          // 等待到下一个时间窗口
-          const waitTime = (this.windowStartTime + this.windowSize) - now;
-          if (waitTime > 0) {
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-          } else {
-            // 如果计算出的等待时间不正确，强制重置窗口
-            this.windowStartTime = Date.now();
-            this.processedInWindow = 0;
+        // 重置窗口计数器
+        this.processedInWindow = 0;
+        this.windowStartTime = now;
+
+        // 执行自适应控制
+        this.adaptiveThroughputControl();
+      }
+
+      // 获取此批次要处理的任务数
+      const tasksToProcess = Math.min(this.batchSize, this.queue.length);
+
+      // 处理批量任务
+      if (tasksToProcess > 0) {
+        const taskStartTime = Date.now();
+
+        // 获取待处理任务
+        const batch = this.queue.splice(0, tasksToProcess);
+
+        // 同时执行所有任务
+        await Promise.all(batch.map(async (task) => {
+          try {
+            await task();
+
+            // 更新计数器
+            this.processedInWindow++;
+            this.totalProcessed++;
+
+          } catch (error) {
+            console.error('Error executing task in ThroughputDispatcher:', error);
           }
-          continue;
-        }
+        }));
 
-        // 计算本批次要处理的任务数
-        const currentBatchSize = Math.min(
-          this.batchSize,
-          remainingInWindow,
-          this.queue.length
-        );
+        // 记录任务执行时间
+        const taskEndTime = Date.now();
+        const taskDuration = taskEndTime - taskStartTime;
+        this.totalLatency += taskDuration;
 
-        if (currentBatchSize <= 0) continue;
+        // 如果处理得太快，需要等待以维持目标吞吐量
+        const targetBatchTime = tasksToProcess * this.targetInterval;
+        const waitTime = Math.max(0, targetBatchTime - taskDuration);
 
-        // 取出要处理的任务
-        const batch = this.queue.splice(0, currentBatchSize);
-        const batchStartTime = Date.now();
-
-        // 并行执行任务，但控制启动时间
-        const executions = batch.map((runner, index) => {
-          return (async () => {
-            // 计算这个任务应该在什么时候开始
-            const targetStartTime = batchStartTime + (index * this.targetInterval);
-            const now = Date.now();
-
-            // 如果还没到开始时间，等待
-            if (now < targetStartTime) {
-              await new Promise(resolve => setTimeout(resolve, targetStartTime - now));
+        if (waitTime > 0) {
+          // 延迟下一批次处理，以保持吞吐量
+          this.processingTimeout = setTimeout(() => {
+            this.processing = false;
+            if (this.queue.length > 0) {
+              this.processQueue();
             }
-
-            // 执行任务
-            return runner().catch(error => {
-              // 捕获并记录任务执行中的错误
-              console.error('Error executing task in ThroughputDispatcher:', error);
-            });
-          })();
-        });
-
-        try {
-          // 等待所有任务完成，但设置合理超时
-          await Promise.race([
-            Promise.all(executions),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Batch execution timeout')), 10000))
-          ]);
-        } catch (error) {
-          console.error('Batch execution error or timeout:', error);
-          // 即使批处理超时或出错，仍继续处理队列
+          }, waitTime);
+        } else {
+          // 无需等待，立即处理下一批次
+          this.processing = false;
+          if (this.queue.length > 0) {
+            this.processQueue();
+          }
         }
-
-        // 更新已处理的任务数
-        this.processedInWindow += currentBatchSize;
-
-        // 计算下一批任务的开始时间
-        const nextBatchStartTime = batchStartTime + (currentBatchSize * this.targetInterval);
-        const timeToNextBatch = nextBatchStartTime - Date.now();
-
-        // 如果需要，等待到下一批次的开始时间，但限制最长等待时间
-        if (timeToNextBatch > 0 && timeToNextBatch < 1000) {
-          await new Promise(resolve => setTimeout(resolve, timeToNextBatch));
-        }
+      } else {
+        // 队列为空，停止处理
+        this.processing = false;
       }
-
-      // 如果达到最大处理次数但队列仍有任务，记录警告
-      if (this.queue.length > 0) {
-        console.warn(`ThroughputDispatcher reached max process count with ${this.queue.length} tasks remaining`);
-      }
-    } finally {
+    } catch (error) {
+      console.error('Unexpected error in ThroughputDispatcher:', error);
       this.processing = false;
 
-      // 如果队列中还有任务，使用setTimeout而非setImmediate继续处理
+      // 尝试继续处理队列
       if (this.queue.length > 0) {
-        this.processingTimeout = setTimeout(() => this.processQueue(), 0);
+        this.processingTimeout = setTimeout(() => {
+          this.processQueue();
+        }, 100); // 出错后稍微延迟
       }
+    }
+  }
+
+  /**
+   * 更新历史数据
+   */
+  private updateHistory(queueSize: number, latency: number): void {
+    // 移除最旧的数据
+    this.queueSizeHistory.shift();
+    this.latencyHistory.shift();
+
+    // 添加新数据
+    this.queueSizeHistory.push(queueSize);
+    this.latencyHistory.push(latency);
+
+    // 如果队列大小降到阈值以下，重置过载状态
+    if (this.overloadDetected && queueSize < this.maxQueueThreshold * 0.7) {
+      this.overloadDetected = false;
     }
   }
 } 

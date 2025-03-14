@@ -1,4 +1,5 @@
 import { Actor, ActorContext, Message } from '@bactor/core';
+import { PID } from '@bactor/common';
 import { Worker as NodeWorker } from 'worker_threads';
 import { ChildProcess } from 'child_process';
 
@@ -60,6 +61,7 @@ export interface PluginInstance {
     status: PluginStatus;
     config?: any;
     actor?: Actor;
+    actorPid?: PID;
     process?: ChildProcess;
     worker?: WorkerType;
 }

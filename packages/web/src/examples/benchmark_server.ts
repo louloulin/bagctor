@@ -3,6 +3,7 @@ import { HttpServer, HttpServerProps } from "../server";
 import { HttpRequest, HttpResponse, HttpContext } from "../types";
 import { Router } from "../router";
 import autocannon from "autocannon";
+import { ActorContext } from '@bactor/core';
 
 // Helper function to run a benchmark scenario
 async function runBenchmark(config: autocannon.Options): Promise<void> {
@@ -36,8 +37,12 @@ async function main() {
   // Create a simple benchmark server
   const system = new ActorSystem("localhost:50051");
 
+  // 创建一个临时的ActorContext来初始化Router
+  const mockPid = { id: 'benchmark-router' };
+  const mockContext = new ActorContext(mockPid, system);
+
   // Create router with benchmark routes
-  const router = new Router({});
+  const router = new Router(mockContext);
 
   // Echo endpoint
   router.get("/echo", async (ctx: HttpContext) => {

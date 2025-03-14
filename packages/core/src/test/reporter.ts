@@ -1,4 +1,18 @@
-import { TestRunner } from "bun:test";
+// import { TestRunner } from "bun:test";
+
+// 定义测试相关的接口
+interface TestResult {
+    name: string;
+    failed: boolean;
+    skipped: boolean;
+    error?: Error;
+}
+
+interface BunTestRunner {
+    onTestStart: (callback: () => void) => void;
+    onTestEnd: (callback: (test: TestResult) => void) => void;
+    onEnd: (callback: () => void) => void;
+}
 
 export class CustomReporter {
     private startTime: number = 0;
@@ -7,7 +21,7 @@ export class CustomReporter {
     private failCount: number = 0;
     private skipCount: number = 0;
 
-    constructor(private runner: TestRunner) {
+    constructor(private runner: BunTestRunner) {
         this.setupListeners();
     }
 
@@ -20,7 +34,7 @@ export class CustomReporter {
             this.testCount++;
         });
 
-        this.runner.onTestEnd((test) => {
+        this.runner.onTestEnd((test: TestResult) => {
             if (test.failed) {
                 this.failCount++;
                 console.log(`❌ ${test.name}`);

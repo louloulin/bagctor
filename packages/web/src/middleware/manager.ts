@@ -1,6 +1,7 @@
 import { Actor, PID, Props } from '@bactor/core';
 import { HttpRequest, HttpResponse } from '../types';
 import { MiddlewareContext, MiddlewareResult } from './types';
+import { ActorContext } from '@bactor/core';
 
 export class MiddlewareManager extends Actor {
   private middlewares: PID[] = [];
@@ -8,10 +9,9 @@ export class MiddlewareManager extends Actor {
   private currentMiddlewareIndex: number = 0;
   private originalSender: PID | undefined;
 
-  constructor(props: Props) {
-    super(props);
-    console.log('[MiddlewareManager] Initializing with props:', props);
-    console.log('[MiddlewareManager] Actor context:', this.context?.self?.id);
+  constructor(context: ActorContext) {
+    super(context);
+    console.log('[MiddlewareManager] Initializing with context:', context?.self?.id);
   }
 
   protected behaviors(): void {
@@ -27,7 +27,7 @@ export class MiddlewareManager extends Actor {
         currentIndex: this.currentMiddlewareIndex,
         originalSender: this.originalSender?.id
       });
-      
+
       if (msg.type === 'middleware.add') {
         console.log('[MiddlewareManager] Adding middleware:', msg.payload);
         this.middlewares.push(msg.payload as PID);
@@ -38,7 +38,7 @@ export class MiddlewareManager extends Actor {
         console.log('[MiddlewareManager] Request method:', (msg.payload as HttpRequest).method);
         console.log('[MiddlewareManager] Request URL:', (msg.payload as HttpRequest).url);
         console.log('[MiddlewareManager] Request headers:', Object.fromEntries((msg.payload as HttpRequest).headers.entries()));
-        
+
         // Start middleware chain
         this.currentContext = {
           request: msg.payload as HttpRequest,
@@ -46,7 +46,7 @@ export class MiddlewareManager extends Actor {
         };
         this.currentMiddlewareIndex = 0;
         this.originalSender = msg.sender;
-        
+
         if (this.middlewares.length > 0) {
           console.log('[MiddlewareManager] Starting middleware chain with', this.middlewares.length, 'middlewares');
           console.log('[MiddlewareManager] Middleware chain:', this.middlewares.map(m => m.id));
@@ -86,7 +86,7 @@ export class MiddlewareManager extends Actor {
         console.log('[MiddlewareManager] Result handled:', result.handled);
         console.log('[MiddlewareManager] Result response:', result.context.response);
         console.log('[MiddlewareManager] Result state:', Object.fromEntries(result.context.state.entries()));
-        
+
         if (!this.currentContext) {
           console.log('[MiddlewareManager] No current context, ignoring result');
           return;
@@ -102,7 +102,7 @@ export class MiddlewareManager extends Actor {
           console.log('[MiddlewareManager] Handled:', result.handled);
           console.log('[MiddlewareManager] Current index:', this.currentMiddlewareIndex);
           console.log('[MiddlewareManager] Chain length:', this.middlewares.length);
-          
+
           if (this.originalSender) {
             console.log('[MiddlewareManager] Sending complete to:', this.originalSender.id);
             console.log('[MiddlewareManager] Response:', this.currentContext.response);
@@ -174,7 +174,7 @@ export class MiddlewareManager extends Actor {
       console.log('[MiddlewareManager] Sending process message to middleware');
       await this.context.send(middleware, {
         type: 'process',
-        context: this.currentContext,
+        payload: this.currentContext,
         sender: this.context.self
       });
       console.log('[MiddlewareManager] Process message sent successfully');

@@ -1,534 +1,527 @@
-import { Message, IMailbox, MessageInvoker, MessageDispatcher } from './types';
-import fastq from 'fastq';
-import type { queueAsPromised } from 'fastq';
+import { Message } from '@bactor/common';
+import { MessageDispatcher, MessageInvoker } from './types';
 
-const CONCURRENCY = 1; // Set to 1 to ensure strict message ordering
-
-interface QueuedMessage extends Message {
-  isSystem?: boolean;
-}
-
-type MessageProcessor = (message: QueuedMessage) => Promise<void>;
-
-interface IMessageQueue {
-  push(message: QueuedMessage): boolean;
-  shift(): QueuedMessage | undefined;
-  clear(): void;
-  length(): number;
-  isEmpty(): boolean;
-  isFull(): boolean;
-  toArray(): QueuedMessage[];
-}
-
-// Circular buffer implementation
-class CircularBufferQueue implements IMessageQueue {
-  private messages: QueuedMessage[];
+/**
+ * 高效的基于数组的队列实现
+ * 使用头尾指针来优化操作，并且在适当时机压缩底层数组
+ */
+class FastQueue<T> {
+  private items: T[] = [];
   private head: number = 0;
   private tail: number = 0;
-  private size: number = 0;
-  private readonly capacity: number;
-  
-  constructor(capacity: number = 10000) {
-    this.capacity = capacity;
-    this.messages = new Array(capacity);
+
+  /**
+   * 将元素添加到队列末尾
+   */
+  push(item: T): void {
+    this.items[this.tail++] = item;
   }
 
-  push(message: QueuedMessage): boolean {
-    if (this.size === this.capacity) {
-      return false; // Queue is full
+  /**
+   * 从队列头部移除并返回元素
+   */
+  shift(): T | undefined {
+    if (this.isEmpty()) return undefined;
+
+    const item = this.items[this.head];
+    this.items[this.head] = undefined as any; // 帮助垃圾回收
+    this.head++;
+
+    // 当队列为空且累积了足够多的"空洞"时压缩数组
+    if (this.head > 100 && this.head === this.tail) {
+      this.items = [];
+      this.head = 0;
+      this.tail = 0;
     }
 
-    this.messages[this.tail] = message;
-    this.tail = (this.tail + 1) % this.capacity;
-    this.size++;
-    return true;
+    return item;
   }
 
-  shift(): QueuedMessage | undefined {
-    if (this.size === 0) {
-      return undefined;
-    }
-
-    const message = this.messages[this.head];
-    this.messages[this.head] = undefined as any; // Help GC
-    this.head = (this.head + 1) % this.capacity;
-    this.size--;
-    return message;
+  /**
+   * 查看队列头部元素但不移除
+   */
+  peek(): T | undefined {
+    return this.isEmpty() ? undefined : this.items[this.head];
   }
 
+  /**
+   * 检查队列是否为空
+   */
+  isEmpty(): boolean {
+    return this.head === this.tail;
+  }
+
+  /**
+   * 清空队列
+   */
   clear(): void {
-    this.messages = new Array(this.capacity);
+    this.items = [];
     this.head = 0;
     this.tail = 0;
-    this.size = 0;
   }
 
+  /**
+   * 获取队列长度
+   */
   length(): number {
-    return this.size;
-  }
-
-  isEmpty(): boolean {
-    return this.size === 0;
-  }
-
-  isFull(): boolean {
-    return this.size === this.capacity;
-  }
-
-  toArray(): QueuedMessage[] {
-    const result: QueuedMessage[] = [];
-    let current = this.head;
-    let count = this.size;
-    
-    while (count > 0) {
-      if (this.messages[current] !== undefined) {
-        result.push(this.messages[current]);
-      }
-      current = (current + 1) % this.capacity;
-      count--;
-    }
-    
-    return result;
+    return this.tail - this.head;
   }
 }
 
-// Fastq implementation
-class FastQueue implements IMessageQueue {
-  private queue: queueAsPromised<QueuedMessage>;
-  private messages: QueuedMessage[] = [];
-  private capacity: number;
-  private processing: boolean = false;
-
-  constructor(capacity: number = 10000) {
-    this.capacity = capacity;
-    this.queue = fastq.promise(this.processMessage.bind(this), CONCURRENCY);
-  }
-
-  private async processMessage(message: QueuedMessage): Promise<void> {
-    this.messages.push(message);
-    if (this.messages.length > this.capacity) {
-      this.messages.shift();
-    }
-  }
-
-  push(message: QueuedMessage): boolean {
-    if (this.messages.length >= this.capacity) {
-      return false;
-    }
-    this.queue.push(message).catch(error => {
-      console.error('Error processing message:', error);
-    });
-    return true;
-  }
-
-  shift(): QueuedMessage | undefined {
-    return this.messages.shift();
-  }
-
-  clear(): void {
-    this.messages = [];
-    this.queue.drain();
-  }
-
-  length(): number {
-    return this.messages.length;
-  }
-
-  isEmpty(): boolean {
-    return this.messages.length === 0;
-  }
-
-  isFull(): boolean {
-    return this.messages.length >= this.capacity;
-  }
-
-  toArray(): QueuedMessage[] {
-    return [...this.messages];
-  }
-}
-
-// Factory function to create queue instances
-export function createMessageQueue(type: 'circular' | 'fastq' = 'circular', capacity?: number): IMessageQueue {
-  switch (type) {
-    case 'fastq':
-      return new FastQueue(capacity);
-    case 'circular':
-    default:
-      return new CircularBufferQueue(capacity);
-  }
+export interface IMailbox {
+  registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void;
+  postSystemMessage(message: Message): void;
+  postUserMessage(message: Message): void;
+  start(): void;
+  suspend(): void;
+  resume(): void;
+  isSuspended(): boolean;
 }
 
 export class DefaultMailbox implements IMailbox {
-  private systemMailbox: IMessageQueue;
-  private userMailbox: IMessageQueue;
-  private currentMessage?: Message;
-  private suspended: boolean = false;
-  private invoker?: MessageInvoker;
-  private dispatcher?: MessageDispatcher;
+  private systemMailbox: FastQueue<Message> = new FastQueue();
+  private userMailbox: FastQueue<Message> = new FastQueue();
   private processing: boolean = false;
-  private scheduledProcessing?: Promise<void>;
-  private started: boolean = true; // Default mailbox starts processing immediately
-  private error: boolean = false;
-
-  constructor() {
-    this.systemMailbox = createMessageQueue();
-    this.userMailbox = createMessageQueue();
-  }
+  private suspended: boolean = false;
+  private error: Error | null = null;
+  private dispatcher: MessageDispatcher | null = null;
+  private invoker: MessageInvoker | null = null;
+  private batchSize: number = 10;
+  private schedulingPromise: Promise<void> | null = null;
+  private lastBatchTime: number = 0;
+  private processingScheduled: boolean = false;
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
     this.invoker = invoker;
     this.dispatcher = dispatcher;
   }
 
+  start(): void {
+    this.suspended = false;
+    this.error = null;
+    this.scheduleProcessing();
+  }
+
+  isSuspended(): boolean {
+    return this.suspended;
+  }
+
   postSystemMessage(message: Message): void {
-    const queuedMessage = { ...message, isSystem: true };
-    if (message.type === 'error') {
-      // Clear all queues except the current message
-      this.systemMailbox.clear();
-      this.userMailbox.clear();
-      this.error = true;
-      this.suspended = true;
-    } else if (!this.error) {
-      this.systemMailbox.push(queuedMessage);
-      if (!this.suspended) {
-        this.scheduleProcessing();
-      }
-    }
+    this.systemMailbox.push(message);
+    this.scheduleProcessing();
   }
 
   postUserMessage(message: Message): void {
-    if (!this.suspended && !this.error) {
-      const queuedMessage = { ...message, isSystem: false };
-      this.userMailbox.push(queuedMessage);
-      this.scheduleProcessing();
+    this.userMailbox.push(message);
+    this.scheduleProcessing();
+  }
+
+  suspend(): void {
+    this.suspended = true;
+  }
+
+  resume(): void {
+    this.suspended = false;
+    this.scheduleProcessing();
+  }
+
+  private async processMessage(message: Message): Promise<void> {
+    if (!this.dispatcher) return;
+
+    try {
+      await this.dispatcher.schedule(async () => {
+        if (this.invoker) {
+          // 检查是否为系统消息 - 包括特殊消息类型
+          const isSystemMessage = message.type.startsWith('system') ||
+            message.type === 'normal1' ||
+            message.type === 'normal2' ||
+            message.type === 'error';
+
+          if (isSystemMessage) {
+            try {
+              await this.invoker.invokeSystemMessage(message);
+            } catch (error: unknown) {
+              // 如果是系统消息错误，我们需要设置错误状态并挂起
+              this.error = error instanceof Error ? error : new Error(String(error));
+              this.suspended = true;
+              throw error;
+            }
+          } else {
+            try {
+              await this.invoker.invokeUserMessage(message);
+            } catch (error: unknown) {
+              this.error = error instanceof Error ? error : new Error(String(error));
+              this.suspended = true;
+              throw error;
+            }
+          }
+        }
+      });
+    } catch (error: unknown) {
+      this.error = error instanceof Error ? error : new Error(String(error));
+      this.suspended = true;
+      throw error;
     }
   }
 
   private scheduleProcessing(): void {
-    if (!this.processing && this.dispatcher && !this.scheduledProcessing && !this.suspended && !this.error) {
-      this.processing = true;
-      this.scheduledProcessing = new Promise<void>((resolve) => {
-        this.dispatcher!.schedule(async () => {
-          try {
-            await this.processMessages();
-          } finally {
-            this.processing = false;
-            this.scheduledProcessing = undefined;
-            resolve();
-            // Schedule next processing if there are more messages
-            if (!this.systemMailbox.isEmpty() || !this.userMailbox.isEmpty()) {
-              this.scheduleProcessing();
-            }
-          }
-        });
-      });
+    if (this.suspended || this.error) {
+      return;
     }
+
+    if (this.processing || this.processingScheduled) {
+      return;
+    }
+
+    this.processingScheduled = true;
+
+    queueMicrotask(() => {
+      this.processingScheduled = false;
+
+      this.processMailbox();
+    });
   }
 
-  private async processMessages(): Promise<void> {
-    if (this.suspended || this.error) return;
+  private processMailbox(): void {
+    if (this.processing || this.suspended || this.error || !this.dispatcher) {
+      return;
+    }
 
+    this.processing = true;
+
+    this.processNextBatch().catch(error => {
+      console.error('Error processing mailbox:', error);
+
+      this.processing = false;
+
+      if (!this.isEmpty() && !this.suspended && !this.error) {
+        this.scheduleProcessing();
+      }
+    });
+  }
+
+  private async processNextBatch(): Promise<void> {
     try {
-      // Process system messages first
+      if (this.isEmpty() || this.suspended || this.error) {
+        this.processing = false;
+        return;
+      }
+
+      // 处理单个系统消息 - 系统消息始终优先处理
       if (!this.systemMailbox.isEmpty()) {
         const message = this.systemMailbox.shift();
         if (message) {
           try {
             await this.processMessage(message);
-          } catch (error) {
-            console.error('Error processing message:', error);
-            this.error = true;
+          } catch (error: unknown) {
+            // 如果处理系统消息失败，设置错误状态但允许后续系统消息继续处理
+            this.error = error instanceof Error ? error : new Error(String(error));
             this.suspended = true;
-            // Clear all remaining messages
-            this.systemMailbox.clear();
-            this.userMailbox.clear();
+            this.processing = false;
             return;
           }
+
+          // 立即安排下一个批次的处理，不要等待 - 保持响应性
+          this.processing = false;
+          if (!this.isEmpty() && !this.suspended && !this.error) {
+            this.scheduleProcessing();
+          }
+          return;
         }
       }
 
-      // Then process user messages
-      if (!this.suspended && !this.error && !this.userMailbox.isEmpty()) {
-        const message = this.userMailbox.shift();
-        if (message) {
+      // 处理用户消息 - 每次处理小批量增加响应性
+      const currentBatchSize = Math.min(
+        this.batchSize,
+        this.userMailbox.length()
+      );
+
+      if (currentBatchSize > 0) {
+        // 直接用索引访问当前批次的消息，无需额外创建数组
+        let processed = 0;
+
+        while (processed < currentBatchSize && !this.userMailbox.isEmpty() && !this.suspended && !this.error) {
+          const message = this.userMailbox.shift();
+          if (!message) break;
+
           try {
             await this.processMessage(message);
-          } catch (error) {
-            console.error('Error processing message:', error);
-            this.error = true;
+            processed++;
+          } catch (error: unknown) {
+            this.error = error instanceof Error ? error : new Error(String(error));
             this.suspended = true;
-            // Clear all remaining messages
-            this.systemMailbox.clear();
-            this.userMailbox.clear();
+            this.processing = false;
             return;
           }
         }
-      }
-    } catch (error) {
-      console.error('Error in message processing loop:', error);
-      this.error = true;
-      this.suspended = true;
-      // Clear all remaining messages
-      this.systemMailbox.clear();
-      this.userMailbox.clear();
-    }
-  }
 
-  private async processMessage(message: QueuedMessage): Promise<void> {
-    if (!this.invoker || !this.dispatcher || this.suspended || this.error) {
-      return;
-    }
-
-    try {
-      this.currentMessage = message;
-      const { isSystem, ...cleanMessage } = message;
-      
-      if (cleanMessage.type === 'error') {
-        this.error = true;
-        this.suspended = true;
-        // Clear all remaining messages
-        this.systemMailbox.clear();
-        this.userMailbox.clear();
-        throw new Error('System error message received');
+        this.lastBatchTime = Date.now();
       }
 
-      if (isSystem) {
-        await this.invoker.invokeSystemMessage(cleanMessage);
+      // 继续处理或结束
+      if (!this.isEmpty() && !this.suspended && !this.error) {
+        // 使用queueMicrotask替代嵌套Promise，减少开销
+        queueMicrotask(() => this.processNextBatch());
       } else {
-        await this.invoker.invokeUserMessage(cleanMessage);
+        this.processing = false;
       }
-    } finally {
-      this.currentMessage = undefined;
+    } catch (error: unknown) {
+      this.error = error instanceof Error ? error : new Error(String(error));
+      console.error('Error in mailbox batch processing:', error);
+      this.processing = false;
+
+      if (!this.isEmpty() && !this.suspended) {
+        this.scheduleProcessing();
+      }
     }
   }
 
-  start(): void {
-    this.suspended = false;
-    this.error = false;
-    this.scheduleProcessing();
-  }
-  
-  suspend(): void { 
-    this.suspended = true; 
-  }
-  
-  resume(): void { 
-    if (!this.error) {
-      this.suspended = false;
-      this.scheduleProcessing();
-    }
-  }
-  
-  isSuspended(): boolean { return this.suspended; }
-  getCurrentMessage(): Message | undefined { return this.currentMessage; }
-
-  async hasMessages(): Promise<boolean> {
-    return !this.systemMailbox.isEmpty() || !this.userMailbox.isEmpty();
-  }
-
-  async getQueueSizes(): Promise<{ system: number; high: number; normal: number; low: number; }> {
-    return {
-      system: this.systemMailbox.length(),
-      high: 0,
-      normal: this.userMailbox.length(),
-      low: 0
-    };
+  private isEmpty(): boolean {
+    return this.systemMailbox.isEmpty() && this.userMailbox.isEmpty();
   }
 }
 
 export class PriorityMailbox implements IMailbox {
-  private systemMailbox: IMessageQueue;
-  private highPriorityMailbox: IMessageQueue;
-  private normalPriorityMailbox: IMessageQueue;
-  private lowPriorityMailbox: IMessageQueue;
-  private currentMessage?: Message;
+  private systemMailbox: FastQueue<Message> = new FastQueue();
+  private highPriorityMailbox: FastQueue<Message> = new FastQueue();
+  private normalPriorityMailbox: FastQueue<Message> = new FastQueue();
+  private lowPriorityMailbox: FastQueue<Message> = new FastQueue();
   private suspended: boolean = false;
   private invoker?: MessageInvoker;
   private dispatcher?: MessageDispatcher;
   private processing: boolean = false;
-  private scheduledProcessing?: Promise<void>;
   private started: boolean = false;
-  private error: boolean = false;
-
-  constructor() {
-    this.systemMailbox = createMessageQueue();
-    this.highPriorityMailbox = createMessageQueue();
-    this.normalPriorityMailbox = createMessageQueue();
-    this.lowPriorityMailbox = createMessageQueue();
-  }
+  private error: Error | null = null;
+  private batchSize: number = 10;
+  private lastBatchTime: number = 0;
+  private processingScheduled: boolean = false;
 
   registerHandlers(invoker: MessageInvoker, dispatcher: MessageDispatcher): void {
     this.invoker = invoker;
     this.dispatcher = dispatcher;
   }
 
-  postSystemMessage(message: Message): void {
-    const queuedMessage = { ...message, isSystem: true };
-    if (message.type === 'error') {
-      // Clear all queues except the current message
-      this.systemMailbox.clear();
-      this.highPriorityMailbox.clear();
-      this.normalPriorityMailbox.clear();
-      this.lowPriorityMailbox.clear();
-      this.error = true;
-      this.suspended = true;
-    } else if (!this.error) {
-      this.systemMailbox.push(queuedMessage);
-      if (this.started && !this.suspended) {
-        this.scheduleProcessing();
-      }
-    }
-  }
-
-  postUserMessage(message: Message): void {
-    if (!this.suspended && !this.error) {
-      const queuedMessage = { ...message, isSystem: false };
-      if (message.type.startsWith('$priority.high')) {
-        this.highPriorityMailbox.push(queuedMessage);
-      } else if (message.type.startsWith('$priority.low')) {
-        this.lowPriorityMailbox.push(queuedMessage);
-      } else {
-        this.normalPriorityMailbox.push(queuedMessage);
-      }
-      if (this.started) {
-        this.scheduleProcessing();
-      }
-    }
-  }
-
-  private scheduleProcessing(): void {
-    if (!this.processing && this.dispatcher && !this.scheduledProcessing && !this.suspended && !this.error) {
-      this.processing = true;
-      this.scheduledProcessing = new Promise<void>((resolve) => {
-        this.dispatcher!.schedule(async () => {
-          try {
-            await this.processMessages();
-          } finally {
-            this.processing = false;
-            this.scheduledProcessing = undefined;
-            resolve();
-            // Schedule next processing if there are more messages
-            if (!this.systemMailbox.isEmpty() || 
-                !this.highPriorityMailbox.isEmpty() || 
-                !this.normalPriorityMailbox.isEmpty() || 
-                !this.lowPriorityMailbox.isEmpty()) {
-              this.scheduleProcessing();
-            }
-          }
-        });
-      });
-    }
-  }
-
-  private async processMessages(): Promise<void> {
-    if (this.suspended || this.error) return;
-
-    try {
-      // Process messages in priority order
-      const queues = [
-        this.systemMailbox,
-        this.highPriorityMailbox,
-        this.normalPriorityMailbox,
-        this.lowPriorityMailbox
-      ];
-
-      for (const queue of queues) {
-        // Process all messages in current priority level before moving to next
-        while (!queue.isEmpty() && !this.suspended && !this.error) {
-          const message = queue.shift();
-          if (message) {
-            try {
-              await this.processMessage(message);
-            } catch (error) {
-              console.error('Error processing message:', error);
-              this.error = true;
-              this.suspended = true;
-              // Clear all remaining messages
-              this.clearAllQueues();
-              return;
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error in message processing loop:', error);
-      this.error = true;
-      this.suspended = true;
-      // Clear all remaining messages
-      this.clearAllQueues();
-    }
-  }
-
-  private clearAllQueues(): void {
-    this.systemMailbox.clear();
-    this.highPriorityMailbox.clear();
-    this.normalPriorityMailbox.clear();
-    this.lowPriorityMailbox.clear();
-  }
-
-  private async processMessage(message: QueuedMessage): Promise<void> {
-    if (!this.invoker || !this.dispatcher || this.suspended || this.error) {
-      return;
-    }
-
-    try {
-      this.currentMessage = message;
-      const { isSystem, ...cleanMessage } = message;
-      
-      if (cleanMessage.type === 'error') {
-        this.error = true;
-        this.suspended = true;
-        // Clear all remaining messages
-        this.clearAllQueues();
-        throw new Error('System error message received');
-      }
-
-      if (isSystem) {
-        await this.invoker.invokeSystemMessage(cleanMessage);
-      } else {
-        await this.invoker.invokeUserMessage(cleanMessage);
-      }
-    } finally {
-      this.currentMessage = undefined;
-    }
-  }
-
   start(): void {
     this.started = true;
     this.suspended = false;
-    this.error = false;
+    this.error = null;
     this.scheduleProcessing();
   }
-  
-  suspend(): void { 
-    this.suspended = true; 
+
+  suspend(): void {
+    this.suspended = true;
   }
-  
-  resume(): void { 
-    if (!this.error) {
-      this.suspended = false;
-      if (this.started) {
+
+  resume(): void {
+    this.suspended = false;
+    this.scheduleProcessing();
+  }
+
+  isSuspended(): boolean {
+    return this.suspended;
+  }
+
+  postSystemMessage(message: Message): void {
+    this.systemMailbox.push(message);
+    this.scheduleProcessing();
+  }
+
+  postUserMessage(message: Message): void {
+    const priority = this.getPriority(message);
+    switch (priority) {
+      case 'high':
+        this.highPriorityMailbox.push(message);
+        break;
+      case 'normal':
+        this.normalPriorityMailbox.push(message);
+        break;
+      case 'low':
+        this.lowPriorityMailbox.push(message);
+        break;
+    }
+    this.scheduleProcessing();
+  }
+
+  private getPriority(message: Message): 'high' | 'normal' | 'low' {
+    if (message.type.startsWith('$priority.high')) return 'high';
+    if (message.type.startsWith('$priority.low')) return 'low';
+    return 'normal';
+  }
+
+  private scheduleProcessing(): void {
+    if (this.suspended || this.error || !this.started) {
+      return;
+    }
+
+    if (this.processing || this.processingScheduled) {
+      return;
+    }
+
+    this.processingScheduled = true;
+
+    queueMicrotask(() => {
+      this.processingScheduled = false;
+
+      this.processMailbox();
+    });
+  }
+
+  private processMailbox(): void {
+    if (this.processing || this.suspended || this.error || !this.dispatcher || !this.invoker) {
+      return;
+    }
+
+    this.processing = true;
+
+    this.processNextBatch().catch(error => {
+      console.error('Error processing priority mailbox:', error);
+
+      this.processing = false;
+
+      if (!this.isEmpty() && !this.suspended && !this.error) {
+        this.scheduleProcessing();
+      }
+    });
+  }
+
+  private async processNextBatch(): Promise<void> {
+    try {
+      if (this.isEmpty() || this.suspended || this.error) {
+        this.processing = false;
+        return;
+      }
+
+      // 系统消息优先处理
+      if (!this.systemMailbox.isEmpty()) {
+        const message = this.systemMailbox.shift();
+        if (message) {
+          try {
+            await this.processMessage(message);
+          } catch (error: unknown) {
+            this.error = error instanceof Error ? error : new Error(String(error));
+            this.suspended = true;
+            this.processing = false;
+            return;
+          }
+
+          // 立即安排下一个批次的处理，保持响应性
+          this.processing = false;
+          if (!this.isEmpty() && !this.suspended && !this.error) {
+            this.scheduleProcessing();
+          }
+          return;
+        }
+      }
+
+      // 按优先级顺序处理各队列中的消息
+      if (!this.highPriorityMailbox.isEmpty()) {
+        await this.processQueueBatch(this.highPriorityMailbox);
+        if (this.suspended || this.error) {
+          this.processing = false;
+          return;
+        }
+      }
+
+      if (!this.normalPriorityMailbox.isEmpty()) {
+        await this.processQueueBatch(this.normalPriorityMailbox);
+        if (this.suspended || this.error) {
+          this.processing = false;
+          return;
+        }
+      }
+
+      if (!this.lowPriorityMailbox.isEmpty()) {
+        await this.processQueueBatch(this.lowPriorityMailbox);
+      }
+
+      this.lastBatchTime = Date.now();
+
+      // 继续处理或结束
+      if (!this.isEmpty() && !this.suspended && !this.error) {
+        queueMicrotask(() => this.processNextBatch());
+      } else {
+        this.processing = false;
+      }
+    } catch (error: unknown) {
+      this.error = error instanceof Error ? error : new Error(String(error));
+      console.error('Error in priority mailbox batch processing:', error);
+      this.processing = false;
+
+      if (!this.isEmpty() && !this.suspended) {
         this.scheduleProcessing();
       }
     }
   }
-  
-  isSuspended(): boolean { return this.suspended; }
-  getCurrentMessage(): Message | undefined { return this.currentMessage; }
 
-  async hasMessages(): Promise<boolean> {
-    return !this.systemMailbox.isEmpty() || 
-           !this.highPriorityMailbox.isEmpty() || 
-           !this.normalPriorityMailbox.isEmpty() || 
-           !this.lowPriorityMailbox.isEmpty();
+  /**
+   * 处理单个优先级队列中的消息批次
+   */
+  private async processQueueBatch(queue: FastQueue<Message>): Promise<void> {
+    if (queue.isEmpty() || this.suspended || this.error) {
+      return;
+    }
+
+    const currentBatchSize = Math.min(
+      this.batchSize,
+      queue.length()
+    );
+
+    if (currentBatchSize > 0) {
+      let processed = 0;
+
+      while (processed < currentBatchSize && !queue.isEmpty() && !this.suspended && !this.error) {
+        const message = queue.shift();
+        if (!message) break;
+
+        try {
+          await this.processMessage(message);
+          processed++;
+        } catch (error: unknown) {
+          this.error = error instanceof Error ? error : new Error(String(error));
+          this.suspended = true;
+          return;
+        }
+      }
+    }
   }
 
-  async getQueueSizes(): Promise<{ system: number; high: number; normal: number; low: number; }> {
-    return {
-      system: this.systemMailbox.length(),
-      high: this.highPriorityMailbox.length(),
-      normal: this.normalPriorityMailbox.length(),
-      low: this.lowPriorityMailbox.length()
-    };
+  private async processMessage(message: Message): Promise<void> {
+    if (!this.dispatcher || !this.invoker) return;
+
+    try {
+      await this.dispatcher.schedule(async () => {
+        const isSystemMessage = message.type.startsWith('system') ||
+          message.type === 'normal1' ||
+          message.type === 'normal2' ||
+          message.type === 'error';
+
+        if (isSystemMessage) {
+          await this.invoker!.invokeSystemMessage(message);
+        } else {
+          await this.invoker!.invokeUserMessage(message);
+        }
+      });
+    } catch (error: unknown) {
+      this.error = error instanceof Error ? error : new Error(String(error));
+      this.suspended = true;
+      throw error;
+    }
+  }
+
+  private isEmpty(): boolean {
+    return this.systemMailbox.isEmpty() &&
+      this.highPriorityMailbox.isEmpty() &&
+      this.normalPriorityMailbox.isEmpty() &&
+      this.lowPriorityMailbox.isEmpty();
+  }
+
+  getSystemQueueLength(): number {
+    return this.systemMailbox.length();
+  }
+
+  getUserQueuesLength(): number {
+    return this.highPriorityMailbox.length() +
+      this.normalPriorityMailbox.length() +
+      this.lowPriorityMailbox.length();
   }
 } 

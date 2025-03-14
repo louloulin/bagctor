@@ -40,11 +40,46 @@ export class ActorContext implements IActorContext {
     this.parent = pid;
   }
 
-  async send(target: PID, message: Message): Promise<void> {
-    await this.system.send(target, {
-      ...message,
-      sender: this.pid
-    });
+  getMailbox(): IMailbox {
+    return this.mailbox;
+  }
+
+  /**
+   * 向当前Actor投递用户消息
+   */
+  postMessage(message: Message): void {
+    this.mailbox.postUserMessage(message);
+  }
+
+  /**
+   * 向当前Actor投递系统消息
+   * 系统消息具有更高的优先级，会在用户消息之前处理
+   */
+  postSystemMessage(message: Message): void {
+    this.mailbox.postSystemMessage(message);
+  }
+
+  /**
+   * 发送消息到指定的Actor
+   */
+  send(target: PID, message: Message): Promise<void> {
+    return this.system.send(target, message);
+  }
+
+  /**
+   * 发送消息到指定的Actor并等待响应
+   */
+  request<T = any>(target: PID, message: Message, timeout?: number): Promise<T> {
+    return this.system.request<T>(target, message, timeout);
+  }
+
+  /**
+   * 发送响应消息给请求方
+   */
+  respond(message: Message, response: any, error?: any): void {
+    if (message.responseId) {
+      this.system.handleResponse(message.responseId, response, error);
+    }
   }
 
   async spawn(props: Props): Promise<PID> {
@@ -104,9 +139,5 @@ export class ActorContext implements IActorContext {
         }
         break;
     }
-  }
-
-  postMessage(message: Message): void {
-    this.mailbox.postUserMessage(message);
   }
 } 

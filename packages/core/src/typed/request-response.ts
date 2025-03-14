@@ -185,4 +185,18 @@ export class RequestResponseManager {
         this.pendingRequests.clear();
         console.log(`[RequestResponseManager] All requests cancelled`);
     }
+
+    /**
+     * 取消所有待处理的请求 (别名方法，兼容现有代码)
+     */
+    cancelAll(reason: string = 'All requests cancelled'): void {
+        this.cancelAllRequests(reason);
+    }
+
+    /**
+     * 获取当前待处理请求数量
+     */
+    get pendingCount(): number {
+        return this.pendingRequests.size;
+    }
 } 

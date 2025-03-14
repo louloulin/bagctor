@@ -184,15 +184,71 @@ export class MetricsMiddleware implements MessageMiddleware {
 }
 ```
 
-## Pending Optimizations
+### 8. Lock-free Concurrent Data Structures
 
-### Phase 3: Architectural Optimizations
-- [✅ IMPLEMENTED] Lock-free concurrent structures
-  - ✅ Implemented LockFreeQueue for high performance message passing
-  - ✅ Implemented LockFreeMap for concurrent key-value operations
-  - ✅ Implemented AtomicReference for thread-safe reference updates
-  - ✅ Implemented ConcurrentSet based on LockFreeMap
-- [ ] Multi-layered dispatch strategies
+Implemented a suite of lock-free concurrent data structures to support high-performance actor operations:
+
+- ✅ LockFreeQueue for high performance message passing
+- ✅ LockFreeMap for concurrent key-value operations
+- ✅ AtomicReference for thread-safe reference updates
+- ✅ ConcurrentSet based on LockFreeMap
+
+### 9. Multi-layered Dispatch Strategies
+
+Implemented sophisticated task dispatch strategies to optimize resource utilization:
+
+- ✅ LayeredDispatcher with task categorization and prioritization
+- ✅ AdaptiveScheduler for dynamic resource allocation based on system load
+- ✅ Comprehensive performance metrics collection for tuning
+
+```typescript
+/**
+ * Multi-layered task dispatcher - Categorizes and prioritizes tasks
+ */
+export class LayeredDispatcher implements MessageDispatcher {
+    private layers: Record<TaskType, DispatchLayer>;
+    private metrics: LayeredDispatcherMetrics;
+    
+    /**
+     * 提交任务执行
+     */
+    schedule(task: () => Promise<void>): void {
+        // 使用分类器确定任务类型
+        const taskType = this.taskClassifier(task);
+        
+        // 创建完整任务并分配到对应层
+        const submitted = this.layers[taskType].submit({
+            id: `task-${++this.taskIdCounter}`,
+            execute: task,
+            priority: TaskPriority.NORMAL,
+            type: taskType,
+            createdAt: Date.now()
+        });
+        
+        // 更新指标
+        this.metrics.totalTasksSubmitted++;
+    }
+}
+
+/**
+ * 自适应调度器 - 动态调整资源分配
+ */
+export class AdaptiveScheduler extends LayeredDispatcher {
+    /**
+     * 自适应调整资源
+     */
+    private adapt(): void {
+        // 获取系统负载
+        const systemLoad = this.getSystemLoad();
+        
+        // 获取调度器指标
+        const metrics = this.getMetrics();
+
+        // 根据系统负载和任务特性调整资源
+        this.adjustResourceAllocation(systemLoad, metrics);
+    }
+}
+```
 
 ## Performance Improvements
 
@@ -204,9 +260,11 @@ Based on the implemented optimizations, we expect the following performance impr
 4. **Actor Reuse**: 5-10x better performance for temporary actors, reduced GC pressure
 5. **Batch Message Processing**: 3-5x improved throughput for broadcast messages and multi-target communication
 6. **Router Performance**: 2-4x faster message routing with reduced contention and optimized strategies
+7. **Lock-free Data Structures**: 15-40% faster operations in high-concurrency environments
+8. **Multi-layered Dispatch**: 2-3x better resource utilization with workload-aware scheduling
 
 ## Next Steps
 
 1. Conduct comprehensive performance testing to measure actual gains
 2. Refine adaptive scheduling parameters based on real-world usage
-3. Begin planning for Phase 3 optimizations 
+3. Explore potential Phase 4 optimizations focused on distributed processing 

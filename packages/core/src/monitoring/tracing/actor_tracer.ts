@@ -1,7 +1,7 @@
-import { ActorSystem } from '../../../core/system';
-import { Message, PID } from '../../../core/types';
+import { ActorSystem } from '@core/system';
+import { Message, PID } from '@core/types';
 import { Tracer, SpanKind, SpanStatus, Span, TraceContext } from './tracer';
-import { log } from '../../../utils/logger';
+import { log } from '@utils/logger';
 
 export interface ActorTracingConfig {
     enabled: boolean;
@@ -23,13 +23,13 @@ export class ActorTracer {
         this.system = system;
         this.tracer = tracer;
         this.config = {
-            enabled: true,
-            captureAllMessages: false,
-            ignoredMessageTypes: ['ping', 'heartbeat', 'metrics'],
-            includedMessageTypes: [],
-            includePayload: false,
-            includeMetadata: false,
-            ...config
+            ...config,
+            enabled: config.enabled ?? true,
+            captureAllMessages: config.captureAllMessages ?? false,
+            ignoredMessageTypes: config.ignoredMessageTypes ?? ['ping', 'heartbeat', 'metrics'],
+            includedMessageTypes: config.includedMessageTypes ?? [],
+            includePayload: config.includePayload ?? false,
+            includeMetadata: config.includeMetadata ?? false
         };
 
         log.info('Actor tracer initialized');
@@ -302,4 +302,4 @@ export class ActorTracer {
     private generateTraceKey(message: Message, target: PID): string {
         return `${message.type}_${target.id}_${message.id || Date.now()}`;
     }
-} 
+}

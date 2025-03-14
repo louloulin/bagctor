@@ -1,5 +1,5 @@
-import { log } from '../../../utils/logger';
-import { Message, PID } from '../../../core/types';
+import { log } from '@utils/logger';
+import { Message, PID } from '@core/types';
 
 // 追踪上下文
 export interface TraceContext {
@@ -221,13 +221,13 @@ export class Tracer {
 
     private constructor(config: TracingConfig) {
         this.config = {
-            serviceName: 'bactor',
-            enabled: true,
-            sampleRate: 0.1,
-            exporterType: 'console',
-            tags: {},
-            propagationHeaders: ['traceparent', 'tracestate', 'baggage'],
-            ...config
+            ...config,
+            serviceName: config.serviceName ?? 'bactor',
+            enabled: config.enabled ?? true,
+            sampleRate: config.sampleRate ?? 0.1,
+            exporterType: config.exporterType ?? 'console',
+            tags: config.tags ?? {},
+            propagationHeaders: config.propagationHeaders ?? ['traceparent', 'tracestate', 'baggage']
         };
 
         // 初始化采样器
@@ -245,7 +245,7 @@ export class Tracer {
 
         // 设置定期导出
         if (this.config.enabled) {
-            this.flushInterval = setInterval(() => this.flush(), 5000);
+            this.flushInterval = setInterval(() => this.flush(), 5000) as unknown as NodeJS.Timeout;
         }
 
         log.info(`Tracer initialized for service ${this.config.serviceName}`);
@@ -455,4 +455,4 @@ export class Tracer {
 
         log.info('Tracer shutdown');
     }
-} 
+}

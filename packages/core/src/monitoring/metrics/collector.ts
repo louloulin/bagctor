@@ -1,4 +1,4 @@
-import { log } from '../../../utils/logger';
+import { log } from '@utils/logger';
 
 // 指标类型
 export enum MetricType {

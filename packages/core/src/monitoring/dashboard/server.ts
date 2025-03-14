@@ -1,5 +1,5 @@
 import { MetricRegistry, Metric, MetricType } from '../metrics/collector';
-import { log } from '../../../utils/logger';
+import { log } from '@utils/logger';
 
 export interface DashboardConfig {
     enabled: boolean;
@@ -24,13 +24,13 @@ export class DashboardServer {
     constructor(config: DashboardConfig) {
         this.registry = MetricRegistry.getInstance();
         this.config = {
-            enabled: true,
-            port: 8080,
-            path: '/metrics',
-            updateInterval: 5000,
-            allowCors: true,
-            requireAuth: false,
-            ...config
+            ...config,
+            enabled: config.enabled ?? true,
+            port: config.port ?? 8080,
+            path: config.path ?? '/metrics',
+            updateInterval: config.updateInterval ?? 5000,
+            allowCors: config.allowCors ?? true,
+            requireAuth: config.requireAuth ?? false
         };
 
         // 动态导入模块
@@ -77,7 +77,7 @@ export class DashboardServer {
         // 设置定期更新
         this.updateInterval = setInterval(() => {
             this.updateMetrics();
-        }, this.config.updateInterval);
+        }, this.config.updateInterval) as unknown as NodeJS.Timeout;
     }
 
     // 更新指标缓存
@@ -131,10 +131,10 @@ export class DashboardServer {
                 return value;
             case MetricType.HISTOGRAM:
                 return {
-                    buckets: Array.from(value.buckets.entries()).map(([bucket, count]) => ({
-                        bucket,
-                        count
-                    })),
+                    buckets: Array.from(value.buckets.entries()).map((entry) => {
+                        const [bucket, count] = entry as [number, number];
+                        return { bucket, count };
+                    }),
                     sum: value.sum,
                     count: value.count
                 };

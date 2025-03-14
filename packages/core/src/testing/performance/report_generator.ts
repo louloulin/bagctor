@@ -1,5 +1,5 @@
 import { BenchmarkResult } from './benchmark_system';
-import { log } from '../../../utils/logger';
+import { log } from '@utils/logger';
 
 export interface BenchmarkReport {
     summary: {

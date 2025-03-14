@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeAll, afterAll } from 'bun:test';
-import { ActorSystem } from '../../../../core/system';
+import { ActorSystem } from '@core/system';
 import { BenchmarkSystem, BenchmarkConfig } from '../benchmark_system';
-import { log } from '../../../../utils/logger';
+import { log } from '@utils/logger';
 
 describe('Actor System Performance Benchmark', () => {
     let system: ActorSystem;

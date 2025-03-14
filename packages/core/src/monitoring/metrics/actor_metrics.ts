@@ -1,7 +1,7 @@
-import { ActorSystem } from '../../../core/system';
-import { Message, PID } from '../../../core/types';
+import { ActorSystem } from '@core/system';
+import { Message, PID } from '@core/types';
 import { MetricRegistry, Counter, Gauge, Histogram, Meter } from './collector';
-import { log } from '../../../utils/logger';
+import { log } from '@utils/logger';
 
 export interface ActorMetricsConfig {
     enabled: boolean;
@@ -52,15 +52,15 @@ export class ActorMetricsCollector {
         this.system = system;
         this.registry = MetricRegistry.getInstance();
         this.config = {
-            enabled: true,
-            actorCreationEnabled: true,
-            messageProcessingEnabled: true,
-            mailboxMetricsEnabled: true,
-            detailedMetricsEnabled: false,
-            histogramBuckets: [
+            ...config,
+            enabled: config.enabled ?? true,
+            actorCreationEnabled: config.actorCreationEnabled ?? true,
+            messageProcessingEnabled: config.messageProcessingEnabled ?? true,
+            mailboxMetricsEnabled: config.mailboxMetricsEnabled ?? true,
+            detailedMetricsEnabled: config.detailedMetricsEnabled ?? false,
+            histogramBuckets: config.histogramBuckets ?? [
                 0.1, 0.5, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000
-            ],
-            ...config
+            ]
         };
 
         this.systemMetrics = this.initializeSystemMetrics();

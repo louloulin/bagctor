@@ -1,5 +1,5 @@
 import { MetricRegistry, Metric, MetricType, Counter, Gauge, Histogram, Meter } from './collector';
-import { log } from '../../../utils/logger';
+import { log } from '@utils/logger';
 
 // 报告格式
 export enum ReportFormat {
@@ -60,7 +60,7 @@ export class ConsoleReporter implements Reporter {
             this.report().catch(err => {
                 log.error('Error reporting metrics:', err);
             });
-        }, this.config.reportingIntervalMs);
+        }, this.config.reportingIntervalMs) as unknown as NodeJS.Timeout;
 
         log.info(`Console reporter started with interval: ${this.config.reportingIntervalMs}ms`);
     }
@@ -117,7 +117,7 @@ export class ConsoleReporter implements Reporter {
         log.info(`Metrics Report (JSON): ${json}`);
     }
 
-    private reportPrometheus(snapshots: MetricSnapshot[]): void {
+    protected reportPrometheus(snapshots: MetricSnapshot[]): void {
         let output = '';
 
         for (const snapshot of snapshots) {
@@ -184,7 +184,7 @@ export class ConsoleReporter implements Reporter {
         return `${name}${tagStr} ${value}\n`;
     }
 
-    private reportInfluxDb(snapshots: MetricSnapshot[]): void {
+    protected reportInfluxDb(snapshots: MetricSnapshot[]): void {
         let output = '';
 
         for (const snapshot of snapshots) {
@@ -259,7 +259,7 @@ export class FileReporter implements Reporter {
             this.report().catch(err => {
                 log.error('Error reporting metrics to file:', err);
             });
-        }, this.config.reportingIntervalMs);
+        }, this.config.reportingIntervalMs) as unknown as NodeJS.Timeout;
 
         log.info(`File reporter started with interval: ${this.config.reportingIntervalMs}ms`);
     }
@@ -324,39 +324,59 @@ export class FileReporter implements Reporter {
     }
 
     private formatPrometheusOutput(snapshots: MetricSnapshot[]): string {
-        // 重用ConsoleReporter的Prometheus格式化功能
-        const reporter = new ConsoleReporter({
-            ...this.config,
-            enabled: true,
-            reportingIntervalMs: 0
-        });
+        // 创建临时类继承 ConsoleReporter，以便访问 protected 方法
+        class PrometheusFormatter extends ConsoleReporter {
+            constructor() {
+                super({
+                    enabled: true,
+                    reportingIntervalMs: 0,
+                    format: ReportFormat.PROMETHEUS
+                });
+            }
 
-        // 使用内部的reportPrometheus方法
-        const originalLog = log.info;
-        let output = '';
-        log.info = (message: string) => { output = message.replace('Metrics Report (Prometheus):\n', ''); };
-        reporter.reportPrometheus(snapshots);
-        log.info = originalLog;
+            formatOutput(data: MetricSnapshot[]): string {
+                // 使用内部的 reportPrometheus 方法
+                const originalLog = log.info;
+                let output = '';
+                log.info = (message: string) => {
+                    output = message.replace('Metrics Report (Prometheus):\n', '');
+                };
+                this.reportPrometheus(data);
+                log.info = originalLog;
+                return output;
+            }
+        }
 
-        return output;
+        const formatter = new PrometheusFormatter();
+        return formatter.formatOutput(snapshots);
     }
 
     private formatInfluxDbOutput(snapshots: MetricSnapshot[]): string {
-        // 重用ConsoleReporter的InfluxDB格式化功能
-        const reporter = new ConsoleReporter({
-            ...this.config,
-            enabled: true,
-            reportingIntervalMs: 0
-        });
+        // 创建临时类继承 ConsoleReporter，以便访问 protected 方法
+        class InfluxDbFormatter extends ConsoleReporter {
+            constructor() {
+                super({
+                    enabled: true,
+                    reportingIntervalMs: 0,
+                    format: ReportFormat.INFLUXDB
+                });
+            }
 
-        // 使用内部的reportInfluxDb方法
-        const originalLog = log.info;
-        let output = '';
-        log.info = (message: string) => { output = message.replace('Metrics Report (InfluxDB):\n', ''); };
-        reporter.reportInfluxDb(snapshots);
-        log.info = originalLog;
+            formatOutput(data: MetricSnapshot[]): string {
+                // 使用内部的 reportInfluxDb 方法
+                const originalLog = log.info;
+                let output = '';
+                log.info = (message: string) => {
+                    output = message.replace('Metrics Report (InfluxDB):\n', '');
+                };
+                this.reportInfluxDb(data);
+                log.info = originalLog;
+                return output;
+            }
+        }
 
-        return output;
+        const formatter = new InfluxDbFormatter();
+        return formatter.formatOutput(snapshots);
     }
 
     private async writeToFile(filePath: string, content: string): Promise<void> {

@@ -294,7 +294,7 @@ export class TestMonitor extends EventEmitter {
             }
 
             this.emit('throughput.sampled', throughput);
-        }, this.config.samplingInterval);
+        }, this.config.samplingInterval) as unknown as NodeJS.Timeout;
     }
 
     /**
@@ -372,7 +372,7 @@ export class TestMonitor extends EventEmitter {
             'reason' in (d as any) && (d as any).reason !== 'dropped'
         ).length;
         const dropped = this.events.filter(e => e.type === 'message.dropped').length;
-        const duplicated = this.events.filter(e => e.type === 'message.duplicated').length;
+        const duplicated = this.events.filter(e => (e.type as string) === 'message.duplicated').length;
         const delayed = this.events.filter(e => e.type === 'message.delayed').length;
 
         return {

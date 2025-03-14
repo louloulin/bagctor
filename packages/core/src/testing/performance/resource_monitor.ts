@@ -1,4 +1,4 @@
-import { log } from '../../../utils/logger';
+import { log } from '@utils/logger';
 
 export interface ResourceMetrics {
     cpu: number;  // CPU usage percentage

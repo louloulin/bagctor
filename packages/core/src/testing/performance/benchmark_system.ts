@@ -1,6 +1,8 @@
-import { ActorSystem } from '../../../core/system';
-import { Message, PID } from '../../../core/types';
-import { log } from '../../../utils/logger';
+import { ActorSystem } from '@core/system';
+import { Message, PID } from '@core/types';
+import { log } from '@utils/logger';
+import { ResourceMonitor } from './resource_monitor';
+import { ReportGenerator, BenchmarkReport } from './report_generator';
 
 export interface BenchmarkConfig {
     messageCount: number;
@@ -86,7 +88,7 @@ export class BenchmarkSystem {
         const actors: PID[] = [];
         for (let i = 0; i < this.config.concurrentActors; i++) {
             const actor = await this.system.spawn({
-                producer: (context) => ({
+                producer: (context: any) => ({
                     receive: async (msg: Message) => {
                         const endTime = Date.now();
                         this.latencies.push(endTime - this.startTime);

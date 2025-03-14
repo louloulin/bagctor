@@ -85,7 +85,7 @@ export class RequestResponseManager {
     private pendingRequests: Map<string, {
         resolve: (value: any) => void;
         reject: (reason: any) => void;
-        timeout: NodeJS.Timer;
+        timeout: NodeJS.Timeout;
     }> = new Map();
 
     /**
@@ -105,7 +105,7 @@ export class RequestResponseManager {
                 } else {
                     console.log(`[RequestResponseManager] Strange: Request ${correlationId} not found when timing out`);
                 }
-            }, timeoutMs);
+            }, timeoutMs) as unknown as NodeJS.Timeout;
 
             // 存储请求信息
             this.pendingRequests.set(correlationId, {

@@ -7,6 +7,21 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "baseUrl": "./src",
+    "paths": {
+      "@core/*": [
+        "core/*"
+      ],
+      "@utils/*": [
+        "utils/*"
+      ],
+      "@testing/*": [
+        "testing/*"
+      ],
+      "@monitoring/*": [
+        "monitoring/*"
+      ]
+    },
     "types": [
       "bun-types"
     ]

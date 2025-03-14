@@ -18,6 +18,18 @@
     "paths": {
       "@bactor/*": [
         "packages/*/src"
+      ],
+      "@core/*": [
+        "packages/core/src/core/*"
+      ],
+      "@utils/*": [
+        "packages/core/src/utils/*"
+      ],
+      "@testing/*": [
+        "packages/core/src/testing/*"
+      ],
+      "@monitoring/*": [
+        "packages/core/src/monitoring/*"
       ]
     },
     "allowSyntheticDefaultImports": true
@@ -25,9 +37,6 @@
   "references": [
     {
       "path": "packages/core"
-    },
-    {
-      "path": "packages/agent"
     },
     {
       "path": "packages/match-engine"

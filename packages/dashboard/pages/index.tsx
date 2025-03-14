@@ -235,8 +235,8 @@ const Dashboard: React.FC = () => {
                 <div className="lg:col-span-2 card">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-lg font-medium">Message Rate</h2>
-                        <Link href="/metrics">
-                            <a className="text-sm text-blue-600 hover:text-blue-800">View Details →</a>
+                        <Link href="/metrics" className="text-sm text-blue-600 hover:text-blue-800">
+                            View Details →
                         </Link>
                     </div>
                     <div className="h-80">
@@ -300,8 +300,8 @@ const Dashboard: React.FC = () => {
                 <div className="card">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-lg font-medium">Active Alerts</h2>
-                        <Link href="/alerts">
-                            <a className="text-sm text-blue-600 hover:text-blue-800">View All →</a>
+                        <Link href="/alerts" className="text-sm text-blue-600 hover:text-blue-800">
+                            View All →
                         </Link>
                     </div>
 
@@ -327,10 +327,8 @@ const Dashboard: React.FC = () => {
                                 </div>
                             ))}
                             <div className="text-center pt-2">
-                                <Link href="/alerts">
-                                    <a className="text-sm text-blue-600 hover:text-blue-800">
-                                        View All Alerts
-                                    </a>
+                                <Link href="/alerts" className="text-sm text-blue-600 hover:text-blue-800">
+                                    View All Alerts
                                 </Link>
                             </div>
                         </div>

@@ -16,4 +16,20 @@ export type { LoggerConfig } from './utils/logger';
 // Messaging
 export * from './core/messaging/types';
 export * from './core/messaging/delivery_tracker';
-export * from './core/messaging/memory_message_store'; 
+export * from './core/messaging/memory_message_store';
+
+// Memory Pool Management
+export {
+    GenericObjectPool,
+    BufferPool,
+    memoryPoolManager,
+    MemoryPoolManager
+} from './core/memory_pool';
+export type {
+    ObjectPool,
+    PoolStats,
+    ObjectFactory,
+    ObjectReset,
+    ObjectPoolConfig,
+    BufferPoolConfig
+} from './core/memory_pool'; 

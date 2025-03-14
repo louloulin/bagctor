@@ -102,6 +102,7 @@ export class PluginLoader {
             let actor: Actor | undefined;
             let process: ChildProcess | undefined;
             let worker: WorkerType | undefined;
+            let actorPid = undefined;
 
             switch (metadata.type) {
                 case 'inline':
@@ -114,6 +115,15 @@ export class PluginLoader {
                         throw new Error('Plugin must export createActor function');
                     }
                     actor = await module.createActor(context, config || metadata.config);
+
+                    // 如果创建了actor，直接获取system中的pid
+                    if (actor) {
+                        actorPid = context.self;
+                        log.info('Created actor with PID reference:', {
+                            actorId: actor.constructor.name,
+                            pid: context.self.id
+                        });
+                    }
                     break;
 
                 case 'process':
@@ -126,15 +136,6 @@ export class PluginLoader {
 
                 default:
                     throw new Error(`Unsupported plugin type: ${metadata.type}`);
-            }
-
-            // 获取actor的PID（如果可用）
-            let actorPid = undefined;
-            if (actor && actor instanceof Actor) {
-                // 通过spawn方法获取actor的PID
-                actorPid = await context.spawn({
-                    producer: () => actor!
-                });
             }
 
             return {

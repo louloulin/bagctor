@@ -1,6 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface MenuItem {
     name: string;
@@ -70,6 +71,51 @@ const navigation: MenuItem[] = [
         ),
     },
     {
+        name: 'Workers',
+        href: '/workers',
+        icon: (props) => (
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                {...props}
+            >
+                <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z"
+                />
+            </svg>
+        ),
+    },
+    {
+        name: 'Cluster',
+        href: '/cluster',
+        icon: (props) => (
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                {...props}
+            >
+                <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+                <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 9.563C9 9.252 9.252 9 9.563 9h4.874c.311 0 .563.252.563.563v4.874c0 .311-.252.563-.563.563H9.564A.562.562 0 019 14.437V9.564z"
+                />
+            </svg>
+        ),
+    },
+    {
         name: 'Tracing',
         href: '/tracing',
         icon: (props) => (
@@ -93,27 +139,28 @@ const navigation: MenuItem[] = [
 
 const Sidebar: React.FC = () => {
     const router = useRouter();
+    const { theme } = useTheme();
 
     return (
-        <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-lg overflow-y-auto">
+        <div className="fixed inset-y-0 left-0 w-64 bg-card border-r border-border shadow-lg overflow-y-auto z-20 transition-colors duration-200 custom-scrollbar">
             <div className="flex flex-col h-full">
-                <div className="flex items-center justify-center h-16 border-b border-gray-200">
-                    <span className="text-xl font-bold text-primary-600">Bagctor Monitor</span>
+                <div className="flex items-center justify-center h-16 border-b border-border">
+                    <span className="text-xl font-bold text-primary">Bagctor Monitor</span>
                 </div>
-                <div className="flex-1 py-6 space-y-1 px-2">
+                <div className="flex-1 py-6 px-3 space-y-2">
                     {navigation.map((item) => {
                         const isActive = router.pathname === item.href;
                         return (
                             <Link
                                 key={item.name}
                                 href={item.href}
-                                className={`group flex items-center px-2 py-2 text-base font-medium rounded-md ${isActive
-                                        ? 'bg-primary-100 text-primary-700'
-                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                className={`group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors duration-150 focus-ring ${isActive
+                                    ? 'bg-primary/10 text-primary'
+                                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                                     }`}
                             >
                                 <item.icon
-                                    className={`mr-4 flex-shrink-0 h-6 w-6 ${isActive ? 'text-primary-500' : 'text-gray-500 group-hover:text-gray-500'
+                                    className={`mr-3 flex-shrink-0 h-5 w-5 ${isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-accent-foreground'
                                         }`}
                                     aria-hidden="true"
                                 />
@@ -121,6 +168,40 @@ const Sidebar: React.FC = () => {
                             </Link>
                         );
                     })}
+                </div>
+
+                {/* System Status Section */}
+                <div className="p-4 border-t border-border">
+                    <h3 className="text-sm font-medium text-muted-foreground mb-3">System Status</h3>
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">Actor Pool</span>
+                            <div className="flex items-center">
+                                <div className="status-indicator bg-success-500">
+                                    <div className="status-indicator-pulse bg-success-500"></div>
+                                </div>
+                                <span className="text-xs text-success-500">Healthy</span>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">Worker Pool</span>
+                            <div className="flex items-center">
+                                <div className="status-indicator bg-success-500">
+                                    <div className="status-indicator-pulse bg-success-500"></div>
+                                </div>
+                                <span className="text-xs text-success-500">Healthy</span>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">Message Bus</span>
+                            <div className="flex items-center">
+                                <div className="status-indicator bg-warning-500">
+                                    <div className="status-indicator-pulse bg-warning-500"></div>
+                                </div>
+                                <span className="text-xs text-warning-500">Degraded</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

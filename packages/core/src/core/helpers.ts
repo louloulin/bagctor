@@ -52,11 +52,19 @@ export function defineActor<TState, TMessage extends Message = Message>(
  * @returns 行为函数
  */
 export function match<TState, TMessage extends Message = Message>(
-    handlers: Partial<Record<string, Behavior<TState, TMessage> | {
-        condition?: ((message: TMessage) => boolean) | Array<(message: TMessage) => boolean>;
-        handler: Behavior<TState, TMessage>;
-        priority?: number;
-    }>>,
+    handlers: Partial<Record<string,
+        | Behavior<TState, TMessage>
+        | {
+            condition?: ((message: TMessage) => boolean) | Array<(message: TMessage) => boolean>;
+            handler: Behavior<TState, TMessage>;
+            priority?: number;
+        }
+        | Array<{
+            condition?: ((message: TMessage) => boolean) | Array<(message: TMessage) => boolean>;
+            handler: Behavior<TState, TMessage>;
+            priority?: number;
+        }>
+    >>,
     defaultHandler?: Behavior<TState, TMessage>
 ): Behavior<TState, TMessage> {
     return (state, message, context) => {
@@ -69,6 +77,42 @@ export function match<TState, TMessage extends Message = Message>(
                 return defaultHandler(state, message, context);
             }
             throw new Error(`No handler found for message type: ${message.type}`);
+        }
+
+        // 如果处理器是处理器数组
+        if (Array.isArray(handler)) {
+            // 按优先级降序排序
+            const sortedHandlers = [...handler].sort((a, b) =>
+                (b.priority || 0) - (a.priority || 0)
+            );
+
+            // 尝试每个处理器，直到找到满足条件的
+            for (const h of sortedHandlers) {
+                // 处理单个条件或条件数组
+                if (h.condition) {
+                    const conditions = Array.isArray(h.condition)
+                        ? h.condition
+                        : [h.condition];
+
+                    // 检查所有条件是否满足（逻辑与）
+                    const allConditionsMet = conditions.every(condition =>
+                        condition(message)
+                    );
+
+                    if (allConditionsMet) {
+                        return h.handler(state, message, context);
+                    }
+                } else {
+                    // 没有条件，直接执行处理器
+                    return h.handler(state, message, context);
+                }
+            }
+
+            // 如果没有满足条件的处理器，使用默认处理器
+            if (defaultHandler) {
+                return defaultHandler(state, message, context);
+            }
+            throw new Error(`No matching handler found for message type: ${message.type}`);
         }
 
         // 如果处理器是对象，检查条件

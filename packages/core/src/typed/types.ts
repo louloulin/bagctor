@@ -1,6 +1,7 @@
 import { PID as BasePID, Message as BaseMessage } from '@bactor/common';
 import { ActorSystem } from '../core/system';
 import { Message, PID } from '../core/types';
+import { createMessage } from '../core/helpers';
 
 // ========== 基础消息类型系统 ==========
 
@@ -508,4 +509,15 @@ export function createActorProxy<M extends MessageMap>(
             return (payload: any) => context.send(target, messageType as keyof M, payload);
         }
     });
+}
+
+/**
+ * 创建增强型Actor代理
+ * @param system Actor系统
+ * @param target 目标Actor引用
+ * @param options 配置选项
+ * @returns 增强型Actor代理
+ */
+export function createEnhancedProxy<TMessages extends MessageMap = MessageMap>(target: PID<TMessages>): ActorProxy<TMessages> {
+    // ... existing code ...
 } 

@@ -234,4 +234,163 @@ test("EnhancedActorProxy should handle errors", async () => {
         expect(errorHandler).toHaveBeenCalled();
         expect(errorHandler).toHaveBeenCalledWith(error, "get", { id: "error" });
     }
+});
+
+test("Match function should support handler priority", async () => {
+    // 创建一个基础消息构造函数
+    const createMessage = (type: string, payload: any) => ({ type, payload });
+
+    // 创建一个使用优先级匹配的Actor
+    const PriorityActor = defineActor<UserState, Message>(
+        { users: {} },
+        {
+            default: match<UserState, Message>({
+                'update': [
+                    {
+                        // 高优先级处理器 - 只处理VIP用户
+                        priority: 100,
+                        condition: (msg) => msg.payload?.isVIP === true,
+                        handler: (state, msg) => {
+                            const { id, ...updates } = msg.payload;
+                            return {
+                                users: {
+                                    ...state.users,
+                                    [id]: {
+                                        ...state.users[id],
+                                        ...updates,
+                                        lastUpdateTime: Date.now(),
+                                        updatedWithPriority: 'high'
+                                    }
+                                }
+                            };
+                        }
+                    },
+                    {
+                        // 中优先级处理器 - 处理员工用户
+                        priority: 50,
+                        condition: (msg) => msg.payload?.isEmployee === true,
+                        handler: (state, msg) => {
+                            const { id, ...updates } = msg.payload;
+                            return {
+                                users: {
+                                    ...state.users,
+                                    [id]: {
+                                        ...state.users[id],
+                                        ...updates,
+                                        lastUpdateTime: Date.now(),
+                                        updatedWithPriority: 'medium'
+                                    }
+                                }
+                            };
+                        }
+                    },
+                    {
+                        // 低优先级处理器 - 处理普通用户
+                        priority: 0,
+                        handler: (state, msg) => {
+                            const { id, ...updates } = msg.payload;
+                            return {
+                                users: {
+                                    ...state.users,
+                                    [id]: {
+                                        ...state.users[id],
+                                        ...updates,
+                                        lastUpdateTime: Date.now(),
+                                        updatedWithPriority: 'low'
+                                    }
+                                }
+                            };
+                        }
+                    }
+                ],
+                // 添加set-state处理器
+                'set-state': (state, msg) => {
+                    return msg.payload;
+                },
+                'get-state': (state) => {
+                    return state;
+                },
+                'create': (state, msg) => {
+                    const { name, email } = msg.payload;
+                    const id = `user-${Date.now()}`;
+                    return {
+                        users: {
+                            ...state.users,
+                            [id]: { name, email }
+                        }
+                    };
+                }
+            })
+        }
+    );
+
+    // 创建系统和Actor实例
+    const system = new ActorSystem();
+
+    // 监听状态变化的函数
+    const stateListener = mock(state => { });
+
+    // 创建一个简单的消息创建函数
+    function createTestMessage(type: string, payload: any) {
+        return { type, payload };
+    }
+
+    // Mocking ActorRef.request 来获取状态
+    const originalRequest = system.request;
+    system.request = async (target, message) => {
+        if (message.type === 'get-state') {
+            // 直接模拟返回状态，避免使用内部API
+            const actorState = (system as any).actors.get(target.id)?.customState || {};
+            stateListener(actorState);
+            return actorState;
+        }
+        return originalRequest.call(system, target, message);
+    };
+
+    const props = PropsBuilder.fromClass(PriorityActor).build();
+    const pid = await system.spawn(props);
+
+    // 创建几个测试用户
+    const user1 = { id: 'user1', name: 'John', email: 'john@example.com' };
+    const user2 = { id: 'user2', name: 'Alice', email: 'alice@example.com', isEmployee: true };
+    const user3 = { id: 'user3', name: 'Bob', email: 'bob@example.com', isVIP: true };
+
+    // 初始化用户
+    const initialState = {
+        users: {
+            [user1.id]: user1,
+            [user2.id]: user2,
+            [user3.id]: user3
+        }
+    };
+
+    // 设置初始状态
+    await system.send(pid, createTestMessage('set-state', initialState));
+
+    // 获取当前状态
+    const currentState = await system.request(pid, createTestMessage('get-state', null));
+    expect(currentState.users).toBeDefined();
+
+    // 测试普通用户更新 - 应该使用低优先级处理器
+    await system.send(pid, createTestMessage('update', { id: 'user1', name: 'John Updated' }));
+
+    // 测试员工用户更新 - 应该使用中优先级处理器
+    await system.send(pid, createTestMessage('update', { id: 'user2', name: 'Alice Updated', isEmployee: true }));
+
+    // 测试VIP用户更新 - 应该使用高优先级处理器
+    await system.send(pid, createTestMessage('update', { id: 'user3', name: 'Bob Updated', isVIP: true }));
+
+    // 添加小延迟确保消息已处理
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // 获取最终状态
+    const finalState = await system.request(pid, createTestMessage('get-state', null));
+
+    // 验证每个用户使用了正确的优先级处理器
+    expect(finalState.users.user1.updatedWithPriority).toBe('low');
+    expect(finalState.users.user2.updatedWithPriority).toBe('medium');
+    expect(finalState.users.user3.updatedWithPriority).toBe('high');
+
+    // 恢复原始request方法
+    system.request = originalRequest;
 }); 

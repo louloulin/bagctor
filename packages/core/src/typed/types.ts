@@ -1,4 +1,6 @@
 import { PID as BasePID, Message as BaseMessage } from '@bactor/common';
+import { ActorSystem } from '../core/system';
+import { Message, PID } from '../core/types';
 
 // ========== 基础消息类型系统 ==========
 
@@ -190,8 +192,135 @@ export function actorRef<TM extends MessageMap = any>(pid: BasePID): PID<TM> {
 }
 
 /**
+ * 增强版ActorProxy选项
+ */
+export interface EnhancedActorProxyOptions {
+    /**
+     * 请求方法前缀
+     * @default 'request'
+     */
+    requestPrefix?: string;
+
+    /**
+     * 发送方法前缀
+     * @default 'send'
+     */
+    sendPrefix?: string;
+
+    /**
+     * 请求超时时间(ms)
+     * @default 5000
+     */
+    timeout?: number;
+
+    /**
+     * 错误处理函数
+     */
+    errorHandler?: (error: Error, messageType: string, payload: any) => void;
+}
+
+/**
+ * 增强的Actor代理接口
+ * 为Actor创建类型安全的代理，支持请求-响应模式
+ */
+export type EnhancedActorProxy<M extends MessageMap, R = any> = {
+    [K in keyof M as `send${Capitalize<string & K>}`]: (payload: M[K]) => Promise<void>;
+} & {
+    [K in keyof M as `request${Capitalize<string & K>}`]: (payload: M[K], timeoutMs?: number) => Promise<R>;
+};
+
+/**
+ * 创建增强的ActorProxy，支持基于方法名称的请求和发送模式
+ * @param system Actor系统实例
+ * @param target 目标Actor的PID
+ * @param options 配置选项
+ */
+export function createEnhancedActorProxy<M extends MessageMap, R = any>(
+    system: ActorSystem,
+    target: PID,
+    options: EnhancedActorProxyOptions = {}
+): EnhancedActorProxy<M, R> {
+    const {
+        requestPrefix = 'request',
+        sendPrefix = 'send',
+        timeout = 5000,
+        errorHandler
+    } = options;
+
+    // 创建代理对象，拦截属性访问，动态创建方法
+    return new Proxy({} as EnhancedActorProxy<M, R>, {
+        get(_, methodName: string) {
+            if (typeof methodName !== 'string') {
+                return undefined;
+            }
+
+            // 处理请求方法
+            if (methodName.startsWith(requestPrefix)) {
+                const messageType = methodName.substring(requestPrefix.length);
+                if (messageType) {
+                    // 转换第一个字母为小写
+                    const normalizedType = messageType.charAt(0).toLowerCase() + messageType.slice(1) as keyof M;
+                    return async (payload: M[typeof normalizedType], customTimeout?: number): Promise<R> => {
+                        try {
+                            // 构建消息对象
+                            const message: Message = {
+                                type: normalizedType as string,
+                                payload
+                            };
+
+                            // 使用system.request方法
+                            return await system.request<R>(target, message, customTimeout || timeout);
+                        } catch (error) {
+                            if (errorHandler) {
+                                errorHandler(error as Error, normalizedType as string, payload);
+                            }
+                            throw error;
+                        }
+                    };
+                }
+            }
+
+            // 处理发送方法
+            if (methodName.startsWith(sendPrefix)) {
+                const messageType = methodName.substring(sendPrefix.length);
+                if (messageType) {
+                    // 转换第一个字母为小写
+                    const normalizedType = messageType.charAt(0).toLowerCase() + messageType.slice(1) as keyof M;
+                    return async (payload: M[typeof normalizedType]) => {
+                        try {
+                            // 构建消息对象
+                            const message: Message = {
+                                type: normalizedType as string,
+                                payload
+                            };
+
+                            return await system.send(target, message);
+                        } catch (error) {
+                            if (errorHandler) {
+                                errorHandler(error as Error, normalizedType as string, payload);
+                            }
+                            throw error;
+                        }
+                    };
+                }
+            }
+
+            // 兼容旧版函数式调用
+            return (payload: any) => {
+                const message: Message = {
+                    type: methodName as string,
+                    payload
+                };
+                return system.send(target, message);
+            };
+        }
+    });
+}
+
+/**
  * Actor代理接口
  * 为Actor创建类型安全的代理
+ * @deprecated 使用EnhancedActorProxy替代
  */
 export type ActorProxy<M extends MessageMap> = {
     [K in keyof M]: (payload: M[K]) => Promise<void>;
@@ -200,6 +329,7 @@ export type ActorProxy<M extends MessageMap> = {
 /**
  * 创建Actor代理
  * 提供类型安全的Actor调用接口
+ * @deprecated 使用createEnhancedActorProxy替代
  */
 export function createActorProxy<M extends MessageMap>(
     context: ActorContext<any>,

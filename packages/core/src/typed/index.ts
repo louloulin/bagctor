@@ -12,11 +12,14 @@ export type {
     ActorState,
     Props,
     MessageMetadata,
-    ActorProxy
+    ActorProxy,
+    EnhancedActorProxy,
+    ActorProxyOptions
 } from './types';
 
 export {
     createActorProxy,
+    createEnhancedActorProxy,
     actorRef,
     toTypedMessage,
     toBaseMessage

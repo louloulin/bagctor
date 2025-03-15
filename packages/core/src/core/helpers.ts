@@ -44,7 +44,7 @@ export function defineActor<TState, TMessage extends Message = Message>(
 }
 
 /**
- * 消息匹配器，简化消息处理
+ * 增强的消息匹配器，支持更复杂的模式匹配
  * @template TState 状态类型
  * @template TMessage 消息类型
  * @param handlers 处理器对象，键为消息类型
@@ -52,14 +52,39 @@ export function defineActor<TState, TMessage extends Message = Message>(
  * @returns 行为函数
  */
 export function match<TState, TMessage extends Message = Message>(
-    handlers: Partial<Record<string, Behavior<TState, TMessage>>>,
+    handlers: Partial<Record<string, Behavior<TState, TMessage> | {
+        condition?: (message: TMessage) => boolean;
+        handler: Behavior<TState, TMessage>;
+        priority?: number;
+    }>>,
     defaultHandler?: Behavior<TState, TMessage>
 ): Behavior<TState, TMessage> {
     return (state, message, context) => {
-        const handler = handlers[message.type] || defaultHandler;
+        // 尝试获取消息类型对应的处理器
+        const handler = handlers[message.type];
+
         if (!handler) {
+            // 如果没有找到处理器，使用默认处理器
+            if (defaultHandler) {
+                return defaultHandler(state, message, context);
+            }
             throw new Error(`No handler found for message type: ${message.type}`);
         }
+
+        // 如果处理器是对象，检查条件
+        if (typeof handler !== 'function') {
+            if (!handler.condition || handler.condition(message)) {
+                return handler.handler(state, message, context);
+            }
+
+            // 如果条件不满足，使用默认处理器
+            if (defaultHandler) {
+                return defaultHandler(state, message, context);
+            }
+            throw new Error(`Condition not satisfied for message type: ${message.type}`);
+        }
+
+        // 直接调用处理函数
         return handler(state, message, context);
     };
 }

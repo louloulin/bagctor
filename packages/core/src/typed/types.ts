@@ -217,6 +217,39 @@ export interface EnhancedActorProxyOptions {
      * 错误处理函数
      */
     errorHandler?: (error: Error, messageType: string, payload: any) => void;
+
+    /**
+     * 消息拦截器 - 在发送消息前执行
+     */
+    interceptor?: (messageType: string, payload: any, isRequest: boolean) => boolean | Promise<boolean>;
+
+    /**
+     * 重试配置
+     */
+    retry?: {
+        /**
+         * 最大重试次数
+         * @default 0 (不重试)
+         */
+        maxRetries?: number;
+
+        /**
+         * 重试延迟(ms)
+         * @default 100
+         */
+        delay?: number;
+
+        /**
+         * 重试延迟增长因子
+         * @default 1.5
+         */
+        backoffFactor?: number;
+
+        /**
+         * 判断错误是否可重试的函数
+         */
+        shouldRetry?: (error: Error) => boolean;
+    };
 }
 
 /**
@@ -227,6 +260,29 @@ export type EnhancedActorProxy<M extends MessageMap, R = any> = {
     [K in keyof M as `send${Capitalize<string & K>}`]: (payload: M[K]) => Promise<void>;
 } & {
     [K in keyof M as `request${Capitalize<string & K>}`]: (payload: M[K], timeoutMs?: number) => Promise<R>;
+} & {
+    /**
+     * 批量发送消息
+     */
+    sendBatch: <K extends keyof M>(messages: Array<{ type: K, payload: M[K] }>) => Promise<void>;
+
+    /**
+     * 批量请求并等待所有响应
+     */
+    requestBatch: <K extends keyof M>(
+        messages: Array<{ type: K, payload: M[K], timeout?: number }>,
+        options?: { allSettled?: boolean }
+    ) => Promise<R[]>;
+
+    /**
+     * 设置代理的默认超时时间
+     */
+    setTimeout: (timeoutMs: number) => void;
+
+    /**
+     * 设置错误处理函数
+     */
+    setErrorHandler: (handler: (error: Error, messageType: string, payload: any) => void) => void;
 };
 
 /**
@@ -244,12 +300,104 @@ export function createEnhancedActorProxy<M extends MessageMap, R = any>(
         requestPrefix = 'request',
         sendPrefix = 'send',
         timeout = 5000,
-        errorHandler
+        errorHandler: initialErrorHandler,
+        interceptor,
+        retry = {
+            maxRetries: 0,
+            delay: 100,
+            backoffFactor: 1.5,
+            shouldRetry: () => true
+        }
     } = options;
 
+    let currentTimeout = timeout;
+    let currentErrorHandler = initialErrorHandler;
+
     // 创建代理对象，拦截属性访问，动态创建方法
-    return new Proxy({} as EnhancedActorProxy<M, R>, {
-        get(_, methodName: string) {
+    const proxy: any = {
+        // 实现批量方法
+        sendBatch: async <K extends keyof M>(messages: Array<{ type: K, payload: M[K] }>) => {
+            const promises: Promise<void>[] = [];
+            for (const { type, payload } of messages) {
+                const message = createMessage(type as string, payload);
+
+                // 应用拦截器
+                if (interceptor) {
+                    const shouldContinue = await interceptor(type as string, payload, false);
+                    if (!shouldContinue) continue;
+                }
+
+                promises.push(system.send(target, message));
+            }
+            await Promise.all(promises);
+        },
+
+        requestBatch: async <K extends keyof M>(
+            messages: Array<{ type: K, payload: M[K], timeout?: number }>,
+            options?: { allSettled?: boolean }
+        ): Promise<R[]> => {
+            const promises = messages.map(async ({ type, payload, timeout: msgTimeout }) => {
+                const message = createMessage(type as string, payload);
+
+                // 应用拦截器
+                if (interceptor) {
+                    const shouldContinue = await interceptor(type as string, payload, true);
+                    if (!shouldContinue) {
+                        throw new Error(`Request canceled by interceptor: ${type}`);
+                    }
+                }
+
+                // 支持重试逻辑
+                const doRequest = async (attempt: number): Promise<R> => {
+                    try {
+                        return await system.request<R>(target, message, msgTimeout || currentTimeout);
+                    } catch (error) {
+                        const shouldRetry = retry.shouldRetry && retry.shouldRetry(error as Error);
+                        if (shouldRetry && attempt < (retry.maxRetries || 0)) {
+                            // 计算延迟时间
+                            const delayTime = retry.delay! * Math.pow(retry.backoffFactor!, attempt);
+                            await new Promise(resolve => setTimeout(resolve, delayTime));
+                            return doRequest(attempt + 1);
+                        }
+
+                        // 应用错误处理
+                        if (currentErrorHandler) {
+                            currentErrorHandler(error as Error, type as string, payload);
+                        }
+                        throw error;
+                    }
+                };
+
+                return doRequest(0);
+            });
+
+            // 使用allSettled或all来等待所有请求完成
+            if (options?.allSettled) {
+                const results = await Promise.allSettled(promises);
+                return results.map(result =>
+                    result.status === 'fulfilled' ? result.value : undefined as any
+                );
+            } else {
+                return Promise.all(promises);
+            }
+        },
+
+        setTimeout: (timeoutMs: number) => {
+            currentTimeout = timeoutMs;
+        },
+
+        setErrorHandler: (handler: (error: Error, messageType: string, payload: any) => void) => {
+            currentErrorHandler = handler;
+        }
+    };
+
+    return new Proxy(proxy, {
+        get(proxy, methodName: string) {
+            // 如果方法已存在于proxy对象中，直接返回
+            if (methodName in proxy) {
+                return proxy[methodName];
+            }
+
             if (typeof methodName !== 'string') {
                 return undefined;
             }
@@ -262,17 +410,37 @@ export function createEnhancedActorProxy<M extends MessageMap, R = any>(
                     const normalizedType = messageType.charAt(0).toLowerCase() + messageType.slice(1) as keyof M;
                     return async (payload: M[typeof normalizedType], customTimeout?: number): Promise<R> => {
                         try {
+                            // 应用拦截器
+                            if (interceptor) {
+                                const shouldContinue = await interceptor(normalizedType as string, payload, true);
+                                if (!shouldContinue) {
+                                    throw new Error(`Request canceled by interceptor: ${normalizedType}`);
+                                }
+                            }
+
                             // 构建消息对象
-                            const message: Message = {
-                                type: normalizedType as string,
-                                payload
+                            const message = createMessage(normalizedType as string, payload);
+
+                            // 支持重试逻辑
+                            const doRequest = async (attempt: number): Promise<R> => {
+                                try {
+                                    return await system.request<R>(target, message, customTimeout || currentTimeout);
+                                } catch (error) {
+                                    const shouldRetry = retry.shouldRetry && retry.shouldRetry(error as Error);
+                                    if (shouldRetry && attempt < (retry.maxRetries || 0)) {
+                                        // 计算延迟时间
+                                        const delayTime = retry.delay! * Math.pow(retry.backoffFactor!, attempt);
+                                        await new Promise(resolve => setTimeout(resolve, delayTime));
+                                        return doRequest(attempt + 1);
+                                    }
+                                    throw error;
+                                }
                             };
 
-                            // 使用system.request方法
-                            return await system.request<R>(target, message, customTimeout || timeout);
+                            return await doRequest(0);
                         } catch (error) {
-                            if (errorHandler) {
-                                errorHandler(error as Error, normalizedType as string, payload);
+                            if (currentErrorHandler) {
+                                currentErrorHandler(error as Error, normalizedType as string, payload);
                             }
                             throw error;
                         }
@@ -288,16 +456,19 @@ export function createEnhancedActorProxy<M extends MessageMap, R = any>(
                     const normalizedType = messageType.charAt(0).toLowerCase() + messageType.slice(1) as keyof M;
                     return async (payload: M[typeof normalizedType]) => {
                         try {
+                            // 应用拦截器
+                            if (interceptor) {
+                                const shouldContinue = await interceptor(normalizedType as string, payload, false);
+                                if (!shouldContinue) return;
+                            }
+
                             // 构建消息对象
-                            const message: Message = {
-                                type: normalizedType as string,
-                                payload
-                            };
+                            const message = createMessage(normalizedType as string, payload);
 
                             return await system.send(target, message);
                         } catch (error) {
-                            if (errorHandler) {
-                                errorHandler(error as Error, normalizedType as string, payload);
+                            if (currentErrorHandler) {
+                                currentErrorHandler(error as Error, normalizedType as string, payload);
                             }
                             throw error;
                         }
@@ -307,10 +478,7 @@ export function createEnhancedActorProxy<M extends MessageMap, R = any>(
 
             // 兼容旧版函数式调用
             return (payload: any) => {
-                const message: Message = {
-                    type: methodName as string,
-                    payload
-                };
+                const message = createMessage(methodName as string, payload);
                 return system.send(target, message);
             };
         }

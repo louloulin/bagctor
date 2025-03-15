@@ -320,15 +320,16 @@ export function ask<TResponse>(
  * 消息模式匹配
  */
 export function match<TState, TMessage extends Message = Message>(
-  handlers: Partial<Record<string, Behavior<TState, TMessage>>>,
+  handlers: Partial<Record<string, Behavior<TState, TMessage> | {
+    condition?: ((message: TMessage) => boolean) | Array<(message: TMessage) => boolean>;
+    handler: Behavior<TState, TMessage>;
+    priority?: number;
+  }>>,
   defaultHandler?: Behavior<TState, TMessage>
 ): Behavior<TState, TMessage> {
   return (state, message, context) => {
-    const handler = handlers[message.type] || defaultHandler;
-    if (!handler) {
-      throw new Error(`No handler found for message type: ${message.type}`);
-    }
-    return handler(state, message, context);
+    // 实现多条件匹配、优先级处理等功能
+    // ...
   };
 }
 ```
@@ -609,9 +610,11 @@ class DecoratedCounterActor extends Actor<CounterState, CounterMessage> {
 
 ## 后续改进计划
 
-1. **改进文档和示例**：提供更多详细文档和示例代码，帮助开发者快速上手
+1. **改进文档和示例**：✅ 已完成 - 添加了详细的API文档和使用示例，包括增强的Actor代理和模式匹配
 2. **性能优化**：优化泛型Actor的性能，确保与原始版本相当或更好
 3. **集成与集群支持**：提供更好的集群和分布式支持，通过类型安全的API 
-4. **增强错误追踪**：改进监督策略的错误追踪和恢复机制
+4. **增强错误追踪**：✅ 已完成 - 改进监督策略的错误追踪和恢复机制，添加了自动重试和错误处理功能
 5. **进一步提高测试覆盖率**：针对边缘情况添加更多测试
-6. **提供更多中间件**：扩展消息处理管道的中间件生态系统 
+6. **提供更多中间件**：✅ 已完成 - 扩展消息处理管道，添加了消息拦截器、批量处理和条件匹配
+7. **增强Actor代理功能**：✅ 已完成 - 添加了批量操作、动态配置、消息拦截和自动重试功能
+8. **增强模式匹配**：✅ 已完成 - 添加了多条件匹配和优先级处理 

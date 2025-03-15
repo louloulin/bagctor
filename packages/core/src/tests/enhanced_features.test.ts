@@ -10,7 +10,7 @@ import {
     match,
     ask
 } from "..";
-import { createEnhancedActorProxy, EnhancedActorProxy, MessageMap } from "../typed/types";
+import { createEnhancedActorProxy, MessageMap } from "../typed/types";
 
 // 定义消息类型
 interface UserMessages extends MessageMap {
@@ -77,23 +77,34 @@ class MockContext {
     }
 }
 
-test("Enhanced match function should support conditions", async () => {
+test("Enhanced match function should support multiple conditions", async () => {
     // 创建一个使用增强match函数的Actor
     const UserActor = defineActor<UserState, Message>(
         { users: {} },
         {
             default: match<UserState, Message>({
                 'update': {
-                    // 只有当ID存在于用户列表中时才处理更新
-                    condition: (msg) => Boolean(msg.payload?.id && msg.payload.id in msg.payload),
+                    // 使用条件数组 - 验证多条件支持
+                    condition: [
+                        // 条件1: ID必须存在于请求中
+                        (msg) => Boolean(msg.payload?.id),
+                        // 条件2: 至少有一个字段要更新
+                        (msg) => Boolean(msg.payload?.name || msg.payload?.email)
+                    ],
                     handler: (state, msg) => {
                         const { id, ...updates } = msg.payload;
-                        return {
-                            users: {
-                                ...state.users,
-                                [id]: { ...state.users[id], ...updates }
-                            }
-                        };
+                        const user = state.users[id];
+
+                        // 用户存在才进行更新
+                        if (user) {
+                            return {
+                                users: {
+                                    ...state.users,
+                                    [id]: { ...user, ...updates }
+                                }
+                            };
+                        }
+                        return state;
                     }
                 },
                 'create': (state, msg) => {
@@ -105,6 +116,15 @@ test("Enhanced match function should support conditions", async () => {
                             [id]: { name, email }
                         }
                     };
+                },
+                'delete': {
+                    // 使用单个条件函数
+                    condition: (msg) => Boolean(msg.payload?.id && msg.payload.id in msg.payload),
+                    handler: (state, msg) => {
+                        const { id } = msg.payload;
+                        const { [id]: removedUser, ...remainingUsers } = state.users;
+                        return { users: remainingUsers };
+                    }
                 }
             }, (state, msg) => {
                 // 默认处理器
@@ -122,8 +142,15 @@ test("Enhanced match function should support conditions", async () => {
     // 发送创建用户消息
     await system.send(pid, { type: 'create', payload: { name: 'John', email: 'john@example.com' } });
 
-    // 发送一个应该被条件拒绝的消息
-    // 这里我们期望它不会导致错误，而是使用默认处理器
+    // 发送一个空的更新消息 - 应该被条件拒绝
+    // 这里测试第二个条件：需要至少有一个字段要更新
+    await system.send(pid, { type: 'update', payload: { id: 'user-1' } });
+
+    // 发送一个没有ID的更新消息 - 应该被条件拒绝
+    // 这里测试第一个条件：需要有ID
+    await system.send(pid, { type: 'update', payload: { name: 'Updated Name' } });
+
+    // 发送一个有效的更新消息 - 满足所有条件，但用户不存在
     await system.send(pid, { type: 'update', payload: { id: 'non-existent', name: 'Updated' } });
 });
 

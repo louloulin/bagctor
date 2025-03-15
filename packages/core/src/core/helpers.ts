@@ -53,7 +53,7 @@ export function defineActor<TState, TMessage extends Message = Message>(
  */
 export function match<TState, TMessage extends Message = Message>(
     handlers: Partial<Record<string, Behavior<TState, TMessage> | {
-        condition?: (message: TMessage) => boolean;
+        condition?: ((message: TMessage) => boolean) | Array<(message: TMessage) => boolean>;
         handler: Behavior<TState, TMessage>;
         priority?: number;
     }>>,
@@ -73,15 +73,28 @@ export function match<TState, TMessage extends Message = Message>(
 
         // 如果处理器是对象，检查条件
         if (typeof handler !== 'function') {
-            if (!handler.condition || handler.condition(message)) {
-                return handler.handler(state, message, context);
+            // 处理单个条件或条件数组
+            if (handler.condition) {
+                const conditions = Array.isArray(handler.condition)
+                    ? handler.condition
+                    : [handler.condition];
+
+                // 检查所有条件是否满足（逻辑与）
+                const allConditionsMet = conditions.every(condition => condition(message));
+
+                if (allConditionsMet) {
+                    return handler.handler(state, message, context);
+                }
+
+                // 如果条件不满足，使用默认处理器
+                if (defaultHandler) {
+                    return defaultHandler(state, message, context);
+                }
+                throw new Error(`Conditions not satisfied for message type: ${message.type}`);
             }
 
-            // 如果条件不满足，使用默认处理器
-            if (defaultHandler) {
-                return defaultHandler(state, message, context);
-            }
-            throw new Error(`Condition not satisfied for message type: ${message.type}`);
+            // 没有条件，直接执行处理器
+            return handler.handler(state, message, context);
         }
 
         // 直接调用处理函数

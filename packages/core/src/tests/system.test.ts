@@ -22,8 +22,8 @@ class TestSupervisorStrategy implements SupervisorStrategy {
   public failures: { supervisor: ActorContext; child: any; error: Error }[] = [];
   public directive: SupervisorDirective = SupervisorDirective.Restart;
 
-  handleFailure(supervisor: ActorContext, child: any, error: Error): SupervisorDirective {
-    this.failures.push({ supervisor, child, error });
+  handleError(error: Error, child: any, restartCount: number): SupervisorDirective {
+    this.failures.push({ supervisor: null as any, child, error });
     return this.directive;
   }
 }

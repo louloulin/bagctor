@@ -18,6 +18,7 @@ export interface RouterConfig {
     strategy: RouterStrategy;
     routees: PID[];
     hashFunction?: (message: MessageEnvelope) => string | number;
+    virtualNodes?: number; // 用于一致性哈希路由器，每个节点的虚拟节点数量
 }
 
 /**

@@ -171,6 +171,8 @@ export class ActorContext implements IActorContext, MessageInvoker {
     try {
       await actor.receive(message);
     } catch (error) {
+      console.error(`Error in actor ${this.pid.id} while processing message:`, error);
+      // 确保错误被正确传递给系统
       await this.system.handleActorError(this.pid, error as Error);
     }
   }

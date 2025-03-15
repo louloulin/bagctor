@@ -147,7 +147,9 @@ test("LockFreeMailbox 应该按批次处理消息", async () => {
 
 // 挂起和恢复测试
 test("LockFreeMailbox 应该正确支持挂起和恢复操作", async () => {
-    const mailbox = new LockFreeMailbox();
+    const mailbox = new LockFreeMailbox({
+        debug: true // 启用调试模式以便更好地跟踪问题
+    });
     const invoker = new MockMessageInvoker();
     const dispatcher = new MockDispatcher();
 
@@ -157,28 +159,35 @@ test("LockFreeMailbox 应该正确支持挂起和恢复操作", async () => {
     // 发送一些消息
     mailbox.postUserMessage({ type: "user1" });
 
+    // 等待第一条消息处理完成
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // 验证第一条消息已被处理
+    expect(invoker.userMessages.length).toBe(1);
+    expect(invoker.userMessages[0].type).toBe("user1");
+
     // 挂起mailbox
     mailbox.suspend();
+
+    // 验证挂起状态
+    expect(mailbox.isSuspended()).toBe(true);
 
     // 发送更多消息
     mailbox.postUserMessage({ type: "user2" });
     mailbox.postUserMessage({ type: "user3" });
 
-    // 验证挂起状态
-    expect(mailbox.isSuspended()).toBe(true);
+    // 等待一段时间，确保如果消息会被处理的话有足够的时间
+    await new Promise(resolve => setTimeout(resolve, 50));
 
-    // 等待一段时间
-    await new Promise(resolve => setTimeout(resolve, 30));
-
-    // 检查只有第一条消息被处理
+    // 检查只有第一条消息被处理，挂起后的消息未被处理
     expect(invoker.userMessages.length).toBe(1);
     expect(invoker.userMessages[0].type).toBe("user1");
 
     // 恢复mailbox
     mailbox.resume();
 
-    // 等待处理完成
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // 等待足够时间处理剩余消息
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // 验证所有消息都被处理
     expect(invoker.userMessages.length).toBe(3);

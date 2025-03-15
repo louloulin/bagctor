@@ -176,12 +176,12 @@ describe('消息中间件', () => {
             expect(metrics.deadLetters).toBe(0);
         });
 
-        test('应该跟踪消息处理时间', () => {
+        test('应该跟踪消息处理时间', async () => {
             // 发送带追踪ID的消息
             const sentMessage = middleware.onSend(testMessage, testTarget);
 
             // 模拟一些处理时间
-            jest.advanceTimersByTime(100);
+            await new Promise(resolve => setTimeout(resolve, 100));
 
             // 接收相同的消息
             middleware.onReceive(sentMessage, testTarget);

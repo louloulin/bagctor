@@ -219,7 +219,7 @@ export class DefaultMailbox implements IMailbox {
       while (!this.systemMailbox.isEmpty() && processedCount < this.batchSize) {
         const message = this.systemMailbox.shift();
         if (message) {
-          await this.invoker.invoke(message);
+          await this.invoker.invokeSystemMessage(message);
           processedCount++;
         }
       }
@@ -228,7 +228,7 @@ export class DefaultMailbox implements IMailbox {
       while (!this.userMailbox.isEmpty() && processedCount < this.batchSize) {
         const message = this.userMailbox.shift();
         if (message) {
-          await this.invoker.invoke(message);
+          await this.invoker.invokeUserMessage(message);
           processedCount++;
         }
 

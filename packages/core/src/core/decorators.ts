@@ -53,25 +53,24 @@ export function messageHandler(messageType: string) {
  */
 export function initialState<T>(initialState: T) {
     return function (constructor: new (...args: any[]) => any) {
-        // 保存原始构造函数
+        // 保存原始构造函数引用
         const original = constructor;
 
-        // 创建新的构造函数
-        const wrappedConstructor: any = function (...args: any[]) {
+        // 创建一个新函数，直接替换原始构造函数
+        function ClassWithInitialState(this: any, ...args: any[]) {
+            // 调用原始构造函数
             const instance = new original(...args);
 
-            // 自动设置初始状态
-            if (instance.setState) {
-                instance.setState(initialState);
-            }
+            // 通过直接设置state属性来设置初始状态
+            instance.state = initialState;
 
             return instance;
-        };
+        }
 
-        // 复制原型
-        wrappedConstructor.prototype = original.prototype;
+        // 复制原型和构造函数属性
+        ClassWithInitialState.prototype = original.prototype;
 
-        // 设置构造函数
-        return wrappedConstructor;
+        // 返回新构造函数
+        return ClassWithInitialState as any;
     };
 } 

@@ -20,8 +20,14 @@ class DecoratorCounterActor extends Actor<CounterState, CounterMessage> {
     protected behaviors(): void {
         // 获取通过装饰器定义的行为方法
         const proto = Object.getPrototypeOf(this);
+        console.log("Proto:", Object.getOwnPropertyNames(proto));
+
+        // 在DecoratorCounterActor.prototype上查找装饰器定义的元数据
         const behaviorMethods = proto.behaviorMethods || new Map<string, string>();
         const messageHandlers = proto.messageHandlers || new Map<string, string>();
+
+        console.log("Behavior methods:", behaviorMethods);
+        console.log("Message handlers:", messageHandlers);
 
         // 注册默认行为
         this.addBehavior('default', async (msg: CounterMessage) => {

@@ -102,6 +102,12 @@ export class DefaultBackpressureController extends EventEmitter implements Backp
                 messageId,
                 activeCount: this.activeMessages.size
             });
+
+            // 检查队列状态并更新背压状态
+            this.checkBackpressureStatus();
+
+            // 通知等待者有新空间
+            this.notifyWaiters();
         }
     }
 
@@ -116,6 +122,8 @@ export class DefaultBackpressureController extends EventEmitter implements Backp
      * 检查背压是否激活
      */
     isBackpressureActive(): boolean {
+        // 确保状态与当前队列大小一致
+        this.checkBackpressureStatus();
         return this.backpressureActive;
     }
 
@@ -123,7 +131,9 @@ export class DefaultBackpressureController extends EventEmitter implements Backp
      * 获取队列使用率（0-1）
      */
     getQueueUtilization(): number {
-        return this.getQueueSize() / this.config.maxQueueSize;
+        const size = this.getQueueSize();
+        // 当队列为空时确保返回0
+        return size === 0 ? 0 : size / this.config.maxQueueSize;
     }
 
     /**
@@ -227,7 +237,10 @@ export class DefaultBackpressureController extends EventEmitter implements Backp
             case BackpressureStrategy.WAIT:
                 // 等待队列有空间
                 try {
-                    await this.waitForSpace(this.config.waitTimeout);
+                    // 确保在至少有一点空间之前等待
+                    while (this.getQueueSize() >= this.config.maxQueueSize) {
+                        await this.waitForSpace(this.config.waitTimeout);
+                    }
 
                     // 等待成功，添加消息
                     this.messageQueue.push(message);

@@ -192,7 +192,12 @@ export class LockFreeMailbox implements IMailbox {
     resume(): void {
         if (this.suspended) {
             this.suspended = false;
-            this.scheduleProcessing();
+
+            // 确保立即开始处理队列中的消息
+            if (!this.isEmpty() && !this.processing) {
+                this.scheduleProcessing();
+            }
+
             this.logDebug('Mailbox已恢复');
         }
     }

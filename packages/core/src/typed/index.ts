@@ -1,5 +1,5 @@
 // 基本类型定义
-export {
+export type {
     MessageMap,
     Message,
     PID,
@@ -12,7 +12,10 @@ export {
     ActorState,
     Props,
     MessageMetadata,
-    ActorProxy,
+    ActorProxy
+} from './types';
+
+export {
     createActorProxy,
     actorRef,
     toTypedMessage,
@@ -59,4 +62,4 @@ export {
     response,
     generateCorrelationId,
     RequestResponseManager
-} from './request-response'; 
+} from './request-response';

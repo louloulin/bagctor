@@ -1,5 +1,5 @@
 import { describe, expect, test, mock, beforeEach, afterEach } from 'bun:test';
-import { LayeredDispatcher, TaskType, TaskPriority } from '../../core/dispatcher/layered-dispatcher';
+import { LayeredDispatcher, TaskType, TaskPriority, LayeredDispatcherConfig } from '../../core/dispatcher/layered-dispatcher';
 import { AdaptiveScheduler } from '../../core/dispatcher/adaptive-scheduler';
 
 describe('多层调度策略', () => {
@@ -57,30 +57,35 @@ describe('多层调度策略', () => {
 
         test('任务拒绝', async () => {
             // 创建一个模拟的慢任务
-            const slowTask = () => new Promise((resolve) => {
+            const slowTask = () => new Promise<void>((resolve) => {
                 setTimeout(resolve, 100);
             });
 
+            // 创建完整的配置对象
+            const config: LayeredDispatcherConfig = {
+                concurrencyLimits: {
+                    [TaskType.DEFAULT]: 1,
+                    [TaskType.CPU_INTENSIVE]: 10,
+                    [TaskType.IO_INTENSIVE]: 10,
+                    [TaskType.LOW_LATENCY]: 10,
+                    [TaskType.BATCH]: 10
+                },
+                queueSizeLimits: {
+                    [TaskType.DEFAULT]: 1,
+                    [TaskType.CPU_INTENSIVE]: 100,
+                    [TaskType.IO_INTENSIVE]: 100,
+                    [TaskType.LOW_LATENCY]: 100,
+                    [TaskType.BATCH]: 100
+                }
+            };
+
             // 设置限制
-            dispatcher = new LayeredDispatcher({
-                concurrencyLimits: { [TaskType.DEFAULT]: 1 },
-                queueSizeLimits: { [TaskType.DEFAULT]: 1 }
-            });
+            dispatcher = new LayeredDispatcher(config);
 
             // 调度超过限制的任务
-            const successfulTasks = [];
-
             dispatcher.schedule(slowTask);
-            dispatcher.schedule(slowTask).then(result => {
-                if (result !== false) {
-                    successfulTasks.push(result);
-                }
-            });
-            dispatcher.schedule(slowTask).then(result => {
-                if (result !== false) {
-                    successfulTasks.push(result);
-                }
-            });
+            dispatcher.schedule(slowTask);
+            dispatcher.schedule(slowTask);
 
             // 等待任务完成
             await new Promise((resolve) => setTimeout(resolve, 300));
@@ -90,7 +95,8 @@ describe('多层调度策略', () => {
 
             // 验证有任务被拒绝
             expect(metrics.totalTasksRejected).toBeGreaterThan(0);
-            expect(successfulTasks.length).toBeLessThan(3);
+            // 验证完成的任务数小于提交的任务数
+            expect(metrics.totalTasksCompleted).toBeLessThan(metrics.totalTasksSubmitted);
         });
     });
 

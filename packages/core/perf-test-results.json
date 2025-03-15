@@ -5,9 +5,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 3.0808750000001055,
-    "throughput": 324583,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 1.4267089999998461,
+    "throughput": 700913,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -16,9 +16,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 0.9227500000001783,
-    "throughput": 1083717,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 0.9915000000000873,
+    "throughput": 1008572,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -27,9 +27,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 1.1792500000001382,
-    "throughput": 847996,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 1.1129170000003796,
+    "throughput": 898539,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -38,9 +38,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 2.7177080000001297,
-    "throughput": 367957,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 0.9129590000002281,
+    "throughput": 1095339,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -49,9 +49,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 0.743167000000085,
-    "throughput": 1345592,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 0.7924160000002303,
+    "throughput": 1261963,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -60,9 +60,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 3.082582999999886,
-    "throughput": 324403,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 0.7027500000003783,
+    "throughput": 1422981,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -71,9 +71,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 8.178499999999985,
-    "throughput": 611359,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 3.6087079999997513,
+    "throughput": 1385537,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -82,9 +82,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 4.47524999999996,
-    "throughput": 1117256,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 3.716334000000188,
+    "throughput": 1345411,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -93,9 +93,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 4.82529199999999,
-    "throughput": 1036206,
-    "peakMemoryUsage": 9.601927757263184,
+    "duration": 3.732582999999977,
+    "throughput": 1339554,
+    "peakMemoryUsage": 9.566829681396484,
     "avgCpuUtilization": 0
   },
   {
@@ -104,9 +104,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 2.395082999999886,
-    "throughput": 2087610,
-    "peakMemoryUsage": 10.624606132507324,
+    "duration": 2.4600420000001577,
+    "throughput": 2032485,
+    "peakMemoryUsage": 10.500553131103516,
     "avgCpuUtilization": 0
   },
   {
@@ -115,9 +115,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 2.3193750000000364,
-    "throughput": 2155753,
-    "peakMemoryUsage": 10.624606132507324,
+    "duration": 2.429583999999977,
+    "throughput": 2057965,
+    "peakMemoryUsage": 10.500553131103516,
     "avgCpuUtilization": 0
   },
   {
@@ -126,9 +126,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 2.375750000000153,
-    "throughput": 2104598,
-    "peakMemoryUsage": 10.624606132507324,
+    "duration": 2.380540999999994,
+    "throughput": 2100362,
+    "peakMemoryUsage": 10.500553131103516,
     "avgCpuUtilization": 0
   },
   {
@@ -137,9 +137,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 0.6599589999996169,
-    "throughput": 1515245,
-    "peakMemoryUsage": 10.624606132507324,
+    "duration": 0.694459000000279,
+    "throughput": 1439969,
+    "peakMemoryUsage": 10.500553131103516,
     "avgCpuUtilization": 0
   },
   {
@@ -148,9 +148,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 1.9934169999996811,
-    "throughput": 501651,
-    "peakMemoryUsage": 10.624606132507324,
+    "duration": 1.2702500000000327,
+    "throughput": 787246,
+    "peakMemoryUsage": 10.500553131103516,
     "avgCpuUtilization": 0
   },
   {
@@ -159,9 +159,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 0.5848750000000109,
-    "throughput": 1709767,
-    "peakMemoryUsage": 10.889723777770996,
+    "duration": 0.5304999999998472,
+    "throughput": 1885014,
+    "peakMemoryUsage": 10.803043365478516,
     "avgCpuUtilization": 0
   },
   {
@@ -170,9 +170,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.7172919999998157,
-    "throughput": 1394132,
-    "peakMemoryUsage": 10.889723777770996,
+    "duration": 0.4954999999999927,
+    "throughput": 2018163,
+    "peakMemoryUsage": 10.803043365478516,
     "avgCpuUtilization": 0
   },
   {
@@ -181,9 +181,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 0.5325000000002547,
-    "throughput": 1877934,
-    "peakMemoryUsage": 10.889723777770996,
+    "duration": 0.5072910000003503,
+    "throughput": 1971255,
+    "peakMemoryUsage": 10.803043365478516,
     "avgCpuUtilization": 0
   },
   {
@@ -192,20 +192,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 0.541541000000052,
-    "throughput": 1846582,
-    "peakMemoryUsage": 10.889723777770996,
-    "avgCpuUtilization": 0
-  },
-  {
-    "actorCount": 50,
-    "messageCount": 5000,
-    "processingTime": 0,
-    "mailboxType": "default",
-    "dispatcherType": "default",
-    "duration": 3.044332999999824,
-    "throughput": 1642395,
-    "peakMemoryUsage": 10.889723777770996,
+    "duration": 0.5063749999999345,
+    "throughput": 1974821,
+    "peakMemoryUsage": 10.803043365478516,
     "avgCpuUtilization": 0
   },
   {
@@ -213,10 +202,21 @@
     "messageCount": 5000,
     "processingTime": 0,
     "mailboxType": "default",
+    "dispatcherType": "default",
+    "duration": 2.6067909999997028,
+    "throughput": 1918067,
+    "peakMemoryUsage": 10.803043365478516,
+    "avgCpuUtilization": 0
+  },
+  {
+    "actorCount": 50,
+    "messageCount": 5000,
+    "processingTime": 0,
+    "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 3.5473329999999805,
-    "throughput": 1409509,
-    "peakMemoryUsage": 10.889723777770996,
+    "duration": 2.6301250000001346,
+    "throughput": 1901050,
+    "peakMemoryUsage": 10.803043365478516,
     "avgCpuUtilization": 0
   },
   {
@@ -225,9 +225,9 @@
     "processingTime": 0,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 3.457292000000052,
-    "throughput": 1446218,
-    "peakMemoryUsage": 10.889723777770996,
+    "duration": 3.3238329999999223,
+    "throughput": 1504287,
+    "peakMemoryUsage": 10.803043365478516,
     "avgCpuUtilization": 0
   },
   {
@@ -236,9 +236,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 2.5991659999999683,
-    "throughput": 1923693,
-    "peakMemoryUsage": 11.340826988220215,
+    "duration": 2.6457500000001346,
+    "throughput": 1889823,
+    "peakMemoryUsage": 11.265483856201172,
     "avgCpuUtilization": 0
   },
   {
@@ -247,9 +247,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 2.512000000000171,
-    "throughput": 1990445,
-    "peakMemoryUsage": 11.340826988220215,
+    "duration": 2.8760000000002037,
+    "throughput": 1738525,
+    "peakMemoryUsage": 11.265483856201172,
     "avgCpuUtilization": 0
   },
   {
@@ -258,9 +258,9 @@
     "processingTime": 0,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 2.4921250000002146,
-    "throughput": 2006319,
-    "peakMemoryUsage": 11.340826988220215,
+    "duration": 2.6907500000002074,
+    "throughput": 1858217,
+    "peakMemoryUsage": 11.265483856201172,
     "avgCpuUtilization": 0
   },
   {
@@ -269,9 +269,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 0.5027500000001055,
-    "throughput": 1989060,
-    "peakMemoryUsage": 11.340826988220215,
+    "duration": 0.5080830000001697,
+    "throughput": 1968182,
+    "peakMemoryUsage": 11.265483856201172,
     "avgCpuUtilization": 0
   },
   {
@@ -280,9 +280,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 0.5505000000002838,
-    "throughput": 1816530,
-    "peakMemoryUsage": 11.340826988220215,
+    "duration": 0.4968330000001515,
+    "throughput": 2012748,
+    "peakMemoryUsage": 11.265483856201172,
     "avgCpuUtilization": 0
   },
   {
@@ -291,9 +291,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 0.5085830000002716,
-    "throughput": 1966247,
-    "peakMemoryUsage": 11.340826988220215,
+    "duration": 0.5086250000003929,
+    "throughput": 1966085,
+    "peakMemoryUsage": 11.265483856201172,
     "avgCpuUtilization": 0
   },
   {
@@ -302,9 +302,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.4697919999998703,
-    "throughput": 2128601,
-    "peakMemoryUsage": 11.340826988220215,
+    "duration": 0.4886670000000777,
+    "throughput": 2046383,
+    "peakMemoryUsage": 11.265483856201172,
     "avgCpuUtilization": 0
   },
   {
@@ -313,9 +313,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 1.0669160000002194,
-    "throughput": 937280,
-    "peakMemoryUsage": 11.340826988220215,
+    "duration": 0.9941249999997126,
+    "throughput": 1005909,
+    "peakMemoryUsage": 11.265483856201172,
     "avgCpuUtilization": 0
   },
   {
@@ -324,9 +324,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 0.4694159999999101,
-    "throughput": 2130306,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.4810000000002219,
+    "throughput": 2079002,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -335,9 +335,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 0.9734160000002703,
-    "throughput": 2054620,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.9728340000001481,
+    "throughput": 2055849,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -346,9 +346,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 1.0392919999999322,
-    "throughput": 1924386,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.9634580000001733,
+    "throughput": 2075855,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -357,9 +357,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 0.9503340000001117,
-    "throughput": 2104523,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.9467079999999441,
+    "throughput": 2112583,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -368,9 +368,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.8842920000001868,
-    "throughput": 2261696,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.8878329999997732,
+    "throughput": 2252675,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -379,9 +379,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 0.8958750000001601,
-    "throughput": 2232454,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.8924170000000231,
+    "throughput": 2241104,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -390,9 +390,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 0.8975000000000364,
-    "throughput": 2228412,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.9027079999996204,
+    "throughput": 2215555,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -401,9 +401,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 0.5021670000000995,
-    "throughput": 1991369,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.5019170000000486,
+    "throughput": 1992361,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -412,9 +412,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 0.5390840000000026,
-    "throughput": 1854998,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.49487500000032014,
+    "throughput": 2020712,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -423,9 +423,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 0.5066670000001068,
-    "throughput": 1973682,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.5135000000000218,
+    "throughput": 1947419,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -434,9 +434,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.4967500000002474,
-    "throughput": 2013085,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.49254100000007384,
+    "throughput": 2030287,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -445,9 +445,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 0.4910840000002281,
-    "throughput": 2036311,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.4952920000000631,
+    "throughput": 2019011,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -456,9 +456,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 0.49316700000008495,
-    "throughput": 2027710,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 0.5328749999998763,
+    "throughput": 1876612,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -467,9 +467,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 1.5884169999999358,
-    "throughput": 1259115,
-    "peakMemoryUsage": 11.722228050231934,
+    "duration": 1.511167000000114,
+    "throughput": 1323480,
+    "peakMemoryUsage": 11.677677154541016,
     "avgCpuUtilization": 0
   },
   {
@@ -478,9 +478,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 1.0033339999999953,
-    "throughput": 1993354,
-    "peakMemoryUsage": 12.081048011779785,
+    "duration": 1.0259169999999358,
+    "throughput": 1949475,
+    "peakMemoryUsage": 12.007734298706055,
     "avgCpuUtilization": 0
   },
   {
@@ -489,9 +489,9 @@
     "processingTime": 1,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 1.0703749999997854,
-    "throughput": 1868504,
-    "peakMemoryUsage": 12.081048011779785,
+    "duration": 0.9998329999998532,
+    "throughput": 2000334,
+    "peakMemoryUsage": 12.007734298706055,
     "avgCpuUtilization": 0
   },
   {
@@ -500,9 +500,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.9305410000001757,
-    "throughput": 2149287,
-    "peakMemoryUsage": 12.081048011779785,
+    "duration": 0.9270839999999225,
+    "throughput": 2157301,
+    "peakMemoryUsage": 12.007734298706055,
     "avgCpuUtilization": 0
   },
   {
@@ -511,9 +511,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 0.961667000000034,
-    "throughput": 2079721,
-    "peakMemoryUsage": 12.081048011779785,
+    "duration": 0.934291999999914,
+    "throughput": 2140658,
+    "peakMemoryUsage": 12.007734298706055,
     "avgCpuUtilization": 0
   },
   {
@@ -522,9 +522,9 @@
     "processingTime": 1,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 1.1217920000003687,
-    "throughput": 1782861,
-    "peakMemoryUsage": 12.081048011779785,
+    "duration": 0.9271659999999429,
+    "throughput": 2157111,
+    "peakMemoryUsage": 12.007734298706055,
     "avgCpuUtilization": 0
   }
 ]

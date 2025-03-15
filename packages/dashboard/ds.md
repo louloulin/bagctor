@@ -8,6 +8,7 @@ The current dashboard implementation provides a foundation for monitoring the Ba
    - Main Dashboard (index.tsx): Overview of system metrics and status
    - Metrics (metrics.tsx): Detailed system, actor, and message metrics
    - Alerts (alerts.tsx): Alert management and notification
+   - Alert Rules (alert-rules.tsx): Alert rule configuration UI ✓
    - Tracing (tracing.tsx): Distributed tracing visualization
    - Workers (workers.tsx): Worker monitoring and task tracking ✓
    - Cluster (cluster.tsx): Distributed system visualization ✓
@@ -23,6 +24,7 @@ The current dashboard implementation provides a foundation for monitoring the Ba
    - Dashboard-specific charts (MessageRateChart, SystemMetricsChart)
    - Layout components with modern styling ✓
    - ThemeContext for dark/light mode support ✓
+   - WebSocketContext for real-time updates ✓
    - ClusterVisualization with interactive node display ✓
 
 4. **Technologies:**
@@ -32,6 +34,7 @@ The current dashboard implementation provides a foundation for monitoring the Ba
    - Axios for API requests
    - TailwindCSS for styling with dark mode support ✓
    - Canvas API for interactive visualizations ✓
+   - WebSocket for real-time data updates ✓
 
 ## Enhancement Goals
 
@@ -39,7 +42,7 @@ Based on the Bactor Improvement Plan, we need to enhance the dashboard to suppor
 
 1. **Real-time Monitoring:**
    - Connect to actual metrics endpoints rather than mock data
-   - Implement WebSocket connections for real-time updates
+   - Implement WebSocket connections for real-time updates ✓
    - Add more granular time range options ✓
 
 2. **Comprehensive Worker Monitoring:**
@@ -53,8 +56,8 @@ Based on the Bactor Improvement Plan, we need to enhance the dashboard to suppor
    - Add partition detection visualization ✓
 
 4. **Advanced Alerting:**
-   - Create alert rules configuration UI
-   - Implement notification channels (email, Slack, etc.)
+   - Create alert rules configuration UI ✓
+   - Implement notification channels (email, Slack, etc.) ✓
    - Add alert history and analytics
 
 5. **Enhanced Tracing:**
@@ -69,7 +72,7 @@ Based on the Bactor Improvement Plan, we need to enhance the dashboard to suppor
 1. **Metrics Integration**
    - Modify API endpoints to connect to Bactor metrics collectors
    - Implement authentication for API requests
-   - Add real-time data fetching with polling and WebSockets
+   - Add real-time data fetching with polling and WebSockets ✓
    - Enhance data visualization components
 
 2. **Worker Monitoring**
@@ -86,9 +89,9 @@ Based on the Bactor Improvement Plan, we need to enhance the dashboard to suppor
 ### Phase 2: Advanced Monitoring Features (3 weeks)
 
 1. **Enhanced Alerting System**
-   - Create alert configuration UI
-   - Implement notification settings
-   - Add alert severity levels and grouping
+   - Create alert configuration UI ✓
+   - Implement notification settings ✓
+   - Add alert severity levels and grouping ✓
    - Create alert history visualization
 
 2. **Distributed System Visualization**
@@ -163,17 +166,30 @@ Based on the Bactor Improvement Plan, we need to enhance the dashboard to suppor
    - Added performance metrics display for selected nodes
    - Created topology view with different node types
 
+5. **Advanced Alerting**
+   - Implemented alert rules configuration UI with form validation
+   - Created notification channel management with multiple types (email, Slack, PagerDuty)
+   - Added severity level filtering and management
+   - Implemented rule enable/disable functionality
+   - Created mock alert data for testing
+
+6. **Real-time Updates**
+   - Added WebSocket support for real-time data streaming
+   - Implemented reconnection logic with exponential backoff
+   - Created mock data generator for testing
+   - Added WebSocket status indicators and controls
+
 ## Next Steps
 
 1. **Immediate Actions**
    - Connect to actual metrics collectors from the Bactor system
-   - Enhance alert management with configuration UI
-   - Implement WebSocket support for real-time updates
-   - Add drag and drop functionality to cluster visualization
+   - Implement real-time updates via WebSockets for production
+   - Add exportable reports functionality
+   - Extend monitoring to include more detailed network metrics
 
 2. **Technical Requirements**
    - Set up authentication for API requests
-   - Implement real-time data streaming
+   - Implement real-time data streaming from actual sources
    - Add exportable reports functionality
    - Extend monitoring to include more detailed network metrics
 
@@ -266,6 +282,26 @@ interface NotificationChannel {
 }
 ```
 
+### 4. WebSocket Implementation
+
+```typescript
+interface WebSocketMessage {
+  type: string;
+  data: any;
+}
+
+interface WebSocketOptions {
+  url: string;
+  autoConnect: boolean;
+  reconnectAttempts: number;
+  reconnectInterval: number;
+  onOpen?: () => void;
+  onClose?: () => void;
+  onError?: (error: any) => void;
+  onMessage?: (message: WebSocketMessage) => void;
+}
+```
+
 ## Success Metrics
 
 1. **Dashboard Performance**
@@ -303,13 +339,13 @@ interface NotificationChannel {
 ## Next Steps
 
 1. **Immediate Actions**
-   - Refactor API endpoints to connect to real data sources
-   - Implement worker monitoring page
-   - Enhance system metrics visualization
-   - Create integration tests for data fetching
+   - Connect to actual metrics collectors from the Bactor system
+   - Enhance alert history visualization
+   - Implement drag and drop functionality for cluster visualization
+   - Add additional notification channel types
 
 2. **Technical Requirements**
-   - Set up WebSocket connections for real-time updates
+   - Set up secure WebSocket connections for production
    - Implement authentication for API requests
-   - Create visualization components for worker monitoring
-   - Enhance alerts system with configuration UI 
+   - Add persistent alert storage
+   - Create exportable report generation 

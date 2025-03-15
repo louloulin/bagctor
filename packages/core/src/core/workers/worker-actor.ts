@@ -305,7 +305,7 @@ export class WorkerActor extends Actor {
      * 在Actor停止前执行清理
      * 由于基类Actor可能没有beforeStop方法，不使用override关键字
      */
-    public async beforeStop(): Promise<void> {
+    public async postStop(): Promise<void> {
         try {
             // 关闭Worker池
             await this.workerPool.shutdown();
@@ -313,9 +313,7 @@ export class WorkerActor extends Actor {
             console.error('Error shutting down worker pool:', error);
         }
 
-        // 如果基类有beforeStop方法，则调用它
-        if (super.beforeStop) {
-            await super.beforeStop();
-        }
+        // 调用父类的postStop方法
+        await super.postStop();
     }
 } 

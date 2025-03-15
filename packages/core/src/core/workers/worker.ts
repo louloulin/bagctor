@@ -1,7 +1,9 @@
 // Worker脚本 - 用于在独立线程中执行任务
 // 注意：该文件将在Worker线程中运行
 
-declare var self: Worker;
+// 使用类型断言将全局self变量转换为Worker类型
+// @ts-ignore: 忽略类型检查以处理Worker环境中的self
+const workerSelf = self as unknown as Worker;
 
 // 任务执行环境配置
 interface TaskContext {
@@ -49,7 +51,7 @@ const ctx = {
 
 // 发送消息到主线程
 function sendMessage(type: MessageType, id: string, payload: any): void {
-    self.postMessage({
+    workerSelf.postMessage({
         id,
         type,
         payload,
@@ -265,7 +267,7 @@ function cancelTask(message: WorkerMessage): void {
 }
 
 // 消息处理器
-self.onmessage = async (event: MessageEvent) => {
+workerSelf.onmessage = async (event: MessageEvent) => {
     const message = event.data as WorkerMessage;
 
     try {

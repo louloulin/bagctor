@@ -107,6 +107,10 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
     const containerRef = useRef<HTMLDivElement>(null);
     const [selectedNode, setSelectedNode] = useState<Node | null>(null);
     const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+    const [draggedNode, setDraggedNode] = useState<string | null>(null);
+    const [isDragging, setIsDragging] = useState(false);
+    const [positions, setPositions] = useState<Record<string, Position>>({});
+    const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
     const { theme } = useTheme();
     const isDarkMode = theme === 'dark';
 
@@ -174,6 +178,17 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
         return positions;
     };
 
+    // Initialize positions when nodes change
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        if (!canvas || !container) return;
+
+        const { width, height } = container.getBoundingClientRect();
+        const initialPositions = calculatePositions(nodes, width, height);
+        setPositions(initialPositions);
+    }, [nodes]);
+
     // Draw the visualization
     const drawVisualization = () => {
         const canvas = canvasRef.current;
@@ -192,8 +207,11 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
         ctx.fillStyle = colors.background;
         ctx.fillRect(0, 0, width, height);
 
-        // Calculate node positions
-        const positions = calculatePositions(nodes, width, height);
+        // Initialize positions if not set yet
+        if (Object.keys(positions).length === 0) {
+            const initialPositions = calculatePositions(nodes, width, height);
+            setPositions(initialPositions);
+        }
 
         // Draw connections
         ctx.lineWidth = 1;
@@ -226,14 +244,19 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
 
             const isHovered = hoveredNode === node.id;
             const isSelected = selectedNode?.id === node.id;
+            const isDragged = draggedNode === node.id;
 
             // Draw node circle
             ctx.beginPath();
             ctx.arc(pos.x, pos.y, nodeRadius, 0, 2 * Math.PI);
-            ctx.fillStyle = colors[node.type].fill;
+            ctx.fillStyle = isDragged
+                ? `${colors[node.type].fill.split(')')[0]}, 0.3)`
+                : colors[node.type].fill;
             ctx.fill();
-            ctx.lineWidth = isHovered || isSelected ? 3 : 2;
-            ctx.strokeStyle = colors[node.type].stroke;
+            ctx.lineWidth = isHovered || isSelected || isDragged ? 3 : 2;
+            ctx.strokeStyle = isDragged
+                ? 'rgba(99, 102, 241, 0.8)' // Dragged node highlight color
+                : colors[node.type].stroke;
             ctx.stroke();
 
             // Draw status indicator
@@ -268,15 +291,13 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
 
         // Check if clicked on a node
         for (const node of nodes) {
-            const pos = node.position;
-            const radius = node.radius;
+            const pos = positions[node.id];
+            if (!pos) continue;
 
-            if (pos && radius) {
-                const distance = Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(y - pos.y, 2));
-                if (distance <= radius) {
-                    setSelectedNode(node);
-                    return;
-                }
+            const distance = Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(y - pos.y, 2));
+            if (distance <= (node.radius || 30)) {
+                setSelectedNode(node);
+                return;
             }
         }
 
@@ -284,8 +305,8 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
         setSelectedNode(null);
     };
 
-    // Handle canvas mouse move event
-    const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Handle mouse down for drag start
+    const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
@@ -293,23 +314,90 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        // Check if hovering over a node
-        let hovered = null;
+        // Check if clicked on a node to start dragging
         for (const node of nodes) {
-            const pos = node.position;
-            const radius = node.radius;
+            const pos = positions[node.id];
+            if (!pos) continue;
 
-            if (pos && radius) {
+            const distance = Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(y - pos.y, 2));
+            if (distance <= (node.radius || 30)) {
+                setDraggedNode(node.id);
+                setIsDragging(true);
+                setDragOffset({
+                    x: pos.x - x,
+                    y: pos.y - y
+                });
+                return;
+            }
+        }
+    };
+
+    // Handle mouse move for dragging
+    const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // Update node position during drag
+        if (isDragging && draggedNode) {
+            setPositions(prev => ({
+                ...prev,
+                [draggedNode]: {
+                    x: x + dragOffset.x,
+                    y: y + dragOffset.y
+                }
+            }));
+        }
+
+        // Handle hover state
+        if (!isDragging) {
+            let hovered = null;
+            for (const node of nodes) {
+                const pos = positions[node.id];
+                if (!pos) continue;
+
                 const distance = Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(y - pos.y, 2));
-                if (distance <= radius) {
+                if (distance <= (node.radius || 30)) {
                     hovered = node.id;
                     break;
                 }
             }
-        }
 
-        setHoveredNode(hovered);
-        canvas.style.cursor = hovered ? 'pointer' : 'default';
+            setHoveredNode(hovered);
+            canvas.style.cursor = hovered ? 'grab' : 'default';
+        } else {
+            canvas.style.cursor = 'grabbing';
+        }
+    };
+
+    // Handle mouse up to end dragging
+    const handleMouseUp = () => {
+        if (isDragging) {
+            setIsDragging(false);
+            setDraggedNode(null);
+        }
+    };
+
+    // Handle mouse leave to cancel dragging
+    const handleMouseLeave = () => {
+        if (isDragging) {
+            setIsDragging(false);
+            setDraggedNode(null);
+        }
+    };
+
+    // Reset node positions
+    const resetPositions = () => {
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        if (!canvas || !container) return;
+
+        const { width, height } = container.getBoundingClientRect();
+        const initialPositions = calculatePositions(nodes, width, height);
+        setPositions(initialPositions);
     };
 
     // Redraw on window resize, theme change, or nodes update
@@ -324,7 +412,7 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
         return () => {
             window.removeEventListener('resize', handleResize);
         };
-    }, [nodes, theme, hoveredNode, selectedNode]);
+    }, [nodes, theme, hoveredNode, selectedNode, positions, draggedNode, isDragging]);
 
     return (
         <div className="modern-card h-[600px] p-4">
@@ -332,7 +420,12 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
                 <h3 className="text-lg font-semibold text-card-foreground">Bagctor Cluster Visualization</h3>
                 <div className="flex space-x-2">
                     <button className="btn btn-sm btn-outline">Refresh</button>
-                    <button className="btn btn-sm btn-outline">Reset View</button>
+                    <button
+                        className="btn btn-sm btn-outline"
+                        onClick={resetPositions}
+                    >
+                        Reset View
+                    </button>
                 </div>
             </div>
 
@@ -353,75 +446,85 @@ const ClusterVisualization: React.FC<ClusterVisualizationProps> = ({
                         <canvas
                             ref={canvasRef}
                             onClick={handleCanvasClick}
-                            onMouseMove={handleCanvasMouseMove}
+                            onMouseDown={handleMouseDown}
+                            onMouseMove={handleMouseMove}
+                            onMouseUp={handleMouseUp}
+                            onMouseLeave={handleMouseLeave}
                             className="w-full h-full"
                         />
+                        {isDragging && (
+                            <div className="absolute bottom-4 left-4 bg-background/90 p-2 rounded-md text-sm text-muted-foreground shadow-sm border border-border">
+                                Dragging node...
+                            </div>
+                        )}
                     </div>
 
                     {selectedNode && (
-                        <div className="w-64 ml-4 p-4 rounded-lg border border-border bg-card">
-                            <div className="flex items-center mb-3">
-                                <div className={`w-3 h-3 rounded-full mr-2 bg-${colors.status[selectedNode.status]}`}></div>
-                                <h4 className="font-medium">{selectedNode.name}</h4>
+                        <div className="w-72 ml-4 p-4 border border-border rounded-lg bg-card text-card-foreground overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-medium">{selectedNode.name}</h3>
+                                <div className={`px-2 py-1 text-xs rounded-full ${selectedNode.status === 'healthy' ? 'bg-success-100 text-success-800 dark:bg-success-900/20 dark:text-success-300' :
+                                    selectedNode.status === 'degraded' ? 'bg-warning-100 text-warning-800 dark:bg-warning-900/20 dark:text-warning-300' :
+                                        'bg-danger-100 text-danger-800 dark:bg-danger-900/20 dark:text-danger-300'
+                                    }`}>
+                                    {selectedNode.status}
+                                </div>
                             </div>
-                            <div className="space-y-3 text-sm">
+
+                            <div className="space-y-3">
                                 <div>
-                                    <span className="text-muted-foreground">Type:</span>
+                                    <span className="text-sm text-muted-foreground">Type:</span>
                                     <span className="ml-2 capitalize">{selectedNode.type}</span>
                                 </div>
                                 <div>
-                                    <span className="text-muted-foreground">IP Address:</span>
+                                    <span className="text-sm text-muted-foreground">IP Address:</span>
                                     <span className="ml-2">{selectedNode.ip}</span>
                                 </div>
                                 <div>
-                                    <span className="text-muted-foreground">Status:</span>
-                                    <span className={`ml-2 capitalize ${selectedNode.status === 'healthy' ? 'text-success-500' :
-                                        selectedNode.status === 'degraded' ? 'text-warning-500' :
-                                            'text-destructive'
-                                        }`}>
-                                        {selectedNode.status}
-                                    </span>
-                                </div>
-                                <div>
-                                    <span className="text-muted-foreground">Connections:</span>
+                                    <span className="text-sm text-muted-foreground">Connections:</span>
                                     <span className="ml-2">{selectedNode.connections.length}</span>
                                 </div>
 
-                                <div className="pt-2">
-                                    <div className="mb-1 flex justify-between">
-                                        <span className="text-xs text-muted-foreground">CPU Usage</span>
-                                        <span className="text-xs">{selectedNode.metrics.cpu}%</span>
+                                <div className="pt-2 border-t border-border">
+                                    <h4 className="text-sm font-medium mb-2">Metrics</h4>
+                                    <div className="space-y-2">
+                                        <div>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span>CPU Usage</span>
+                                                <span>{selectedNode.metrics.cpu}%</span>
+                                            </div>
+                                            <div className="w-full bg-muted rounded-full h-1.5">
+                                                <div
+                                                    className="bg-primary h-1.5 rounded-full"
+                                                    style={{ width: `${selectedNode.metrics.cpu}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span>Memory Usage</span>
+                                                <span>{selectedNode.metrics.memory}%</span>
+                                            </div>
+                                            <div className="w-full bg-muted rounded-full h-1.5">
+                                                <div
+                                                    className="bg-secondary h-1.5 rounded-full"
+                                                    style={{ width: `${selectedNode.metrics.memory}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span>Message Rate</span>
+                                                <span>{selectedNode.metrics.messageRate}/s</span>
+                                            </div>
+                                            <div className="w-full bg-muted rounded-full h-1.5">
+                                                <div
+                                                    className="bg-success h-1.5 rounded-full"
+                                                    style={{ width: `${Math.min(selectedNode.metrics.messageRate / 2, 100)}%` }}
+                                                ></div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="progress-bar">
-                                        <div
-                                            className="progress-bar-fill bg-primary"
-                                            style={{ width: `${selectedNode.metrics.cpu}%` }}
-                                        ></div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <div className="mb-1 flex justify-between">
-                                        <span className="text-xs text-muted-foreground">Memory Usage</span>
-                                        <span className="text-xs">{selectedNode.metrics.memory}%</span>
-                                    </div>
-                                    <div className="progress-bar">
-                                        <div
-                                            className="progress-bar-fill bg-secondary"
-                                            style={{ width: `${selectedNode.metrics.memory}%` }}
-                                        ></div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <div className="mb-1 flex justify-between">
-                                        <span className="text-xs text-muted-foreground">Message Rate</span>
-                                        <span className="text-xs">{selectedNode.metrics.messageRate}/s</span>
-                                    </div>
-                                </div>
-
-                                <div className="pt-2">
-                                    <button className="btn btn-sm btn-primary w-full">View Details</button>
                                 </div>
                             </div>
                         </div>

@@ -165,13 +165,16 @@ Based on the Bactor Improvement Plan, we need to enhance the dashboard to suppor
    - Implemented status indicators for node health
    - Added performance metrics display for selected nodes
    - Created topology view with different node types
+   - Added drag-and-drop functionality for node arrangement ✓
 
 5. **Advanced Alerting**
    - Implemented alert rules configuration UI with form validation
-   - Created notification channel management with multiple types (email, Slack, PagerDuty)
+   - Created notification channel management with multiple types (email, Slack, PagerDuty, Webhook, Microsoft Teams, Telegram) ✓
    - Added severity level filtering and management
    - Implemented rule enable/disable functionality
    - Created mock alert data for testing
+   - Enhanced alert history visualization with timeline charts ✓
+   - Added time range selection for alert history ✓
 
 6. **Real-time Updates**
    - Added WebSocket support for real-time data streaming
@@ -183,15 +186,15 @@ Based on the Bactor Improvement Plan, we need to enhance the dashboard to suppor
 
 1. **Immediate Actions**
    - Connect to actual metrics collectors from the Bactor system
-   - Implement real-time updates via WebSockets for production
+   - Implement secure authentication for API endpoints
    - Add exportable reports functionality
    - Extend monitoring to include more detailed network metrics
 
 2. **Technical Requirements**
-   - Set up authentication for API requests
-   - Implement real-time data streaming from actual sources
-   - Add exportable reports functionality
-   - Extend monitoring to include more detailed network metrics
+   - Set up secure WebSocket connections for production
+   - Implement authentication for API requests
+   - Add persistent alert storage
+   - Create exportable report generation
 
 ## Technical Specifications
 

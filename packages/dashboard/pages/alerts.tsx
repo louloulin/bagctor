@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Layout from '../components/layout/Layout';
+import AlertHistoryChart from '../components/alert/AlertHistoryChart';
 
 // 模拟告警数据
 const mockAlerts = [
@@ -89,6 +90,8 @@ const AlertsPage: React.FC = () => {
     const [showResolved, setShowResolved] = useState(false);
     const [severityFilter, setSeverityFilter] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
+    const [historyTimeRange, setHistoryTimeRange] = useState<'24h' | '7d' | '30d'>('7d');
+    const [showHistory, setShowHistory] = useState(true);
 
     // 格式化时间为相对时间
     const formatRelativeTime = (date: Date) => {
@@ -164,190 +167,289 @@ const AlertsPage: React.FC = () => {
     );
 
     return (
-        <Layout title="Alerts - Bagctor Monitoring Dashboard">
-            <div className="mb-6">
+        <Layout title="Alerts - Bagctor Monitoring">
+            <div className="mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-3 sm:mb-0">Alerts</h1>
+                <div className="flex items-center space-x-2">
+                    <button
+                        className="btn btn-primary"
+                        onClick={() => window.location.href = '/alert-rules'}
+                    >
+                        Manage Alert Rules
+                    </button>
+                </div>
+            </div>
+
+            {/* Alert History Chart */}
+            <div className={`card mb-6 ${showHistory ? '' : 'hidden'}`}>
                 <div className="flex justify-between items-center mb-4">
-                    <h1 className="text-2xl font-bold text-gray-900">Alerts</h1>
-                    <div className="flex items-center space-x-2">
-                        <button className="btn btn-primary">
-                            + New Alert Rule
+                    <h2 className="text-lg font-medium">Alert History</h2>
+                    <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-2">
+                            <label htmlFor="show-resolved-history" className="text-sm">
+                                Show Resolved
+                            </label>
+                            <input
+                                id="show-resolved-history"
+                                type="checkbox"
+                                className="h-4 w-4 text-primary border-gray-300 rounded focus:ring-primary"
+                                checked={showResolved}
+                                onChange={(e) => setShowResolved(e.target.checked)}
+                            />
+                        </div>
+                        <select
+                            className="border border-gray-300 rounded-md text-sm py-1 pl-2 pr-8 bg-white dark:bg-gray-800 focus:outline-none focus:ring-primary focus:border-primary"
+                            value={historyTimeRange}
+                            onChange={(e) => setHistoryTimeRange(e.target.value as '24h' | '7d' | '30d')}
+                        >
+                            <option value="24h">Last 24 hours</option>
+                            <option value="7d">Last 7 days</option>
+                            <option value="30d">Last 30 days</option>
+                        </select>
+                        <button
+                            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                            onClick={() => setShowHistory(false)}
+                        >
+                            <svg
+                                className="h-5 w-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M6 18L18 6M6 6l12 12"
+                                />
+                            </svg>
                         </button>
                     </div>
                 </div>
+                <div className="h-80">
+                    <AlertHistoryChart
+                        timeRange={historyTimeRange}
+                        showResolved={showResolved}
+                        height="100%"
+                    />
+                </div>
+            </div>
 
-                {/* 过滤控件 */}
-                <div className="bg-white p-4 rounded-lg shadow mb-6">
-                    <div className="flex flex-wrap items-center gap-4">
-                        <div className="flex-1 min-w-[240px]">
-                            <label htmlFor="search" className="sr-only">Search alerts</label>
+            {/* Alert Filter Controls */}
+            <div className="card mb-6">
+                <div className="p-4">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+                        <div className="mb-4 md:mb-0">
+                            <h2 className="text-lg font-medium mb-2">Active Alerts</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {filteredAlerts.length} alerts matching your filters
+                            </p>
+                        </div>
+
+                        {!showHistory && (
+                            <button
+                                className="btn btn-outline text-sm mb-4 md:mb-0"
+                                onClick={() => setShowHistory(true)}
+                            >
+                                <svg
+                                    className="h-4 w-4 mr-1"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                                    />
+                                </svg>
+                                Show History Chart
+                            </button>
+                        )}
+
+                        <div className="flex flex-col space-y-2 md:space-y-0 md:flex-row md:space-x-4">
                             <div className="relative">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                    </svg>
-                                </div>
                                 <input
                                     type="text"
-                                    id="search"
-                                    className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md text-sm placeholder-gray-500 focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                                    placeholder="Search alerts"
+                                    className="border border-gray-300 rounded-md w-full md:w-64 pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+                                    placeholder="Search alerts..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                 />
+                                <div className="absolute left-3 top-2.5 text-gray-400">
+                                    <svg
+                                        className="h-4 w-4"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                                        />
+                                    </svg>
+                                </div>
                             </div>
                         </div>
+                    </div>
 
-                        <div className="flex items-center space-x-4">
-                            <div className="flex items-center">
-                                <input
-                                    id="critical"
-                                    type="checkbox"
-                                    className="h-4 w-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
-                                    checked={severityFilter.includes('critical')}
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            setSeverityFilter([...severityFilter, 'critical']);
-                                        } else {
-                                            setSeverityFilter(severityFilter.filter(s => s !== 'critical'));
-                                        }
-                                    }}
-                                />
-                                <label htmlFor="critical" className="ml-2 text-sm flex items-center">
-                                    <span className="inline-block w-3 h-3 bg-danger-500 rounded-full mr-1"></span>
-                                    Critical
-                                </label>
-                            </div>
-                            <div className="flex items-center">
-                                <input
-                                    id="error"
-                                    type="checkbox"
-                                    className="h-4 w-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
-                                    checked={severityFilter.includes('error')}
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            setSeverityFilter([...severityFilter, 'error']);
-                                        } else {
-                                            setSeverityFilter(severityFilter.filter(s => s !== 'error'));
-                                        }
-                                    }}
-                                />
-                                <label htmlFor="error" className="ml-2 text-sm flex items-center">
-                                    <span className="inline-block w-3 h-3 bg-danger-400 rounded-full mr-1"></span>
-                                    Error
-                                </label>
-                            </div>
-                            <div className="flex items-center">
-                                <input
-                                    id="warning"
-                                    type="checkbox"
-                                    className="h-4 w-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
-                                    checked={severityFilter.includes('warning')}
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            setSeverityFilter([...severityFilter, 'warning']);
-                                        } else {
-                                            setSeverityFilter(severityFilter.filter(s => s !== 'warning'));
-                                        }
-                                    }}
-                                />
-                                <label htmlFor="warning" className="ml-2 text-sm flex items-center">
-                                    <span className="inline-block w-3 h-3 bg-warning-400 rounded-full mr-1"></span>
-                                    Warning
-                                </label>
-                            </div>
+                    <div className="mt-4 flex flex-wrap gap-x-6 gap-y-3">
+                        <div className="flex items-center">
+                            <input
+                                id="critical"
+                                type="checkbox"
+                                className="h-4 w-4 text-primary border-gray-300 rounded focus:ring-primary"
+                                checked={severityFilter.includes('critical')}
+                                onChange={(e) => {
+                                    if (e.target.checked) {
+                                        setSeverityFilter([...severityFilter, 'critical']);
+                                    } else {
+                                        setSeverityFilter(severityFilter.filter(s => s !== 'critical'));
+                                    }
+                                }}
+                            />
+                            <label htmlFor="critical" className="ml-2 text-sm flex items-center">
+                                <span className="inline-block w-3 h-3 bg-danger-500 rounded-full mr-1"></span>
+                                Critical
+                            </label>
+                        </div>
+
+                        <div className="flex items-center">
+                            <input
+                                id="error"
+                                type="checkbox"
+                                className="h-4 w-4 text-primary border-gray-300 rounded focus:ring-primary"
+                                checked={severityFilter.includes('error')}
+                                onChange={(e) => {
+                                    if (e.target.checked) {
+                                        setSeverityFilter([...severityFilter, 'error']);
+                                    } else {
+                                        setSeverityFilter(severityFilter.filter(s => s !== 'error'));
+                                    }
+                                }}
+                            />
+                            <label htmlFor="error" className="ml-2 text-sm flex items-center">
+                                <span className="inline-block w-3 h-3 bg-danger-400 rounded-full mr-1"></span>
+                                Error
+                            </label>
+                        </div>
+
+                        <div className="flex items-center">
+                            <input
+                                id="warning"
+                                type="checkbox"
+                                className="h-4 w-4 text-primary border-gray-300 rounded focus:ring-primary"
+                                checked={severityFilter.includes('warning')}
+                                onChange={(e) => {
+                                    if (e.target.checked) {
+                                        setSeverityFilter([...severityFilter, 'warning']);
+                                    } else {
+                                        setSeverityFilter(severityFilter.filter(s => s !== 'warning'));
+                                    }
+                                }}
+                            />
+                            <label htmlFor="warning" className="ml-2 text-sm flex items-center">
+                                <span className="inline-block w-3 h-3 bg-warning-400 rounded-full mr-1"></span>
+                                Warning
+                            </label>
                         </div>
 
                         <div className="flex items-center">
                             <input
                                 id="show-resolved"
                                 type="checkbox"
-                                className="h-4 w-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
+                                className="h-4 w-4 text-primary border-gray-300 rounded focus:ring-primary"
                                 checked={showResolved}
                                 onChange={(e) => setShowResolved(e.target.checked)}
                             />
-                            <label htmlFor="show-resolved" className="ml-2 text-sm text-gray-700">
+                            <label htmlFor="show-resolved" className="ml-2 text-sm text-gray-700 dark:text-gray-300">
                                 Show resolved
                             </label>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                {/* 告警列表 */}
-                {filteredAlerts.length === 0 ? (
-                    <div className="bg-white rounded-lg shadow p-6 text-center">
-                        <svg
-                            className="mx-auto h-12 w-12 text-gray-400"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={1.5}
-                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                        </svg>
-                        <h3 className="mt-2 text-sm font-medium text-gray-900">No alerts</h3>
-                        <p className="mt-1 text-sm text-gray-500">No alerts matching your current filters.</p>
-                    </div>
-                ) : (
-                    <div className="space-y-6">
-                        {sortedSeverities.map(severity => (
-                            <div key={severity} className="bg-white rounded-lg shadow overflow-hidden">
-                                <div className={`px-4 py-3 ${severity === 'critical' ? 'bg-danger-50 text-danger-700' :
-                                        severity === 'error' ? 'bg-danger-50 text-danger-600' :
-                                            severity === 'warning' ? 'bg-warning-50 text-warning-700' :
-                                                'bg-primary-50 text-primary-700'
-                                    }`}>
-                                    <h2 className="text-lg font-medium capitalize">
-                                        {severity} Alerts ({groupedAlerts[severity].length})
-                                    </h2>
-                                </div>
-                                <div className="divide-y divide-gray-200">
-                                    {groupedAlerts[severity].map(alert => (
-                                        <div key={alert.id} className="p-4 hover:bg-gray-50">
-                                            <div className="flex items-center justify-between">
-                                                <h3 className="text-lg font-medium text-gray-900">{alert.name}</h3>
-                                                <div className="flex items-center">
-                                                    <span className={`px-2 py-1 text-xs rounded-full ${alert.state === 'firing' ? 'bg-danger-100 text-danger-800' : 'bg-success-100 text-success-800'
-                                                        }`}>
-                                                        {alert.state}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <p className="mt-1 text-sm text-gray-600">{alert.description}</p>
-                                            <div className="mt-3 flex flex-wrap items-center text-sm text-gray-500 gap-x-4 gap-y-2">
-                                                <div>
-                                                    <span className="font-medium">Started:</span> {formatRelativeTime(alert.startsAt)}
-                                                </div>
-                                                {alert.endsAt && (
-                                                    <div>
-                                                        <span className="font-medium">Resolved:</span> {formatRelativeTime(alert.endsAt)}
-                                                    </div>
-                                                )}
-                                                <div>
-                                                    <span className="font-medium">Duration:</span> {getAlertDuration(alert)}
-                                                </div>
-                                                <div>
-                                                    <span className="font-medium">Metric:</span> {alert.metricName} = {alert.metricValue}
-                                                </div>
-                                            </div>
-                                            <div className="mt-2 flex flex-wrap gap-2">
-                                                {Object.entries(alert.labels).map(([key, value]) => (
-                                                    <span key={key} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                                        {key}: {value}
-                                                    </span>
-                                                ))}
+            {/* Alert List */}
+            {filteredAlerts.length === 0 ? (
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden p-6 text-center">
+                    <svg
+                        className="h-12 w-12 text-gray-400 mx-auto mb-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                    >
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                    </svg>
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-1">No alerts found</h3>
+                    <p className="text-gray-500 dark:text-gray-400">
+                        No alerts match your current filters. Try changing your search or filter settings.
+                    </p>
+                </div>
+            ) : (
+                <div className="space-y-6">
+                    {sortedSeverities.map(severity => (
+                        <div key={severity} className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+                            <div className={`px-4 py-3 ${severity === 'critical' ? 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300' :
+                                severity === 'error' ? 'bg-danger-50 text-danger-600 dark:bg-danger-900/20 dark:text-danger-400' :
+                                    severity === 'warning' ? 'bg-warning-50 text-warning-700 dark:bg-warning-900/20 dark:text-warning-300' :
+                                        'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300'
+                                }`}>
+                                <h2 className="text-lg font-medium capitalize">
+                                    {severity} Alerts ({groupedAlerts[severity].length})
+                                </h2>
+                            </div>
+                            <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                                {groupedAlerts[severity].map(alert => (
+                                    <div key={alert.id} className="p-4 hover:bg-gray-50">
+                                        <div className="flex items-center justify-between">
+                                            <h3 className="text-lg font-medium text-gray-900">{alert.name}</h3>
+                                            <div className="flex items-center">
+                                                <span className={`px-2 py-1 text-xs rounded-full ${alert.state === 'firing' ? 'bg-danger-100 text-danger-800' : 'bg-success-100 text-success-800'
+                                                    }`}>
+                                                    {alert.state}
+                                                </span>
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
+                                        <p className="mt-1 text-sm text-gray-600">{alert.description}</p>
+                                        <div className="mt-3 flex flex-wrap items-center text-sm text-gray-500 gap-x-4 gap-y-2">
+                                            <div>
+                                                <span className="font-medium">Started:</span> {formatRelativeTime(alert.startsAt)}
+                                            </div>
+                                            {alert.endsAt && (
+                                                <div>
+                                                    <span className="font-medium">Resolved:</span> {formatRelativeTime(alert.endsAt)}
+                                                </div>
+                                            )}
+                                            <div>
+                                                <span className="font-medium">Duration:</span> {getAlertDuration(alert)}
+                                            </div>
+                                            <div>
+                                                <span className="font-medium">Metric:</span> {alert.metricName} = {alert.metricValue}
+                                            </div>
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {Object.entries(alert.labels).map(([key, value]) => (
+                                                <span key={key} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                                    {key}: {value}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-                        ))}
-                    </div>
-                )}
-            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
         </Layout>
     );
 };

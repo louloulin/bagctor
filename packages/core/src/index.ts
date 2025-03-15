@@ -2,7 +2,8 @@
 export { Actor } from './core/actor';
 export { ActorContext } from './core/context';
 export { ActorSystem } from './core/system';
-export { Message, PID, Props, Behavior, BehaviorMap, SupervisorDirective, SupervisorStrategy, DefaultSupervisorStrategy, createMessage, ActorState } from './core/types';
+export { SupervisorDirective, DefaultSupervisorStrategy, createMessage } from './core/types';
+export type { Message, PID, Behavior, BehaviorMap, Props, SupervisorStrategy } from './core/types';
 export { PropsBuilder } from './core/props';
 export { DefaultMailbox, PriorityMailbox } from './core/mailbox';
 export { DefaultDispatcher, ThreadPoolDispatcher, ThroughputDispatcher } from './core/dispatcher';
@@ -19,12 +20,17 @@ export { behavior, messageHandler, initialState } from './core/decorators';
 export { log, configureLogger, createLogger, trace } from './utils/logger';
 export type { LoggerConfig } from './utils/logger';
 
+// Testing & Debugging
+export type { ActorState, MessageTrace } from './testing/debug/debugger';
+
 // Messaging
 export * from './core/messaging/types';
 export * from './core/messaging/delivery_tracker';
 export * from './core/messaging/memory_message_store';
-export { MessagePipeline, MessagePipelineConfig, MessageTarget, LocalActorTarget, RemoteActorTarget } from './core/messaging/pipeline';
-export { MessageMiddleware, MiddlewareChain, LoggingMiddleware, MetricsMiddleware, RetryMiddleware } from './core/messaging/middleware';
+export { MessagePipeline, LocalActorTarget, RemoteActorTarget } from './core/messaging/pipeline';
+export type { MessageTarget, MessagePipelineConfig } from './core/messaging/pipeline';
+export { MiddlewareChain, LoggingMiddleware, MetricsMiddleware, RetryMiddleware } from './core/messaging/middleware';
+export type { MessageMiddleware } from './core/messaging/middleware';
 
 // Memory Pool Management
 export {

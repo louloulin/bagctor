@@ -111,7 +111,7 @@ export class ActorContext implements IActorContext, MessageInvoker {
 
   async handleFailure(child: PID, error: Error): Promise<void> {
     if (this.supervisorStrategy) {
-      const directive = this.supervisorStrategy.handleFailure(this, child, error);
+      const directive = this.supervisorStrategy.handleError(error, child, 0);
       await this.handleSupervisorDirective(child, directive, error);
     } else if (this.parent) {
       // Escalate to parent if no supervisor strategy

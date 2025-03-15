@@ -2,23 +2,26 @@ import { Message, PID, Props } from './types';
 import { ActorContext } from './context';
 
 /**
- * Actor基类 - 优化版本
+ * Actor基类 - 类型安全版本
  * 提供消息处理、状态管理和行为转换的基础设施
+ * @template TState 状态类型
+ * @template TMessage 消息类型，必须扩展基础Message接口
  */
-export abstract class Actor {
+export abstract class Actor<TState = any, TMessage extends Message = Message> {
   protected context: ActorContext;
   // 当前行为名称
   protected behaviorState: string = 'default';
   // 用于存储Actor业务数据的状态对象
-  protected stateData: Record<string, any> = {};
+  protected state: TState;
   // 行为映射表
-  protected behaviorMap: Map<string, (message: Message) => Promise<any> | any> = new Map();
+  protected behaviorMap: Map<string, (message: TMessage) => Promise<any> | any> = new Map();
   // 缓存当前行为处理函数以提高性能
-  private cachedBehavior: ((message: Message) => Promise<any> | any) | null = null;
+  private cachedBehavior: ((message: TMessage) => Promise<any> | any) | null = null;
   private cachedBehaviorState: string | null = null;
 
-  constructor(context: ActorContext) {
+  constructor(context: ActorContext, initialState?: TState) {
     this.context = context;
+    this.state = initialState || {} as TState;
     this.behaviors();
   }
 
@@ -29,16 +32,19 @@ export abstract class Actor {
 
   /**
    * 添加行为处理函数
+   * @param state 行为状态名称
+   * @param handler 处理该状态下的消息的函数
    */
   protected addBehavior(
     state: string,
-    handler: (message: Message) => Promise<any> | any
+    handler: (message: TMessage) => Promise<any> | any
   ): void {
     this.behaviorMap.set(state, handler);
   }
 
   /**
    * 转换Actor状态，更改当前行为
+   * @param state 要切换到的行为状态名称
    */
   protected become(state: string): void {
     if (!this.behaviorMap.has(state)) {
@@ -52,8 +58,10 @@ export abstract class Actor {
   /**
    * Actor消息接收入口方法
    * 优化版：使用缓存减少行为查找开销，支持响应处理
+   * @param message 要处理的消息
+   * @returns 消息处理的结果
    */
-  async receive(message: Message): Promise<any> {
+  async receive(message: TMessage): Promise<any> {
     // 使用缓存优化行为查找
     if (this.cachedBehaviorState !== this.behaviorState || this.cachedBehavior === null) {
       this.cachedBehavior = this.behaviorMap.get(this.behaviorState) || null;
@@ -94,56 +102,92 @@ export abstract class Actor {
     }
   }
 
+  /**
+   * 向另一个Actor发送消息
+   * @param target 目标Actor的PID
+   * @param message 要发送的消息
+   */
   protected async send(target: PID, message: Message): Promise<void> {
     await this.context.send(target, message);
   }
 
+  /**
+   * 创建子Actor
+   * @param props Actor的属性定义
+   * @returns 创建的Actor的PID
+   */
   protected async spawn(props: Props): Promise<PID> {
     return await this.context.spawn(props);
   }
 
   // 生命周期方法
+  /**
+   * Actor启动前调用
+   */
   async preStart(): Promise<void> {
     // 初始化actor状态
   }
 
+  /**
+   * Actor停止后调用
+   */
   async postStop(): Promise<void> {
     // 清理actor状态
   }
 
+  /**
+   * Actor重启前调用
+   * @param reason 重启原因
+   */
   async preRestart(reason: Error): Promise<void> {
     await this.postStop();
   }
 
+  /**
+   * Actor重启后调用
+   * @param reason 重启原因
+   */
   async postRestart(reason: Error): Promise<void> {
     await this.preStart();
   }
 
-  // 状态管理 - 兼容旧的API但使用新的实现
-  protected setState(data: any): void {
-    this.stateData = { ...this.stateData, ...data };
+  /**
+   * 更新状态数据
+   * @param newStateData 新的状态数据，将与现有状态合并
+   */
+  protected setState(newStateData: Partial<TState>): void {
+    this.state = { ...this.state, ...newStateData };
   }
 
-  protected getState(): any {
-    return this.stateData;
+  /**
+   * 获取当前状态数据
+   * @returns 当前状态数据
+   */
+  protected getState(): TState {
+    return this.state;
   }
 
-  // 提供访问器以保持API兼容性，供旧测试和代码使用
-  get state() {
+  /**
+   * 获取完整的Actor状态，包括行为状态和数据状态
+   */
+  get actorState() {
     return {
       behavior: this.behaviorState,
-      data: this.stateData
+      data: this.state
     };
   }
 
-  set state(newState: { behavior: string, data: any }) {
+  /**
+   * 设置完整的Actor状态，包括行为状态和数据状态
+   */
+  set actorState(newState: { behavior: string, data: Partial<TState> }) {
     if (newState.behavior && this.behaviorMap.has(newState.behavior)) {
       this.behaviorState = newState.behavior;
       this.cachedBehavior = null;
       this.cachedBehaviorState = null;
     }
     if (newState.data) {
-      this.stateData = { ...this.stateData, ...newState.data };
+      this.setState(newState.data);
     }
   }
 } 

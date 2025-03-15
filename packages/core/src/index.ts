@@ -2,12 +2,18 @@
 export { Actor } from './core/actor';
 export { ActorContext } from './core/context';
 export { ActorSystem } from './core/system';
-export { Message, PID, Props } from './core/types';
+export { Message, PID, Props, Behavior, BehaviorMap, SupervisorDirective, SupervisorStrategy, DefaultSupervisorStrategy, createMessage, ActorState } from './core/types';
 export { PropsBuilder } from './core/props';
 export { DefaultMailbox, PriorityMailbox } from './core/mailbox';
 export { DefaultDispatcher, ThreadPoolDispatcher, ThroughputDispatcher } from './core/dispatcher';
 export type { RouterConfig, RouterType, IRouter } from './core/router';
 export { BroadcastRouter, RoundRobinRouter, RandomRouter, createRouter } from './core/router';
+
+// 新增的函数式API
+export { defineActor, match, ask, SupervisorStrategies } from './core/helpers';
+
+// 装饰器API
+export { behavior, messageHandler, initialState } from './core/decorators';
 
 // Utilities
 export { log, configureLogger, createLogger, trace } from './utils/logger';
@@ -17,6 +23,8 @@ export type { LoggerConfig } from './utils/logger';
 export * from './core/messaging/types';
 export * from './core/messaging/delivery_tracker';
 export * from './core/messaging/memory_message_store';
+export { MessagePipeline, MessagePipelineConfig, MessageTarget, LocalActorTarget, RemoteActorTarget } from './core/messaging/pipeline';
+export { MessageMiddleware, MiddlewareChain, LoggingMiddleware, MetricsMiddleware, RetryMiddleware } from './core/messaging/middleware';
 
 // Memory Pool Management
 export {

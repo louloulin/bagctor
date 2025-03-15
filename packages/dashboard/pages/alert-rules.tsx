@@ -131,7 +131,10 @@ type AlertRuleForm = {
     severity: string;
     enabled: boolean;
     notificationChannels: string[];
-    labels: Record<string, string>;
+    labels: {
+        environment: string;
+        service: string;
+    };
 };
 
 // 初始表单状态
@@ -145,7 +148,10 @@ const initialFormState: AlertRuleForm = {
     severity: 'warning',
     enabled: true,
     notificationChannels: [],
-    labels: {},
+    labels: {
+        environment: '',
+        service: ''
+    },
 };
 
 const AlertRulesPage: React.FC = () => {
@@ -191,13 +197,33 @@ const AlertRulesPage: React.FC = () => {
         if (editingRule) {
             // 更新现有规则
             setAlertRules(rules =>
-                rules.map(rule => (rule.id === editingRule.id ? { ...formState, id: rule.id } : rule))
+                rules.map(rule => {
+                    if (rule.id === editingRule.id) {
+                        // 确保labels有正确的结构
+                        const updatedLabels = {
+                            environment: formState.labels?.environment || '',
+                            service: formState.labels?.service || ''
+                        };
+
+                        return {
+                            ...formState,
+                            id: rule.id,
+                            labels: updatedLabels
+                        };
+                    }
+                    return rule;
+                })
             );
         } else {
             // 添加新规则
             const newRule = {
                 ...formState,
                 id: `rule-${Date.now()}`,
+                // 确保新规则的labels有正确的结构
+                labels: {
+                    environment: formState.labels.environment || '',
+                    service: formState.labels.service || ''
+                }
             };
             setAlertRules(rules => [...rules, newRule]);
         }
@@ -259,29 +285,64 @@ const AlertRulesPage: React.FC = () => {
 
     // 添加标签字段
     const addLabelField = () => {
-        setFormState(prev => {
-            const newLabels = { ...prev.labels, '': '' };
-            return { ...prev, labels: newLabels };
-        });
+        // 检查现有的labels状态
+        const hasEnvironment = !!formState.labels.environment;
+        const hasService = !!formState.labels.service;
+
+        // 如果两个字段都已存在，则不做任何操作
+        if (hasEnvironment && hasService) {
+            console.warn("Both environment and service labels already exist");
+            return;
+        }
+
+        // 添加缺失的字段
+        const updatedLabels = { ...formState.labels };
+        if (!hasEnvironment) {
+            updatedLabels.environment = '';
+        } else if (!hasService) {
+            updatedLabels.service = '';
+        }
+
+        updateFormField('labels', updatedLabels);
     };
 
     // 更新标签字段
     const updateLabelField = (oldKey: string, newKey: string, value: string) => {
-        setFormState(prev => {
-            const newLabels = { ...prev.labels };
-            delete newLabels[oldKey];
-            newLabels[newKey] = value;
-            return { ...prev, labels: newLabels };
-        });
+        if (newKey !== 'environment' && newKey !== 'service') {
+            console.warn('Only environment and service labels are supported');
+            return;
+        }
+
+        const updatedLabels = {
+            ...formState.labels,
+            [newKey]: value
+        };
+
+        // 如果更改了键名，需要保留另一个字段
+        if (oldKey !== newKey && (oldKey === 'environment' || oldKey === 'service')) {
+            // @ts-ignore - 临时忽略类型检查以处理动态键
+            delete updatedLabels[oldKey];
+        }
+
+        updateFormField('labels', updatedLabels as AlertRuleForm['labels']);
     };
 
     // 删除标签字段
     const removeLabelField = (key: string) => {
-        setFormState(prev => {
-            const newLabels = { ...prev.labels };
-            delete newLabels[key];
-            return { ...prev, labels: newLabels };
-        });
+        // 只允许删除environment或service
+        if (key !== 'environment' && key !== 'service') {
+            console.warn('Only environment and service labels can be removed');
+            return;
+        }
+
+        // 创建新的labels对象，将要删除的字段设为空字符串
+        // 由于类型定义要求必须有这些字段，我们不能完全删除它们
+        const updatedLabels = {
+            ...formState.labels,
+            [key]: ''
+        };
+
+        updateFormField('labels', updatedLabels);
     };
 
     return (

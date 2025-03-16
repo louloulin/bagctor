@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "types": [
+      "bun-types"
+    ]
+  },
+  "include": [
+    "src/**/*",
+    "src/middleware/**/*",
+    "test/**/*"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../common"
+    }
+  ]
+}

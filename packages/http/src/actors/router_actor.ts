@@ -39,14 +39,28 @@ export class RouterActor extends Actor {
             }
             else if (msg.type === 'router.handle') {
                 const request = msg.payload as HttpRequest;
-                const response = await this.handleRequest(request);
+                try {
+                    const response = await this.handleRequest(request);
+                    console.log(`[RouterActor] Handler response: ${response.status}`);
 
-                if (msg.sender) {
-                    await this.context.send(msg.sender, {
+                    // 直接返回响应，而不是发送异步消息
+                    return {
                         type: 'router.response',
                         payload: response,
                         sender: this.context.self
-                    });
+                    };
+                } catch (error) {
+                    console.error('[RouterActor] Error handling request:', error);
+                    // 返回错误响应
+                    return {
+                        type: 'router.response',
+                        payload: {
+                            status: 500,
+                            headers: new Headers({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({ error: 'Internal Server Error' })
+                        },
+                        sender: this.context.self
+                    };
                 }
             }
         });

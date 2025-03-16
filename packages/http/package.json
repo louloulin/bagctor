@@ -16,7 +16,12 @@
     "test": "bun test",
     "example:basic": "bun run src/examples/basic_server.ts",
     "example:middleware": "bun run src/examples/middleware_server.ts",
-    "clean": "rimraf dist tsconfig.tsbuildinfo"
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
+    "benchmark": "bun run src/performance/run_benchmark.ts",
+    "benchmark:full": "bun run src/performance/run_benchmark.ts full",
+    "benchmark:load": "bun run src/performance/run_benchmark.ts load",
+    "benchmark:data": "bun run src/performance/run_benchmark.ts data",
+    "benchmark:quick": "bun run src/performance/quick_benchmark.ts"
   },
   "dependencies": {
     "@bactor/core": "workspace:*",
@@ -25,7 +30,7 @@
   "devDependencies": {
     "@types/autocannon": "^7.12.6",
     "@types/node": "^20.10.5",
-    "autocannon": "^8.0.0",
+    "autocannon": "8.0.0",
     "bun-types": "latest",
     "typescript": "^5.3.3"
   },

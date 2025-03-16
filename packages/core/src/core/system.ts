@@ -307,14 +307,35 @@ export class ActorSystem {
   }
 
   async restart(pid: PID, reason: Error): Promise<void> {
+    console.log(`[SYSTEM DEBUG] restart method called for actor ${pid.id} with reason: ${reason.message}`);
     const actor = this.actors.get(pid.id);
     if (actor) {
+      console.log(`[SYSTEM DEBUG] Actor found with ID ${pid.id}. Actor type: ${actor.constructor.name}`);
       try {
+        // 直接调用actor的生命周期方法，而不是通过消息
+        console.log(`[SYSTEM DEBUG] Directly calling lifecycle methods for actor ${pid.id}`);
+
+        // 先调用preRestart，然后调用postRestart
+        console.log(`[SYSTEM DEBUG] Calling preRestart for actor ${pid.id}`);
         await actor.preRestart(reason);
+        console.log(`[SYSTEM DEBUG] preRestart completed for actor ${pid.id}`);
+
+        console.log(`[SYSTEM DEBUG] Calling postRestart for actor ${pid.id}`);
         await actor.postRestart(reason);
+        console.log(`[SYSTEM DEBUG] postRestart completed for actor ${pid.id}`);
+
+        // 验证重启计数是否更新
+        if ((actor as any).restartCount !== undefined) {
+          console.log(`[SYSTEM DEBUG] Actor ${pid.id} restart count after restart: ${(actor as any).restartCount}`);
+        }
+
+        console.log(`[SYSTEM DEBUG] Actor ${pid.id} restart completed successfully`);
       } catch (error) {
+        console.error(`[SYSTEM DEBUG] Error restarting actor ${pid.id}:`, error);
         await this.handleActorError(pid, error as Error);
       }
+    } else {
+      console.warn(`[SYSTEM DEBUG] Actor ${pid.id} not found for restart`);
     }
   }
 
@@ -327,27 +348,38 @@ export class ActorSystem {
 
   // 公开处理Actor错误方法，供Context调用
   async handleActorError(pid: PID, error: Error): Promise<void> {
+    console.log(`[SYSTEM DEBUG] handleActorError called for actor ${pid.id} with error: ${error.message}`);
     log.error(`Actor ${pid.id} encountered an error:`, error);
     const context = this.contexts.get(pid.id);
 
     if (!context) {
+      console.log(`[SYSTEM DEBUG] No context found for actor ${pid.id}`);
       return;
     }
 
     // Let the parent handle the failure according to its supervision strategy
     if (context.getParent()) {
+      console.log(`[SYSTEM DEBUG] Actor ${pid.id} has parent ${context.getParent()?.id}, sending failure message`);
       await this.send(context.getParent()!, {
         type: '$system.failure',
         payload: { child: pid, error }
       });
     } else {
       // Root actor - use default strategy (restart)
+      console.log(`[SYSTEM DEBUG] Actor ${pid.id} is a root actor, using default restart strategy`);
       await this.restart(pid, error);
     }
   }
 
   getActor(actorId: string): Actor | undefined {
     return this.actors.get(actorId);
+  }
+
+  /**
+   * 通过Actor ID获取ActorContext
+   */
+  getContext(actorId: string): ActorContext | undefined {
+    return this.contexts.get(actorId);
   }
 
   getActorClass(className: string): (new (context: ActorContext) => Actor) | undefined {

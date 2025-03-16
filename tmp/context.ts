@@ -121,58 +121,15 @@ export class ActorContext implements IActorContext, MessageInvoker {
   }
 
   async handleFailure(child: PID, error: Error): Promise<void> {
-    console.log(`[DEBUG][${this.pid.id}] handleFailure called for child ${child.id} with error: ${error.message}`);
-    console.log(`[DEBUG][${this.pid.id}] Full error: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
-    console.log(`[DEBUG][${this.pid.id}] Error stack: ${error.stack?.split('\n')[0] || 'No stack'}`);
-    console.log(`[DEBUG][${this.pid.id}] Child: ${JSON.stringify(child)}`);
-
     if (this.supervisorStrategy) {
-      console.log(`[DEBUG][${this.pid.id}] Supervisor strategy found: ${this.supervisorStrategy.constructor.name}`);
-
-      // Get restart count for the child (from ActorSystem)
-      const childActor = this.system.getActor(child.id);
-      const restartCount = (childActor as any)?.restartCount || 0;
-      console.log(`[DEBUG][${this.pid.id}] Current restart count for child ${child.id}: ${restartCount}`);
-
-      // Directly call the strategy's handleError method
-      try {
-        console.log(`[DEBUG][${this.pid.id}] About to call strategy.handleError with error: ${error.message}`);
-        const directive = this.supervisorStrategy.handleError(error, child, restartCount);
-        console.log(`[DEBUG][${this.pid.id}] Supervisor strategy returned directive: ${SupervisorDirective[directive]} (${directive})`);
-
-        // Check if this is an AllForOne strategy with restartAll property
-        const isAllForOne = !!(this.supervisorStrategy as any).restartAll;
-        console.log(`[DEBUG][${this.pid.id}] Is AllForOne strategy: ${isAllForOne}`);
-
-        if (isAllForOne && directive === SupervisorDirective.Restart) {
-          log.debug(`Using AllForOne strategy to restart all children of ${this.pid.id}`);
-          console.log(`[DEBUG][${this.pid.id}] Using AllForOne strategy to restart all children`);
-          // Apply directive to all children
-          const restartPromises = [];
-          for (const childPid of this.children.values()) {
-            console.log(`[DEBUG][${this.pid.id}] Adding restart promise for child ${childPid.id}`);
-            restartPromises.push(this.handleSupervisorDirective(childPid, directive, error));
-          }
-          await Promise.all(restartPromises);
-          console.log(`[DEBUG][${this.pid.id}] All children restart completed`);
-        } else {
-          // OneForOne strategy or other directive
-          console.log(`[DEBUG][${this.pid.id}] Using OneForOne or custom strategy for child ${child.id} with directive ${SupervisorDirective[directive]}`);
-          await this.handleSupervisorDirective(child, directive, error);
-          console.log(`[DEBUG][${this.pid.id}] Child ${child.id} directive handling completed`);
-        }
-      } catch (err) {
-        console.error(`[DEBUG][${this.pid.id}] Error calling supervisor strategy: ${err}`);
-        console.error(err);
-      }
+      const directive = this.supervisorStrategy.handleError(error, child, 0);
+      await this.handleSupervisorDirective(child, directive, error);
     } else if (this.parent) {
       // Escalate to parent if no supervisor strategy
-      console.log(`[DEBUG][${this.pid.id}] No supervisor strategy, escalating to parent ${this.parent.id}`);
       await this.system.send(this.parent, {
         type: '$system.failure',
         payload: { child, error }
       });
-      console.log(`[DEBUG][${this.pid.id}] Failure escalated to parent ${this.parent.id}`);
     }
   }
 
@@ -181,25 +138,17 @@ export class ActorContext implements IActorContext, MessageInvoker {
     directive: SupervisorDirective,
     error: Error
   ): Promise<void> {
-    console.log(`[DEBUG][${this.pid.id}] handleSupervisorDirective called for child ${child.id} with directive: ${SupervisorDirective[directive]}`);
-
     switch (directive) {
       case SupervisorDirective.Resume:
-        console.log(`[DEBUG][${this.pid.id}] Resuming child ${child.id}`);
         // Do nothing, let the actor continue
         break;
       case SupervisorDirective.Restart:
-        console.log(`[DEBUG][${this.pid.id}] Restarting child ${child.id}`);
-        console.log(`[DEBUG][${this.pid.id}] Calling system.restart for child ${child.id}...`);
         await this.system.restart(child, error);
-        console.log(`[DEBUG][${this.pid.id}] system.restart completed for child ${child.id}`);
         break;
       case SupervisorDirective.Stop:
-        console.log(`[DEBUG][${this.pid.id}] Stopping child ${child.id}`);
         await this.stop(child);
         break;
       case SupervisorDirective.Escalate:
-        console.log(`[DEBUG][${this.pid.id}] Escalating failure of child ${child.id}`);
         if (this.parent) {
           await this.system.send(this.parent, {
             type: '$system.failure',
@@ -212,29 +161,17 @@ export class ActorContext implements IActorContext, MessageInvoker {
 
   // 实现MessageInvoker接口
   async invokeSystemMessage(message: Message): Promise<void> {
-    console.log(`[CONTEXT DEBUG][${this.pid.id}] invokeSystemMessage called with message type: ${message.type}`);
     const actor = this.system.getActor(this.pid.id);
-    if (!actor) {
-      console.log(`[CONTEXT DEBUG][${this.pid.id}] No actor found for invokeSystemMessage`);
-      return;
-    }
+    if (!actor) return;
 
     // 处理系统消息
     if (message.type === '$system.restart') {
-      console.log(`Actor ${this.pid.id} processing restart message`);
       await actor.preRestart(message.payload?.reason);
       await actor.postRestart(message.payload?.reason);
-      console.log(`Actor ${this.pid.id} restart completed`);
     } else if (message.type === '$system.stop') {
-      console.log(`[CONTEXT DEBUG][${this.pid.id}] Processing stop message`);
       await actor.postStop();
     } else if (message.type === '$system.failure') {
-      console.log(`[CONTEXT DEBUG][${this.pid.id}] Processing failure message for child ${message.payload.child.id}`);
-      const childPid = message.payload.child;
-      const error = message.payload.error;
-      console.log(`[CONTEXT DEBUG][${this.pid.id}] About to call handleFailure for child ${childPid.id}`);
-      await this.handleFailure(childPid, error);
-      console.log(`[CONTEXT DEBUG][${this.pid.id}] handleFailure completed for child ${childPid.id}`);
+      await this.handleFailure(message.payload.child, message.payload.error);
     }
   }
 

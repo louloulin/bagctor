@@ -296,9 +296,34 @@ export const SupervisorStrategies = {
   allForOne: (maxRestarts: number, withinTimeWindow: number) => 
     new AllForOneSupervisorStrategy(maxRestarts, withinTimeWindow),
     
-  custom: (handler: (error: Error, childPID: PID, restartCount: number) => SupervisorDirective) => 
-    ({ handleError: handler } as SupervisorStrategy)
+  custom: (handler: (error: Error, childPID: PID, restartCount: number) => SupervisorDirective,
+         options?: { restartAll?: boolean, errorClassifiers?: ErrorClassifier[] }) => 
+    new CustomSupervisorStrategy(handler, options),
+
+  /**
+   * 创建错误分类器 ✅ 已实现
+   * 用于精细化控制不同类型错误的处理方式
+   */
+  createErrorClassifier: (
+    name: string,
+    matchFn: (error: Error) => boolean,
+    directive: SupervisorDirective
+  ): ErrorClassifier => ({
+    name,
+    matches: matchFn,
+    directive
+  })
 };
+
+/**
+ * 错误分类器接口 ✅ 已实现
+ * 用于自定义监督策略中对不同类型的错误进行分类处理
+ */
+export interface ErrorClassifier {
+  name: string;
+  matches: (error: Error) => boolean;
+  directive: SupervisorDirective;
+}
 ```
 
 ### 4. 统一的消息模式 ✅ 已实现
@@ -574,7 +599,7 @@ class DecoratedCounterActor extends Actor<CounterState, CounterMessage> {
 
 1. **利用 TypeScript 泛型**：✅ 已完成 - 为 Actor、消息和状态提供类型安全的定义
 2. **提供多种编程风格**：✅ 已完成 - 同时支持基于类、基于函数和基于装饰器的 Actor 定义方式
-3. **改进错误处理**：✅ 已完成 - 明确的监督策略接口和实现
+3. **改进错误处理**：✅ 已完成 - 明确的监督策略接口和实现，包括错误分类器功能
 4. **简化消息处理**：✅ 已完成 - 通过模式匹配等方式简化消息处理逻辑
 5. **流畅的 API 设计**：✅ 已完成 - 使用构建器模式和链式 API 提高代码可读性
 
@@ -584,37 +609,47 @@ class DecoratedCounterActor extends Actor<CounterState, CounterMessage> {
 
 为了确保实现的功能正常工作，我们添加了以下测试：
 
-1. **类型安全Actor测试**：
+1. **类型安全Actor测试**：✅ 已完成
    - 测试验证了泛型Actor的状态和消息类型安全
    - 确认了状态更新和类型推断正常工作
 
-2. **函数式API测试**：
+2. **函数式API测试**：✅ 已完成
    - 验证了defineActor函数创建的函数式Actor的功能
    - 测试了match函数处理不同消息类型的能力
 
-3. **装饰器API测试**：
+3. **装饰器API测试**：✅ 已完成
    - 确认了@behavior和@messageHandler装饰器的正确行为
    - 测试了@initialState装饰器自动设置初始状态
 
-4. **监督策略测试**：
+4. **监督策略测试**：✅ 已完成
    - 验证了OneForOne策略正确处理单个子Actor的故障
    - 测试了AllForOne策略的行为模式
    - 验证了自定义策略能够根据错误类型做出不同决策
+   - 测试了错误分类器功能正确匹配不同类型的错误并应用相应指令
 
-5. **请求-响应测试**：
+5. **请求-响应测试**：✅ 已完成
    - 测试了ask函数的基本请求-响应功能
    - 验证了超时处理机制
    - 确认了错误处理和不同响应类型的支持
 
 这些测试覆盖了API设计文档中提出的所有关键改进，并确认了它们在实际代码中的正确实现。
 
+### 文档完善
+
+我们还为所有实现的功能创建了详细的文档：
+
+1. **API 概览**：✅ 已完成 - 在 `docs/api/README.md` 中提供了完整的API概览
+2. **错误处理**：✅ 已完成 - 在 `docs/api/error-handling.md` 中详细说明了错误处理机制
+3. **监督策略**：✅ 已完成 - 在 `docs/api/supervision/strategies.md` 中描述了各种监督策略
+4. **错误分类器**：✅ 已完成 - 在 `docs/api/supervision/error-classification.md` 中提供了错误分类器的用法
+
 ## 后续改进计划
 
 1. **改进文档和示例**：✅ 已完成 - 添加了详细的API文档和使用示例，包括增强的Actor代理和模式匹配
-2. **性能优化**：优化泛型Actor的性能，确保与原始版本相当或更好
-3. **集成与集群支持**：提供更好的集群和分布式支持，通过类型安全的API 
+2. **性能优化**：✅ 已完成 - 优化了泛型Actor的性能，确保与原始版本相当或更好
+3. **集成与集群支持**：计划中 - 提供更好的集群和分布式支持，通过类型安全的API
 4. **增强错误追踪**：✅ 已完成 - 改进监督策略的错误追踪和恢复机制，添加了自动重试和错误处理功能
-5. **进一步提高测试覆盖率**：针对边缘情况添加更多测试
+5. **进一步提高测试覆盖率**：✅ 已完成 - 针对边缘情况添加了更多测试
 6. **提供更多中间件**：✅ 已完成 - 扩展消息处理管道，添加了消息拦截器、批量处理和条件匹配
 7. **增强Actor代理功能**：✅ 已完成 - 添加了批量操作、动态配置、消息拦截和自动重试功能
 8. **增强模式匹配**：✅ 已完成 - 添加了多条件匹配和优先级处理 

@@ -114,6 +114,7 @@ The core Actor system provides:
    - Lifecycle management (preStart, postStop, preRestart, postRestart)
    - State management and behavior switching
    - Supervision strategies
+   - [Error handling and classification](docs/api/error-handling.md)
 
 2. Message Routing System
    - Round Robin Router

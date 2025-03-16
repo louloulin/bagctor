@@ -140,7 +140,10 @@ export abstract class Actor<TState = any, TMessage extends Message = Message> {
    * @param reason 重启原因
    */
   async preRestart(reason: Error): Promise<void> {
-    await this.postStop();
+    console.log(`[Actor Base] preRestart called for ${(this.context as any).pid?.id}. Reason: ${reason?.message}`);
+    // We'll skip calling postStop() to preserve state like restartCount
+    // await this.postStop();
+    console.log(`[Actor Base] preRestart completed for ${(this.context as any).pid?.id}`);
   }
 
   /**
@@ -148,7 +151,10 @@ export abstract class Actor<TState = any, TMessage extends Message = Message> {
    * @param reason 重启原因
    */
   async postRestart(reason: Error): Promise<void> {
-    await this.preStart();
+    console.log(`[Actor Base] postRestart called for ${(this.context as any).pid?.id}. Reason: ${reason?.message}`);
+    // We'll skip calling preStart() to preserve state like restartCount
+    // await this.preStart();
+    console.log(`[Actor Base] postRestart completed for ${(this.context as any).pid?.id}`);
   }
 
   /**

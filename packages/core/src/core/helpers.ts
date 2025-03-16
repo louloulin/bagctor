@@ -206,8 +206,29 @@ export const SupervisorStrategies = {
     /**
      * 自定义策略
      */
-    custom: (handler: (error: Error, childPID: PID, restartCount: number) => SupervisorDirective) => {
-        return new CustomSupervisorStrategy(handler);
+    custom: (
+        handler: (error: Error, childPID: PID, restartCount: number) => SupervisorDirective,
+        options?: {
+            restartAll?: boolean,
+            errorClassifiers?: ErrorClassifier[]
+        }
+    ) => {
+        return new CustomSupervisorStrategy(handler, options);
+    },
+
+    /**
+     * 创建错误分类器
+     */
+    createErrorClassifier: (
+        name: string,
+        matchFn: (error: Error) => boolean,
+        directive: SupervisorDirective
+    ): ErrorClassifier => {
+        return {
+            name,
+            matches: matchFn,
+            directive
+        };
     }
 };
 
@@ -218,9 +239,16 @@ class OneForOneSupervisorStrategy {
     constructor(private maxRestarts: number, private withinTimeWindow: number) { }
 
     handleError(error: Error, childPID: PID, restartCount: number): SupervisorDirective {
+        console.log(`[OneForOne] handleError called for child ${childPID.id}, restartCount=${restartCount}, maxRestarts=${this.maxRestarts}`);
+
+        console.log(`[OneForOne] Error details: ${error.message}`);
+        console.log(`[OneForOne] Error stack: ${error.stack?.split('\n')[0] || 'No stack'}`);
+
         if (restartCount > this.maxRestarts) {
+            console.log(`[OneForOne] Returning SupervisorDirective.Stop (${SupervisorDirective.Stop})`);
             return SupervisorDirective.Stop;
         }
+        console.log(`[OneForOne] Returning SupervisorDirective.Restart (${SupervisorDirective.Restart})`);
         return SupervisorDirective.Restart;
     }
 }
@@ -232,9 +260,16 @@ class AllForOneSupervisorStrategy {
     constructor(private maxRestarts: number, private withinTimeWindow: number) { }
 
     handleError(error: Error, childPID: PID, restartCount: number): SupervisorDirective {
+        console.log(`[AllForOne] handleError called for child ${childPID.id}, restartCount=${restartCount}, maxRestarts=${this.maxRestarts}`);
+
+        console.log(`[AllForOne] Error details: ${error.message}`);
+        console.log(`[AllForOne] Error stack: ${error.stack?.split('\n')[0] || 'No stack'}`);
+
         if (restartCount > this.maxRestarts) {
+            console.log(`[AllForOne] Returning SupervisorDirective.Stop (${SupervisorDirective.Stop})`);
             return SupervisorDirective.Stop;
         }
+        console.log(`[AllForOne] Returning SupervisorDirective.Restart (${SupervisorDirective.Restart})`);
         return SupervisorDirective.Restart;
     }
 
@@ -248,9 +283,51 @@ class AllForOneSupervisorStrategy {
  * 自定义监督策略
  */
 class CustomSupervisorStrategy {
-    constructor(private handler: (error: Error, childPID: PID, restartCount: number) => SupervisorDirective) { }
+    private _restartAll: boolean = false;
+    private _errorClassifiers: ErrorClassifier[] = [];
+
+    constructor(
+        private handler: (error: Error, childPID: PID, restartCount: number) => SupervisorDirective,
+        options?: {
+            restartAll?: boolean,
+            errorClassifiers?: ErrorClassifier[]
+        }
+    ) {
+        this._restartAll = options?.restartAll || false;
+        this._errorClassifiers = options?.errorClassifiers || [];
+    }
 
     handleError(error: Error, childPID: PID, restartCount: number): SupervisorDirective {
-        return this.handler(error, childPID, restartCount);
+        console.log(`[Custom] handleError called for child ${childPID.id}, restartCount=${restartCount}`);
+
+        console.log(`[Custom] Error details: ${error.message}`);
+        console.log(`[Custom] Error stack: ${error.stack?.split('\n')[0] || 'No stack'}`);
+
+        // Check if we have classifiers that match this error
+        for (const classifier of this._errorClassifiers) {
+            if (classifier.matches(error)) {
+                console.log(`[Custom] Error matched classifier: ${classifier.name}`);
+                return classifier.directive;
+            }
+        }
+
+        // Fall back to the default handler
+        const directive = this.handler(error, childPID, restartCount);
+        console.log(`[Custom] Handler returned SupervisorDirective.${SupervisorDirective[directive]} (${directive})`);
+        return directive;
     }
+
+    get restartAll(): boolean {
+        return this._restartAll;
+    }
+}
+
+/**
+ * 错误分类器
+ * 用于自定义监督策略中对不同类型的错误进行分类处理
+ */
+export interface ErrorClassifier {
+    name: string;
+    matches: (error: Error) => boolean;
+    directive: SupervisorDirective;
 } 

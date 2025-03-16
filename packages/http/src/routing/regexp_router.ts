@@ -64,27 +64,33 @@ export class RegExpRouter {
         }
 
         const paramNames: string[] = [];
+        let regexPattern = pattern;
 
-        // Replace parameter placeholders with regex capture groups
-        let regexPattern = pattern
-            .replace(/\/+/g, '/') // Normalize multiple slashes
-            .replace(/:\w+\?/g, (match) => {
-                // Optional parameter
-                const paramName = match.slice(1, -1); // Remove : and ?
-                paramNames.push(paramName);
-                return '(?:/([^/]+))?';
-            })
-            .replace(/:\w+/g, (match) => {
-                // Required parameter
-                const paramName = match.slice(1); // Remove :
-                paramNames.push(paramName);
-                return '/([^/]+)';
-            });
+        // Normalize multiple slashes
+        regexPattern = regexPattern.replace(/\/+/g, '/');
+
+        // Replace optional parameters (:name?) with regex capture groups
+        regexPattern = regexPattern.replace(/\/:(\w+)\?/g, (_, paramName) => {
+            paramNames.push(paramName);
+            return '(?:/([^/]+))?';
+        });
+
+        // Replace required parameters (:name) with regex capture groups
+        regexPattern = regexPattern.replace(/\/:(\w+)/g, (_, paramName) => {
+            paramNames.push(paramName);
+            return '/([^/]+)';
+        });
 
         // Handle wildcard parameters at the end
         if (regexPattern.endsWith('/*')) {
-            regexPattern = regexPattern.slice(0, -2) + '(?:/(.*))?';
+            regexPattern = regexPattern.replace(/\/\*$/, '(?:/(.*))?');
             paramNames.push('*');
+        }
+
+        // Handle /files wildcard case
+        // This special case for /files makes sure that /files alone doesn't match /files/*
+        if (regexPattern === '/files(?:/(.*))?') {
+            regexPattern = '/files/(.+)';
         }
 
         // Ensure the pattern starts with /
@@ -94,6 +100,8 @@ export class RegExpRouter {
 
         // Make sure the pattern matches the entire path
         const regexp = new RegExp(`^${regexPattern}$`);
+
+        console.log(`Compiled pattern: ${pattern} -> ${regexp}`);
 
         return { regexp, paramNames };
     }
@@ -105,6 +113,8 @@ export class RegExpRouter {
      * @returns Route match with handler and params, or null if no match
      */
     match(method: string, path: string): { handler: Route['handler']; params: RouteParams } | null {
+        console.log(`Matching ${method} ${path}`);
+
         // Check cache first
         const cacheKey = `${method}:${path}`;
         const cached = this.cache.get(cacheKey);
@@ -121,19 +131,26 @@ export class RegExpRouter {
                 continue;
             }
 
+            console.log(`Testing route: ${route.method} ${route.pattern} with regexp ${route.regexp}`);
+
             const match = route.regexp.exec(path);
             if (!match) {
+                console.log(`No match for ${path} against ${route.regexp}`);
                 continue;
             }
+
+            console.log(`Match found for ${path}: ${JSON.stringify(match)}`);
 
             // Extract parameters
             const params: RouteParams = {};
             for (let i = 0; i < route.paramNames.length; i++) {
                 const value = match[i + 1];
-                if (value) {
+                if (value !== undefined) {
                     params[route.paramNames[i]] = value;
                 }
             }
+
+            console.log(`Extracted params: ${JSON.stringify(params)}`);
 
             // Store in cache if not full
             if (this.cache.size < this.cacheSize) {
@@ -150,6 +167,7 @@ export class RegExpRouter {
             };
         }
 
+        console.log(`No route found for ${method} ${path}`);
         return null;
     }
 

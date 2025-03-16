@@ -1,6 +1,6 @@
 import { test, expect, describe, mock, beforeEach, afterEach } from 'bun:test';
-import { ActorSystem, Actor, ActorContext, PID } from '@bactor/core';
-import { ActorPool } from '../../src/actors/pool/actor_pool';
+import { ActorSystem, Actor, ActorContext, PID, Props } from '@bactor/core';
+import { ActorPool, ActorPoolProps } from '../../src/actors/pool/actor_pool';
 
 // Mock worker actor class for testing
 class TestWorkerActor extends Actor {
@@ -45,8 +45,10 @@ describe('ActorPool', () => {
         // Create a test sender PID
         testSender = { id: 'test-sender', address: undefined };
 
-        // Create an actor pool
-        poolRef = await system.spawn({
+        console.log("Creating ActorPool with TestWorkerActor");
+
+        // 按照示例代码的格式设置属性
+        const props = {
             actorClass: ActorPool,
             actorContext: {
                 pooledActorClass: TestWorkerActor,
@@ -54,9 +56,21 @@ describe('ActorPool', () => {
                 routingStrategy: 'round-robin',
                 pooledActorProps: {
                     name: 'test-worker'
-                }
+                },
+                supervise: true
             }
-        });
+        };
+
+        console.log("Props for ActorPool:", JSON.stringify(props, (key, value) => {
+            if (key === 'constructor') return undefined;
+            if (typeof value === 'function') return 'function:' + value.name;
+            return value;
+        }, 2));
+
+        // Create an actor pool
+        poolRef = await system.spawn(props);
+
+        console.log("ActorPool created with PID:", poolRef);
     });
 
     afterEach(async () => {
@@ -70,6 +84,8 @@ describe('ActorPool', () => {
             type: 'pool.stats',
             sender: testSender
         });
+
+        console.log("Received response:", response);
 
         expect(response.type).toBe('pool.stats.result');
         expect(response.payload.size).toBe(3);
@@ -92,6 +108,8 @@ describe('ActorPool', () => {
             results.push(response.payload);
         }
 
+        console.log("Work results:", results);
+
         // Verify that work was distributed evenly
         const workCounts = {
             worker0: 0,
@@ -104,6 +122,8 @@ describe('ActorPool', () => {
             if (result.includes('worker-1')) workCounts.worker1++;
             if (result.includes('worker-2')) workCounts.worker2++;
         }
+
+        console.log("Work counts:", workCounts);
 
         // With round-robin and 6 requests to 3 workers, each should get 2 requests
         expect(workCounts.worker0).toBe(2);
@@ -127,6 +147,8 @@ describe('ActorPool', () => {
             type: 'pool.stats',
             sender: testSender
         });
+
+        console.log("Resize response:", response);
 
         expect(response.payload.size).toBe(5);
     });

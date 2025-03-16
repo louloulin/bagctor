@@ -2,15 +2,16 @@
 export type {
     MessageMap,
     Message,
+    TypedMessage,
     PID,
+    TypedPID,
     ActorContext,
     Actor,
     MessageContext,
     Validator,
     MessageHandler,
     PayloadHandler,
-    ActorState,
-    Props,
+    ActorProps,
     MessageMetadata,
     ActorProxy,
     EnhancedActorProxy,
@@ -22,7 +23,8 @@ export {
     createEnhancedActorProxy,
     actorRef,
     toTypedMessage,
-    toBaseMessage
+    toBaseMessage,
+    createInterceptor
 } from './types';
 
 // Actor实现

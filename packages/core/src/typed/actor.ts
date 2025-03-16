@@ -6,23 +6,44 @@ import {
     ActorContext,
     MessageMap,
     Message,
+    TypedMessage,
     PID,
+    TypedPID,
     MessageContext,
-    toTypedMessage,
-    ActorState,
-    PayloadHandler
+    PayloadHandler,
+    toBaseMessage
 } from './types';
 import { TypedActorContext, createTypedContext } from './context';
 import { RequestResponseProtocol } from './request-response';
 
+// Helper function to convert BaseMessage to TypedMessage
+function toTypedMessage<K extends keyof TM, TM extends MessageMap = any>(
+    message: BaseMessage,
+    defaultType?: K
+): TypedMessage<K, TM> {
+    return {
+        type: message.type as K,
+        payload: message.payload,
+        sender: message.sender,
+        metadata: message.metadata,
+        messageId: message.messageId
+    } as TypedMessage<K, TM>;
+}
+
+// 定义ActorState接口
+export interface ActorState<T = any> {
+    behavior: string;
+    data: T;
+}
+
 /**
  * 类型安全的Actor基类，提供类型化的消息处理和状态管理
  */
-export abstract class TypedActor<TState = any, TM extends MessageMap = any> implements Actor<TState, TM> {
+export abstract class TypedActor<TState = any, TM extends MessageMap = any> implements Actor<TM> {
     protected context: ActorContext<TM>;
     protected state: ActorState<TState>;
     protected behaviorMap = new Map<string, (message: Message<any, TM>) => Promise<void>>();
-    protected handlers = new Map<keyof TM, PayloadHandler<any, TM>>();
+    protected handlers = new Map<keyof TM, PayloadHandler<any, any, TM>>();
     protected currentMessage?: Message<any, TM>;
     protected currentBehavior: string = 'default';
 
@@ -86,31 +107,29 @@ export abstract class TypedActor<TState = any, TM extends MessageMap = any> impl
      */
     async receive(message: BaseMessage): Promise<void> {
         // 首先尝试将消息作为响应处理
-        if (this.context.receive?.(message)) {
+        const typedContext = this.context as TypedActorContext<TM>;
+        if (typedContext.receive && typedContext.receive(message)) {
             return;
         }
 
         // 将原始消息转换为类型安全的消息
-        const typedMessage = toTypedMessage<any, TM>(message);
+        const typedMessage = toTypedMessage(message);
         this.currentMessage = typedMessage;
 
         // 获取当前行为处理函数
         const behavior = this.behaviorMap.get(this.state.behavior);
-        if (behavior) {
-            await behavior.call(this, typedMessage);
-        } else {
-            // 如果没有找到行为处理函数，尝试使用类型特定的处理函数
-            const handler = this.handlers.get(typedMessage.type);
-            if (handler) {
-                await handler(typedMessage.payload, {
-                    sender: typedMessage.sender as PID<any>,
-                    self: this.context.self,
-                    message: typedMessage
-                });
-            }
+        if (!behavior) {
+            console.warn(`No behavior found for ${this.state.behavior}`);
+            return;
         }
 
-        this.currentMessage = undefined;
+        // 处理消息
+        try {
+            await behavior(typedMessage);
+        } catch (error) {
+            console.error('Error processing message:', error);
+            throw error;
+        }
     }
 
     /**
@@ -118,14 +137,20 @@ export abstract class TypedActor<TState = any, TM extends MessageMap = any> impl
      */
     protected on<K extends keyof TM>(
         messageType: K,
-        handler: PayloadHandler<TM[K], TM>
+        handler: PayloadHandler<K, TM, TM[K]>
     ): this {
-        this.handlers.set(messageType, handler as PayloadHandler<any, TM>);
+        this.handlers.set(messageType, handler as PayloadHandler<any, any, TM>);
+
+        // 如果还没有默认行为，添加一个
+        if (!this.behaviorMap.has('default')) {
+            this.addDispatchBehavior('default');
+        }
+
         return this;
     }
 
     /**
-     * 注册行为处理器
+     * 添加一个消息处理行为
      */
     protected addBehavior(
         name: string,
@@ -136,19 +161,36 @@ export abstract class TypedActor<TState = any, TM extends MessageMap = any> impl
     }
 
     /**
-     * 切换当前行为
+     * 切换到新的行为
      */
     protected become(behavior: string): void {
-        if (this.behaviorMap.has(behavior)) {
-            this.currentBehavior = behavior;
-            this.state.behavior = behavior;
-        } else {
-            throw new Error(`Behavior ${behavior} not found`);
+        if (!this.behaviorMap.has(behavior)) {
+            throw new Error(`Behavior ${behavior} not defined`);
         }
+        this.state.behavior = behavior;
     }
 
     /**
-     * 获取当前状态
+     * 添加一个基于类型分发的行为
+     */
+    private addDispatchBehavior(name: string): void {
+        this.addBehavior(name, async (message: Message<any, TM>) => {
+            const handler = this.handlers.get(message.type);
+            if (handler) {
+                const context: MessageContext = {
+                    sender: message.sender,
+                    messageId: message.messageId,
+                    metadata: message.metadata,
+                    self: this.context.self,
+                    message: message as any
+                };
+                await handler(message.payload, context);
+            }
+        });
+    }
+
+    /**
+     * 获取当前状态（只读）
      */
     protected getState(): Readonly<TState> {
         return this.state.data;
@@ -162,18 +204,17 @@ export abstract class TypedActor<TState = any, TM extends MessageMap = any> impl
     }
 
     /**
-     * 确保消息是类型化的
+     * 确保消息是类型安全的
      */
     private ensureTypedMessage(message: Message<any, TM> | BaseMessage): Message<any, TM> {
-        if ('payload' in message) {
+        if ('type' in message && 'payload' in message) {
             return message as Message<any, TM>;
         }
-        return toTypedMessage<any, TM>(message as BaseMessage);
+        return toTypedMessage(message as BaseMessage);
     }
 
     /**
-     * 类型安全的消息发送
-     * 向目标Actor发送特定类型的消息
+     * 向目标Actor发送消息
      */
     protected async send<K extends keyof TM>(
         target: PID<any>,
@@ -184,7 +225,6 @@ export abstract class TypedActor<TState = any, TM extends MessageMap = any> impl
     }
 
     /**
-     * 类型安全的请求-响应模式
      * 向目标Actor发送请求并等待响应
      */
     protected async ask<Req, Res>(
@@ -193,16 +233,16 @@ export abstract class TypedActor<TState = any, TM extends MessageMap = any> impl
         request: Req,
         timeoutMs?: number
     ): Promise<Res> {
-        if (!this.context.ask) {
+        const typedContext = this.context as TypedActorContext<TM>;
+        if (!typedContext.ask) {
             throw new Error('Context does not support ask pattern');
         }
-        return this.context.ask(target, protocol, request, timeoutMs);
+        return typedContext.ask(target, protocol, request, timeoutMs);
     }
 }
 
 /**
- * 类型安全的ActorRef创建工厂
- * 用于从非类型安全的Actor类创建类型安全的Actor
+ * 通过包装现有Actor创建类型安全的Actor
  */
 export function typedActorOf<TState, TM extends MessageMap>(
     BaseActorClass: new (...args: any[]) => BaseActor
@@ -214,17 +254,19 @@ export function typedActorOf<TState, TM extends MessageMap>(
 
         protected behaviors(): void {
             // 委托给原始Actor类的behaviors方法
-            const baseActor = new BaseActorClass(this.context instanceof TypedActorContext ?
-                (this.context as TypedActorContext<TM>).getBaseContext() :
-                this.context as BaseActorContext);
+            const typedContext = this.context as TypedActorContext<TM>;
+            const baseActor = new BaseActorClass(typedContext.getBaseContext());
 
             // 设置一个默认行为委托到基础Actor
             this.addBehavior('default', async (message: Message<any, TM>) => {
-                await baseActor.receive({
-                    type: message.type as string,
+                const baseMessage = {
+                    type: message.type.toString(),
                     payload: message.payload,
-                    sender: message.sender
-                });
+                    sender: message.sender,
+                    metadata: message.metadata,
+                    messageId: message.messageId
+                };
+                await baseActor.receive(baseMessage);
             });
         }
     };

@@ -1,17 +1,17 @@
 import { Message as BaseMessage, PID as BasePID } from '@bactor/common';
-import { ActorContext as BaseActorContext } from '../core/context';
-import { ActorSystem } from '../core/system';
+import { ActorContext as BaseActorContext } from '../../packages/core/src/core/context';
+import { ActorSystem } from '../../packages/core/src/core/system';
 import {
     ActorContext,
     PID,
     MessageMap,
-    toBaseMessage,
     Actor,
     Message,
-    ActorProps
+    TypedMessage,
+    Props,
+    toBaseMessage
 } from './types';
-import { PID as CorePID } from '../core/types';
-import { RequestResponseProtocol, generateCorrelationId, RequestResponseManager, request, response } from './request-response';
+import { RequestResponseProtocol, generateCorrelationId, RequestResponseManager, request, response } from '../../packages/core/src/typed/request-response';
 
 /**
  * 类型安全的ActorContext实现
@@ -40,49 +40,53 @@ export class TypedActorContext<TM extends MessageMap = any> implements ActorCont
     async send<K extends keyof TM>(
         target: PID<any>,
         messageType: K,
-        payload: TM[K]
+        payload: TM[K],
+        metadata?: any
     ): Promise<void> {
         const message: BaseMessage = {
-            type: messageType as string,
+            type: String(messageType),
             payload,
-            sender: this.self
+            sender: this.self,
+            metadata
         };
 
         await this.baseContext.send(target as BasePID, message);
     }
 
     /**
-     * 使用完整消息对象发送消息
+     * 请求-响应模式
+     * 向目标Actor发送请求并等待响应
+     */
+    async request<K extends keyof TM, TMTarget extends MessageMap, R>(
+        target: PID<any>,
+        type: K,
+        payload: TM[K],
+        timeout?: number
+    ): Promise<R> {
+        // 使用ask方法处理请求
+        const protocol = {
+            requestType: String(type),
+            responseType: `${String(type)}.response`
+        };
+
+        return this.ask<TM[K], R>(target, protocol, payload, timeout);
+    }
+
+    /**
+     * 类型安全的消息发送（完整消息对象版本）
+     * 使用完整的消息对象发送消息
      */
     async sendMessage<K extends keyof TMTarget, TMTarget extends MessageMap = any>(
         target: PID<TMTarget>,
-        message: Message<K, TMTarget>
+        message: Message<K, TMTarget> | TypedMessage<K, TMTarget>
     ): Promise<void> {
-        const baseMessage = {
-            type: message.type as string,
-            payload: message.payload,
-            sender: message.sender || this.self,
-            metadata: message.metadata,
-            messageId: message.messageId
-        };
-
+        const baseMessage = toBaseMessage(message);
         await this.baseContext.send(target as BasePID, baseMessage);
     }
 
     /**
-     * 请求-响应模式的API，实现需要的request方法
-     */
-    async request<K extends keyof TM, TMTarget extends MessageMap, R>(
-        target: CorePID,
-        type: K,
-        payload: TM[K],
-        timeout: number = 30000
-    ): Promise<R> {
-        return this.ask(target as PID<any>, { requestType: type as string, responseType: 'response' } as any, payload, timeout);
-    }
-
-    /**
-     * 请求-响应模式的API
+     * 向目标Actor发送请求并等待响应
+     * 这是一个类型安全的请求-响应模式实现
      */
     async ask<Req, Res>(
         target: PID<any>,
@@ -90,9 +94,10 @@ export class TypedActorContext<TM extends MessageMap = any> implements ActorCont
         requestPayload: Req,
         timeoutMs: number = 30000
     ): Promise<Res> {
+        // 生成相关ID
         const correlationId = generateCorrelationId();
 
-        // 注册请求并获取Promise
+        // 注册请求
         const responsePromise = this.requestManager.registerRequest<Res>(correlationId, timeoutMs);
 
         // 创建请求消息
@@ -106,50 +111,42 @@ export class TypedActorContext<TM extends MessageMap = any> implements ActorCont
     }
 
     /**
-     * 接收消息，检查是否是响应消息
+     * 处理接收到的消息
+     * 这个方法会在Actor的receive方法中被调用
      */
     receive(message: BaseMessage): boolean {
-        // 检查是否是请求-响应协议的响应消息
-        if (message.type === 'response' && message.metadata?.correlationId) {
-            return this.requestManager.handleResponse(message as any);
-        }
-        return false;
+        // 尝试处理响应消息
+        return this.requestManager.handleResponse(message as any);
     }
 
     /**
-     * 创建子Actor
+     * 类型安全的Actor创建
+     * 创建一个新的Actor实例
      */
     async spawn<TMessages extends MessageMap = any>(
-        props: ActorProps<TMessages>,
-        name?: string
+        props: Props<any, TMessages>
     ): Promise<PID<TMessages>> {
-        // 使用基础Context创建Actor
-        const childProps = {
-            ...props,
-            parent: this.self
+        // 转换为基础Props对象
+        const baseProps = {
+            actorClass: props.actorClass,
+            initialState: props.initialState
         };
 
-        const pid = await this.baseContext.spawn(childProps as any);
-        return pid as PID<TMessages>;
+        // 使用原始系统创建Actor
+        const childPid = await this.baseContext.spawn(baseProps);
+        return childPid as PID<TMessages>;
     }
 
     /**
-     * 停止Actor
+     * 停止指定的Actor
      */
     async stop(pid: PID<any>): Promise<void> {
         await this.baseContext.stop(pid as BasePID);
     }
 
     /**
-     * 停止所有子Actor
-     */
-    async stopAll(): Promise<void> {
-        await this.baseContext.stopAll();
-    }
-
-    /**
-     * 获取基础Context
-     * 用于扩展API或直接访问低级API
+     * 获取原始上下文对象
+     * 这允许在需要完全访问原始功能时使用
      */
     getBaseContext(): BaseActorContext {
         return this.baseContext;
@@ -170,4 +167,4 @@ export function createTypedContext<TM extends MessageMap = any>(
     baseContext: BaseActorContext
 ): TypedActorContext<TM> {
     return new TypedActorContext<TM>(baseContext);
-}
+} 

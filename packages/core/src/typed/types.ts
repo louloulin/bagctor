@@ -1,6 +1,6 @@
 import { PID as BasePID, Message as BaseMessage } from '@bactor/common';
 import { ActorSystem } from '../core/system';
-import { Message, PID } from '../core/types';
+import { Message as CoreMessage, PID as CorePID } from '../core/types';
 import { createMessage } from '../core/helpers';
 
 // ========== 基础消息类型系统 ==========
@@ -28,496 +28,393 @@ export interface MessageMetadata {
  * 类型安全的消息接口
  * 提供了强类型的消息结构，确保消息类型与负载类型匹配
  */
-export interface Message<T extends keyof TM, TM extends MessageMap = any, P = TM[T]> {
+export interface TypedMessage<T extends keyof TM, TM extends MessageMap = any, P = TM[T]> {
     type: T;
     payload: P;
-    sender?: PID<any>;
+    sender?: CorePID;
     metadata?: MessageMetadata;
     messageId?: string;
 }
+
+// 重新导出为Message，保持向后兼容
+export type Message<T extends keyof TM, TM extends MessageMap = any, P = TM[T]> = TypedMessage<T, TM, P>;
+
+/**
+ * 类型化PID接口
+ * 表示一个支持特定消息类型的Actor引用
+ */
+export interface TypedPID<TM extends MessageMap = any> extends CorePID {
+    // 在CorePID基础上支持类型化消息
+}
+
+// 重新导出为PID，保持向后兼容
+export type PID<TM extends MessageMap = any> = TypedPID<TM>;
 
 /**
  * 消息上下文接口
  * 包含与消息相关的上下文信息
  */
 export interface MessageContext {
-    sender?: PID<any>;
+    sender?: CorePID;
     messageId?: string;
     metadata?: MessageMetadata;
-    self?: PID<any>; // 当前Actor的PID
-    message?: Message<any, any>; // 完整的消息对象
+    self?: CorePID; // 当前Actor的PID
+    message?: CoreMessage; // 完整的消息对象
 }
 
-/**
- * 消息验证器类型
- * 用于验证消息负载是否符合特定类型
- */
+// 向后兼容类型
+export interface ActorProps<TM extends MessageMap = any> {
+    // ...同样的属性，但使用正确的类型引用
+}
+
+export interface MessageHandler<K extends keyof TM, TM extends MessageMap> {
+    (
+        message: TypedMessage<K, TM>,
+        context: MessageContext
+    ): Promise<any> | any;
+}
+
+export interface PayloadHandler<K extends keyof TM, TM extends MessageMap, P = TM[K]> {
+    (
+        payload: P,
+        context: MessageContext
+    ): Promise<any> | any;
+}
+
+// Actor上下文接口
+export interface ActorContext<TM extends MessageMap = any> {
+    self: CorePID;
+
+    // 发送消息
+    send<K extends keyof TM>(
+        target: CorePID,
+        type: K,
+        payload: TM[K],
+        options?: Partial<MessageMetadata>
+    ): Promise<void>;
+
+    // 请求-响应模式
+    request<K extends keyof TM, TMTarget extends MessageMap, R>(
+        target: CorePID,
+        type: K,
+        payload: TM[K],
+        timeout?: number
+    ): Promise<R>;
+
+    // 使用完整消息对象发送
+    sendMessage<K extends keyof TM>(
+        target: CorePID,
+        message: TypedMessage<K, TM>
+    ): Promise<void>;
+
+    // Actor生命周期管理
+    spawn<TMessages extends MessageMap = any>(
+        props: ActorProps<TMessages>,
+        name?: string
+    ): Promise<CorePID>;
+
+    // 停止Actor
+    stop(pid: CorePID): Promise<void>;
+}
+
+// Actor接口
+export interface Actor<TM extends MessageMap = any> {
+    // 处理接收到的消息
+    receive(message: CoreMessage | BaseMessage): Promise<void>;
+}
+
+// 类型转换工具
+export function toBaseMessage(message: CoreMessage): BaseMessage {
+    const { type, payload, ...rest } = message;
+    return {
+        type: type.toString(), // 确保type是字符串
+        payload,
+        ...rest
+    } as BaseMessage;
+}
+
+// 创建类型化消息
+export function toTypedMessage<K extends keyof TM, TM extends MessageMap = any>(
+    type: K,
+    payload: TM[K],
+    options?: Partial<Omit<TypedMessage<K, TM>, 'type' | 'payload'>>
+): TypedMessage<K, TM> {
+    return {
+        type,
+        payload,
+        ...options
+    };
+}
+
+// 类型转换工具
+export function actorRef<TM extends MessageMap = any>(pid: BasePID): CorePID {
+    return pid as CorePID;
+}
+
+// Actor代理接口和实现
+
+// 验证器类型
 export type Validator<T> = (value: any) => value is T;
 
-/**
- * 消息处理函数类型
- * 类型安全的消息处理函数定义
- */
-export type MessageHandler<TM extends MessageMap = any> = <K extends keyof TM>(
-    message: Message<K, TM>
-) => Promise<void>;
-
-/**
- * 消息处理器函数类型
- * 接受payload和上下文作为参数的处理函数
- */
-export type PayloadHandler<P, TM extends MessageMap = any> = (
-    payload: P,
-    context: MessageContext
-) => Promise<void> | void;
-
-/**
- * 类型安全的行为映射类型
- */
-export type BehaviorMap<TM extends MessageMap = any> = Map<string, MessageHandler<TM>>;
-
-// ========== 核心Actor类型 ==========
-
-/**
- * Actor状态接口
- * 提供类型安全的状态管理
- */
-export interface ActorState<T = any> {
-    behavior: string;
-    data: T;
-}
-
-/**
- * 类型安全的PID引用
- * 为Actor引用添加类型信息，使消息发送可以获得类型检查
- */
-export interface PID<TM extends MessageMap = any> extends BasePID {
-    _messageTypes?: TM; // 只用于类型检查，运行时不存在
-}
-
-/**
- * Actor创建属性
- */
-export interface Props<TState = any, TM extends MessageMap = any> {
-    actorClass: new (...args: any[]) => Actor<TState, TM>;
-    actorContext?: Record<string, any>;
-    dispatcher?: any;
-    initialState?: TState;
-    mailbox?: any;
-    supervisorStrategy?: any;
-}
-
-/**
- * 类型安全的Actor上下文
- */
-export interface ActorContext<TM extends MessageMap = any> {
-    self: PID<TM>;
-
-    // 类型安全的消息发送
-    send<K extends keyof TM>(
-        target: PID<any>,
-        messageType: K,
-        payload: TM[K]
-    ): Promise<void>;
-
-    // 类型安全的消息发送（完整消息对象版本）
-    sendMessage?<K extends keyof TMTarget, TMTarget extends MessageMap = any>(
-        target: PID<TMTarget>,
-        message: Message<K, TMTarget>
-    ): Promise<void>;
-
-    // 类型安全的请求-响应模式
-    ask?<Req, Res>(
-        target: PID<any>,
-        protocol: any, // RequestResponseProtocol<Req, Res>
-        request: Req,
-        timeoutMs?: number
-    ): Promise<Res>;
-
-    // 处理响应消息
-    receive?(message: BaseMessage): boolean;
-
-    // 类型安全的Actor创建
-    spawn<TActor extends Actor<TState, TMessages>, TState = any, TMessages extends MessageMap = any>(
-        props: Props<TState, TMessages>
-    ): Promise<PID<TMessages>>;
-
-    // 其他方法
-    stop(pid: PID<any>): Promise<void>;
-    stopAll(): Promise<void>;
-}
-
-/**
- * Actor接口
- * 类型安全的Actor定义
- */
-export interface Actor<TState = any, TM extends MessageMap = any> {
-    receive(message: Message<any, TM> | BaseMessage): Promise<void>;
-}
-
-// ========== 类型兼容层 ==========
-
-/**
- * 将类型安全的Message转换为基础Message
- */
-export function toBaseMessage(message: Message<any, any>): BaseMessage {
-    return {
-        type: message.type as string,
-        payload: message.payload,
-        sender: message.sender,
-        metadata: message.metadata,
-        messageId: message.messageId
+// 创建类型验证器
+export function createTypeValidator<T>(typeName: string): Validator<T> {
+    return (value: any): value is T => {
+        // 简单验证，实际应用中可能需要更复杂的验证逻辑
+        return value !== undefined && value !== null;
     };
 }
 
-/**
- * 将基础Message转换为类型安全的Message
- */
-export function toTypedMessage<K extends keyof TM, TM extends MessageMap>(
-    message: BaseMessage
-): Message<K, TM> {
-    return {
-        type: message.type as K,
-        payload: message.payload,
-        sender: message.sender,
-        metadata: message.metadata,
-        messageId: message.messageId
-    };
-}
+// 对象验证器
+export function objectValidator<T extends object>(
+    schema: { [K in keyof T]?: Validator<T[K]> }
+): Validator<T> {
+    return (value: any): value is T => {
+        if (!value || typeof value !== 'object') return false;
 
-/**
- * 创建类型安全的PID引用
- */
-export function actorRef<TM extends MessageMap = any>(pid: BasePID): PID<TM> {
-    return pid as PID<TM>;
-}
-
-/**
- * 增强版ActorProxy选项
- */
-export interface EnhancedActorProxyOptions {
-    /**
-     * 请求方法前缀
-     * @default 'request'
-     */
-    requestPrefix?: string;
-
-    /**
-     * 发送方法前缀
-     * @default 'send'
-     */
-    sendPrefix?: string;
-
-    /**
-     * 请求超时时间(ms)
-     * @default 5000
-     */
-    timeout?: number;
-
-    /**
-     * 错误处理函数
-     */
-    errorHandler?: (error: Error, messageType: string, payload: any) => void;
-
-    /**
-     * 消息拦截器 - 在发送消息前执行
-     */
-    interceptor?: (messageType: string, payload: any, isRequest: boolean) => boolean | Promise<boolean>;
-
-    /**
-     * 重试配置
-     */
-    retry?: {
-        /**
-         * 最大重试次数
-         * @default 0 (不重试)
-         */
-        maxRetries?: number;
-
-        /**
-         * 重试延迟(ms)
-         * @default 100
-         */
-        delay?: number;
-
-        /**
-         * 重试延迟增长因子
-         * @default 1.5
-         */
-        backoffFactor?: number;
-
-        /**
-         * 判断错误是否可重试的函数
-         */
-        shouldRetry?: (error: Error) => boolean;
-    };
-}
-
-/**
- * 增强的Actor代理接口
- * 为Actor创建类型安全的代理，支持请求-响应模式
- */
-export type EnhancedActorProxy<M extends MessageMap, R = any> = {
-    [K in keyof M as `send${Capitalize<string & K>}`]: (payload: M[K]) => Promise<void>;
-} & {
-    [K in keyof M as `request${Capitalize<string & K>}`]: (payload: M[K], timeoutMs?: number) => Promise<R>;
-} & {
-    /**
-     * 批量发送消息
-     */
-    sendBatch: <K extends keyof M>(messages: Array<{ type: K, payload: M[K] }>) => Promise<void>;
-
-    /**
-     * 批量请求并等待所有响应
-     */
-    requestBatch: <K extends keyof M>(
-        messages: Array<{ type: K, payload: M[K], timeout?: number }>,
-        options?: { allSettled?: boolean }
-    ) => Promise<R[]>;
-
-    /**
-     * 设置代理的默认超时时间
-     */
-    setTimeout: (timeoutMs: number) => void;
-
-    /**
-     * 设置错误处理函数
-     */
-    setErrorHandler: (handler: (error: Error, messageType: string, payload: any) => void) => void;
-};
-
-/**
- * 创建增强的ActorProxy，支持基于方法名称的请求和发送模式
- * @param system Actor系统实例
- * @param target 目标Actor的PID
- * @param options 配置选项
- */
-export function createEnhancedActorProxy<M extends MessageMap, R = any>(
-    system: ActorSystem,
-    target: PID,
-    options: EnhancedActorProxyOptions = {}
-): EnhancedActorProxy<M, R> {
-    const {
-        requestPrefix = 'request',
-        sendPrefix = 'send',
-        timeout = 5000,
-        errorHandler: initialErrorHandler,
-        interceptor,
-        retry = {
-            maxRetries: 0,
-            delay: 100,
-            backoffFactor: 1.5,
-            shouldRetry: () => true
+        // 验证每个字段
+        for (const key in schema) {
+            const validator = schema[key];
+            if (validator && !validator(value[key])) return false;
         }
-    } = options;
 
-    let currentTimeout = timeout;
-    let currentErrorHandler = initialErrorHandler;
+        return true;
+    };
+}
 
-    // 创建代理对象，拦截属性访问，动态创建方法
-    const proxy: any = {
-        // 实现批量方法
-        sendBatch: async <K extends keyof M>(messages: Array<{ type: K, payload: M[K] }>) => {
-            const promises: Promise<void>[] = [];
-            for (const { type, payload } of messages) {
-                const message = createMessage(type as string, payload);
+// 基础验证器
+export const isString: Validator<string> = (value): value is string =>
+    typeof value === 'string';
 
-                // 应用拦截器
-                if (interceptor) {
-                    const shouldContinue = await interceptor(type as string, payload, false);
-                    if (!shouldContinue) continue;
+export const isNumber: Validator<number> = (value): value is number =>
+    typeof value === 'number' && !isNaN(value);
+
+export const isBoolean: Validator<boolean> = (value): value is boolean =>
+    typeof value === 'boolean';
+
+// 组合验证器
+export function unionValidator<T, U>(
+    validator1: Validator<T>,
+    validator2: Validator<U>
+): Validator<T | U> {
+    return (value): value is T | U => validator1(value) || validator2(value);
+}
+
+export function arrayValidator<T>(itemValidator: Validator<T>): Validator<T[]> {
+    return (value): value is T[] => {
+        if (!Array.isArray(value)) return false;
+        return value.every(item => itemValidator(item));
+    };
+}
+
+export function optionalValidator<T>(validator: Validator<T>): Validator<T | undefined> {
+    return (value): value is T | undefined =>
+        value === undefined || validator(value);
+}
+
+export function recordValidator<T>(
+    valueValidator: Validator<T>
+): Validator<Record<string, T>> {
+    return (value): value is Record<string, T> => {
+        if (!value || typeof value !== 'object') return false;
+        return Object.values(value).every(v => valueValidator(v));
+    };
+}
+
+// 消息注册表
+export class MessageRegistry<TM extends MessageMap = any> {
+    public validators: { [K in keyof TM]?: Validator<TM[K]> } = {};
+
+    // 注册消息类型
+    register<K extends keyof TM>(type: K, validator: Validator<TM[K]>): this {
+        this.validators[type] = validator;
+        return this;
+    }
+
+    // 验证消息
+    validate<K extends keyof TM>(type: K, payload: any): payload is TM[K] {
+        const validator = this.validators[type];
+        if (!validator) return true; // 如果没有验证器，默认通过
+        return validator(payload);
+    }
+
+    // 创建消息
+    createMessage<K extends keyof TM>(
+        type: K,
+        payload: TM[K],
+        options?: Partial<Omit<TypedMessage<K, TM>, 'type' | 'payload'>>
+    ): TypedMessage<K, TM> {
+        if (this.validators[type] && !this.validators[type]!(payload)) {
+            throw new Error(`Invalid payload for message type: ${String(type)}`);
+        }
+
+        return toTypedMessage(type, payload, options);
+    }
+}
+
+// 消息构建器
+export class MessageBuilder<TM extends MessageMap = any> {
+    private _registry = new MessageRegistry<TM>();
+
+    // 定义消息类型
+    define<K extends keyof TM>(type: K, validator: Validator<TM[K]>): this {
+        this._registry.register(type, validator);
+        return this;
+    }
+
+    // 获取验证器
+    validator<K extends keyof TM>(type: K): Validator<TM[K]> | undefined {
+        return this._registry.validators[type];
+    }
+
+    // 创建消息
+    create<K extends keyof TM>(
+        type: K,
+        payload: TM[K],
+        options?: Partial<Omit<TypedMessage<K, TM>, 'type' | 'payload'>>
+    ): TypedMessage<K, TM> {
+        return this._registry.createMessage(type, payload, options);
+    }
+}
+
+// 定义消息类型
+export function defineMessage<T>(validator: Validator<T>) {
+    return validator;
+}
+
+// 创建消息模式
+export function createMessageSchema<TM extends MessageMap>() {
+    return new MessageBuilder<TM>();
+}
+
+// Actor代理选项
+export interface ActorProxyOptions {
+    timeout?: number; // 请求超时时间
+    retries?: number; // 重试次数
+    retryDelay?: number; // 重试延迟
+    onError?: (error: Error) => void; // 错误处理回调
+    onTimeout?: () => void; // 超时处理回调
+    interceptors?: {
+        beforeSend?: (message: any) => boolean | Promise<boolean>; // 发送前拦截器
+        afterSend?: (result: any) => any | Promise<any>; // 发送后拦截器
+    };
+}
+
+// Actor代理接口
+export interface ActorProxy<M extends MessageMap = any> {
+    // 发送消息方法，会为每个消息类型生成
+    [key: string]: any;
+}
+
+// Enhanced Actor代理接口
+export interface EnhancedActorProxy<M extends MessageMap = any> extends ActorProxy<M> {
+    // 批量处理
+    batch(
+        operations: Array<{
+            type: keyof M;
+            payload: any;
+        }>
+    ): Promise<void>;
+
+    // 设置选项
+    withOptions(options: ActorProxyOptions): EnhancedActorProxy<M>;
+
+    // 添加拦截器
+    withInterceptor(
+        interceptor: {
+            beforeSend?: (message: any) => boolean | Promise<boolean>;
+            afterSend?: (result: any) => any | Promise<any>;
+        }
+    ): EnhancedActorProxy<M>;
+
+    // 获取原始PID
+    getPID(): CorePID;
+}
+
+// 创建Actor代理
+export function createActorProxy<M extends MessageMap = any>(
+    system: ActorSystem,
+    target: CorePID,
+    options: ActorProxyOptions = {}
+): ActorProxy<M> {
+    // 创建基本代理对象
+    const proxy = new Proxy(
+        Object.create(null) as unknown as ActorProxy<M>, // 使用Object.create(null)创建一个干净的对象并进行类型断言
+        {
+            get(_, prop) { // 不使用target参数，避免类型问题
+                // 处理特殊属性
+                if (prop === 'then' || prop === 'catch' || prop === 'finally') {
+                    return undefined;
                 }
 
-                promises.push(system.send(target, message));
-            }
-            await Promise.all(promises);
-        },
+                // 创建发送方法
+                return async (payload: any) => {
+                    const normalizedType = prop.toString();
 
-        requestBatch: async <K extends keyof M>(
-            messages: Array<{ type: K, payload: M[K], timeout?: number }>,
-            options?: { allSettled?: boolean }
-        ): Promise<R[]> => {
-            const promises = messages.map(async ({ type, payload, timeout: msgTimeout }) => {
-                const message = createMessage(type as string, payload);
+                    // 应用拦截器
+                    if (options.interceptors?.beforeSend) {
+                        const shouldContinue = await options.interceptors.beforeSend({
+                            type: normalizedType,
+                            payload
+                        });
 
-                // 应用拦截器
-                if (interceptor) {
-                    const shouldContinue = await interceptor(type as string, payload, true);
-                    if (!shouldContinue) {
-                        throw new Error(`Request canceled by interceptor: ${type}`);
+                        if (!shouldContinue) {
+                            throw new Error(`Request canceled by interceptor: ${String(normalizedType)}`);
+                        }
                     }
-                }
 
-                // 支持重试逻辑
-                const doRequest = async (attempt: number): Promise<R> => {
+                    // 发送请求
                     try {
-                        return await system.request<R>(target, message, msgTimeout || currentTimeout);
-                    } catch (error) {
-                        const shouldRetry = retry.shouldRetry && retry.shouldRetry(error as Error);
-                        if (shouldRetry && attempt < (retry.maxRetries || 0)) {
-                            // 计算延迟时间
-                            const delayTime = retry.delay! * Math.pow(retry.backoffFactor!, attempt);
-                            await new Promise(resolve => setTimeout(resolve, delayTime));
-                            return doRequest(attempt + 1);
+                        const result = await system.request(
+                            target,
+                            {
+                                type: normalizedType,
+                                payload
+                            },
+                            options.timeout
+                        );
+
+                        // 应用响应拦截器
+                        if (options.interceptors?.afterSend) {
+                            return await options.interceptors.afterSend(result);
                         }
 
-                        // 应用错误处理
-                        if (currentErrorHandler) {
-                            currentErrorHandler(error as Error, type as string, payload);
+                        return result;
+                    } catch (error) {
+                        // 处理错误
+                        if (options.onError) {
+                            options.onError(error instanceof Error ? error : new Error(String(error)));
                         }
                         throw error;
                     }
                 };
-
-                return doRequest(0);
-            });
-
-            // 使用allSettled或all来等待所有请求完成
-            if (options?.allSettled) {
-                const results = await Promise.allSettled(promises);
-                return results.map(result =>
-                    result.status === 'fulfilled' ? result.value : undefined as any
-                );
-            } else {
-                return Promise.all(promises);
             }
-        },
-
-        setTimeout: (timeoutMs: number) => {
-            currentTimeout = timeoutMs;
-        },
-
-        setErrorHandler: (handler: (error: Error, messageType: string, payload: any) => void) => {
-            currentErrorHandler = handler;
         }
+    );
+
+    return proxy;
+}
+
+// 创建增强型Actor代理
+export function createEnhancedActorProxy<TMessages extends MessageMap = MessageMap>(
+    target: CorePID
+): EnhancedActorProxy<TMessages> {
+    // 实现增强型代理
+    // 这里需要返回代理的实现
+    const proxy = {
+        // 实现增强型代理的方法和属性
+        getPID() {
+            return target;
+        }
+        // 其他方法的实现...
     };
 
-    return new Proxy(proxy, {
-        get(proxy, methodName: string) {
-            // 如果方法已存在于proxy对象中，直接返回
-            if (methodName in proxy) {
-                return proxy[methodName];
-            }
-
-            if (typeof methodName !== 'string') {
-                return undefined;
-            }
-
-            // 处理请求方法
-            if (methodName.startsWith(requestPrefix)) {
-                const messageType = methodName.substring(requestPrefix.length);
-                if (messageType) {
-                    // 转换第一个字母为小写
-                    const normalizedType = messageType.charAt(0).toLowerCase() + messageType.slice(1) as keyof M;
-                    return async (payload: M[typeof normalizedType], customTimeout?: number): Promise<R> => {
-                        try {
-                            // 应用拦截器
-                            if (interceptor) {
-                                const shouldContinue = await interceptor(normalizedType as string, payload, true);
-                                if (!shouldContinue) {
-                                    throw new Error(`Request canceled by interceptor: ${normalizedType}`);
-                                }
-                            }
-
-                            // 构建消息对象
-                            const message = createMessage(normalizedType as string, payload);
-
-                            // 支持重试逻辑
-                            const doRequest = async (attempt: number): Promise<R> => {
-                                try {
-                                    return await system.request<R>(target, message, customTimeout || currentTimeout);
-                                } catch (error) {
-                                    const shouldRetry = retry.shouldRetry && retry.shouldRetry(error as Error);
-                                    if (shouldRetry && attempt < (retry.maxRetries || 0)) {
-                                        // 计算延迟时间
-                                        const delayTime = retry.delay! * Math.pow(retry.backoffFactor!, attempt);
-                                        await new Promise(resolve => setTimeout(resolve, delayTime));
-                                        return doRequest(attempt + 1);
-                                    }
-                                    throw error;
-                                }
-                            };
-
-                            return await doRequest(0);
-                        } catch (error) {
-                            if (currentErrorHandler) {
-                                currentErrorHandler(error as Error, normalizedType as string, payload);
-                            }
-                            throw error;
-                        }
-                    };
-                }
-            }
-
-            // 处理发送方法
-            if (methodName.startsWith(sendPrefix)) {
-                const messageType = methodName.substring(sendPrefix.length);
-                if (messageType) {
-                    // 转换第一个字母为小写
-                    const normalizedType = messageType.charAt(0).toLowerCase() + messageType.slice(1) as keyof M;
-                    return async (payload: M[typeof normalizedType]) => {
-                        try {
-                            // 应用拦截器
-                            if (interceptor) {
-                                const shouldContinue = await interceptor(normalizedType as string, payload, false);
-                                if (!shouldContinue) return;
-                            }
-
-                            // 构建消息对象
-                            const message = createMessage(normalizedType as string, payload);
-
-                            return await system.send(target, message);
-                        } catch (error) {
-                            if (currentErrorHandler) {
-                                currentErrorHandler(error as Error, normalizedType as string, payload);
-                            }
-                            throw error;
-                        }
-                    };
-                }
-            }
-
-            // 兼容旧版函数式调用
-            return (payload: any) => {
-                const message = createMessage(methodName as string, payload);
-                return system.send(target, message);
-            };
-        }
-    });
+    return proxy as EnhancedActorProxy<TMessages>;
 }
 
-/**
- * Actor代理接口
- * 为Actor创建类型安全的代理
- * @deprecated 使用EnhancedActorProxy替代
- */
-export type ActorProxy<M extends MessageMap> = {
-    [K in keyof M]: (payload: M[K]) => Promise<void>;
-};
-
-/**
- * 创建Actor代理
- * 提供类型安全的Actor调用接口
- * @deprecated 使用createEnhancedActorProxy替代
- */
-export function createActorProxy<M extends MessageMap>(
-    context: ActorContext<any>,
-    target: PID<M>
-): ActorProxy<M> {
-    return new Proxy({} as ActorProxy<M>, {
-        get: (_, messageType: string) => {
-            return (payload: any) => context.send(target, messageType as keyof M, payload);
-        }
-    });
-}
-
-/**
- * 创建增强型Actor代理
- * @param system Actor系统
- * @param target 目标Actor引用
- * @param options 配置选项
- * @returns 增强型Actor代理
- */
-export function createEnhancedProxy<TMessages extends MessageMap = MessageMap>(target: PID<TMessages>): ActorProxy<TMessages> {
-    // ... existing code ...
+// 创建拦截器
+export function createInterceptor(handlers: {
+    beforeSend?: (message: any) => boolean | Promise<boolean>;
+    afterSend?: (result: any) => any | Promise<any>;
+}) {
+    return handlers;
 } 

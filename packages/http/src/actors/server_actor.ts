@@ -22,10 +22,13 @@ export class HttpServerActor extends Actor {
 
     constructor(context: ActorContext, props?: HttpServerProps) {
         super(context);
+        // 使用固定端口3038，除非明确指定其他端口
+        const fixedPort = 3038;
         this.config = {
-            port: props?.port || 3000,
+            port: props?.port || fixedPort,
             hostname: props?.hostname || 'localhost'
         };
+        console.log(`[HttpServerActor] Configured with port: ${this.config.port}, hostname: ${this.config.hostname}`);
     }
 
     async preStart(): Promise<void> {
@@ -107,6 +110,7 @@ export class HttpServerActor extends Actor {
         }
 
         const { port, hostname } = this.config;
+        console.log(`[HttpServerActor] Starting server on port: ${port}, hostname: ${hostname}`);
 
         this.server = Bun.serve({
             port,
@@ -176,7 +180,9 @@ export class HttpServerActor extends Actor {
             }
         });
 
-        console.log(`[HttpServerActor] Server running at http://${hostname}:${port}`);
+        // 输出实际使用的端口
+        const actualPort = this.server.port;
+        console.log(`[HttpServerActor] Server actually running at http://${hostname}:${actualPort}`);
     }
 
     private async stopServer(): Promise<void> {

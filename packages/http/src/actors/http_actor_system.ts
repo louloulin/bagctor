@@ -17,10 +17,13 @@ export class HttpActorSystem extends Actor {
 
     constructor(context: ActorContext, props?: HttpActorSystemProps) {
         super(context);
+        // 使用固定端口3038，除非明确指定其他端口
+        const fixedPort = 3038;
         this.config = {
-            port: props?.port || 3000,
+            port: props?.port || fixedPort,
             hostname: props?.hostname || 'localhost'
         };
+        console.log(`[HttpActorSystem] Configured with port: ${this.config.port}, hostname: ${this.config.hostname}`);
     }
 
     async preStart(): Promise<void> {

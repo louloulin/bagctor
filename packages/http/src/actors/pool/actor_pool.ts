@@ -68,7 +68,30 @@ export class ActorPool extends Actor {
     constructor(context: ActorContext, props?: ActorPoolProps) {
         super(context);
 
-        console.log(`[ActorPool] Constructor called`);
+        console.log(`[ActorPool] Constructor called with context:`, {
+            hasContext: !!context,
+            hasProps: !!props,
+            self: context?.self?.id
+        });
+
+        // 从 context 中获取 actorContext 属性
+        if (!props && context) {
+            // 尝试从 context 中获取 actorContext
+            // @ts-ignore  - 私有属性访问
+            const contextProps = (context as any)._props?.actorContext;
+
+            if (contextProps) {
+                console.log('[ActorPool] Found props in context:', {
+                    hasPooledActorClass: !!contextProps.pooledActorClass
+                });
+
+                // 使用从 context 中找到的 props
+                props = {
+                    actorClass: ActorPool,
+                    ...contextProps
+                };
+            }
+        }
 
         if (props) {
             console.log('[ActorPool] Props provided:', {
@@ -252,8 +275,18 @@ export class ActorPool extends Actor {
                 }
             } else if (msg.type === 'pool.resize') {
                 await this.resizePool(msg.payload.size);
+
+                // 确保发送响应
+                if (msg.sender) {
+                    await this.context.send(msg.sender, {
+                        type: 'pool.resize.result',
+                        payload: { success: true, size: this.workers.length },
+                        sender: this.context.self
+                    });
+                }
             } else if (msg.type === 'pool.stats') {
                 if (msg.sender) {
+                    // 确保发送响应，修复对 request 的响应
                     await this.context.send(msg.sender, {
                         type: 'pool.stats.result',
                         payload: {

@@ -55,7 +55,7 @@ async function main() {
 
   // CPU intensive endpoint (fibonacci)
   router.get("/cpu/:n", async (ctx: HttpContext) => {
-    const n = parseInt(ctx.params.n) || 10;
+    const n = parseInt(ctx.params?.n ?? "10") || 10;
     const fib = (n: number): number => {
       if (n <= 1) return n;
       return fib(n - 1) + fib(n - 2);

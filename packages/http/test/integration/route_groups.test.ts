@@ -1,12 +1,11 @@
 import { describe, expect, test, beforeAll, afterAll } from 'bun:test';
 import { ActorSystem } from '@bactor/core';
-import { createHttpSystem, HttpResponses, HttpStatus, RouteGroupConfig } from '../../src';
+import { createHttpSystem, HttpResponses, HttpStatus, RouteGroupConfig, HttpActorSystem } from '../../src';
 import type { HttpContext } from '../../src';
 
 describe('Route Groups Integration', () => {
-    let system;
-    let httpSystem;
-    let server;
+    let system: ActorSystem;
+    let httpSystem: HttpActorSystem; // 使用明确的类型代替 any
     const PORT = 3000 + Math.floor(Math.random() * 1000); // Random port to avoid conflicts
 
     beforeAll(async () => {
@@ -18,13 +17,13 @@ describe('Route Groups Integration', () => {
         });
 
         // Define API routes for users
-        const userRoutes = {
+        const userRoutes: RouteGroupConfig = {
             prefix: '/api/users',
             routes: [
                 {
                     method: 'GET',
                     pattern: '/',
-                    handler: async (context) => {
+                    handler: async (context: HttpContext) => {
                         return HttpResponses.json(
                             { users: [{ id: 1, name: 'John' }, { id: 2, name: 'Jane' }] }
                         );
@@ -33,7 +32,7 @@ describe('Route Groups Integration', () => {
                 {
                     method: 'GET',
                     pattern: '/:id',
-                    handler: async (context) => {
+                    handler: async (context: HttpContext) => {
                         const userId = context.params.id;
                         return HttpResponses.json(
                             { user: { id: userId, name: 'User ' + userId } }
@@ -50,7 +49,7 @@ describe('Route Groups Integration', () => {
         await httpSystem.addRoute({
             method: 'GET',
             pattern: '/',
-            handler: async (context) => {
+            handler: async (context: HttpContext) => {
                 return HttpResponses.json({
                     message: 'Welcome to the API',
                     endpoints: {

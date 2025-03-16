@@ -48,10 +48,27 @@ class ErrorProneActor extends Actor {
     }
 }
 
+// TestSender actor that stores messages in a public property for assertions
+class TestSenderActor extends Actor {
+    public lastMessage: any = null;
+
+    constructor(context: ActorContext) {
+        super(context);
+    }
+
+    protected behaviors(): void {
+        this.addBehavior('default', (msg) => {
+            // Store message directly in a public property
+            this.lastMessage = msg;
+        });
+    }
+}
+
 describe('SupervisorActor', () => {
     let system: ActorSystem;
     let supervisorRef: PID;
     let workerRef: PID;
+    let testSenderRef: PID;
 
     beforeEach(async () => {
         // Create a new actor system for each test
@@ -70,11 +87,16 @@ describe('SupervisorActor', () => {
             }
         });
 
+        // Create a test sender actor
+        testSenderRef = await system.spawn({
+            actorClass: TestSenderActor
+        });
+
         // Tell the supervisor to supervise the worker
         await system.send(supervisorRef, {
             type: 'supervise',
             payload: { child: workerRef },
-            sender: null
+            sender: undefined // 使用 undefined 代替 null
         });
     });
 
@@ -84,37 +106,22 @@ describe('SupervisorActor', () => {
     });
 
     test('should handle message passing', async () => {
-        // Define a test message sender
-        const testSender = await system.spawn({
-            actorClass: class TestSender extends Actor {
-                constructor(context: ActorContext) {
-                    super(context);
-                }
-
-                protected behaviors(): void {
-                    this.addBehavior('default', (msg) => {
-                        // Just store the message for assertion
-                        this.context.state.set('lastMessage', msg);
-                    });
-                }
-            }
-        });
-
         // Send a ping message to the worker
         await system.send(workerRef, {
             type: 'ping',
-            sender: testSender
+            sender: testSenderRef
         });
 
         // Wait a bit for the message to be processed
         await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Get the response from the test actor's state
-        const lastMessage = system.getActor(testSender.id).context.state.get('lastMessage');
+        // Get the response from the test actor directly
+        const testSender = system.getActor(testSenderRef.id) as TestSenderActor;
+        expect(testSender).toBeDefined();
 
-        expect(lastMessage).not.toBe(undefined);
-        expect(lastMessage.type).toBe('pong');
-        expect(lastMessage.payload.from).toBe('test-worker');
+        expect(testSender.lastMessage).toBeDefined();
+        expect(testSender.lastMessage.type).toBe('pong');
+        expect(testSender.lastMessage.payload.from).toBe('test-worker');
     });
 
     // This test demonstrates that the supervisor handles errors
@@ -136,7 +143,7 @@ describe('SupervisorActor', () => {
             await system.send(workerRef, {
                 type: 'throw',
                 payload: { errorType: 'temporary' },
-                sender: null
+                sender: undefined // 使用 undefined 代替 null
             });
 
             // Wait for the error to be handled

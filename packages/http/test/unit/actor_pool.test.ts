@@ -1,5 +1,5 @@
 import { test, expect, describe, mock, beforeEach, afterEach } from 'bun:test';
-import { ActorSystem, Actor, ActorContext } from '@bactor/core';
+import { ActorSystem, Actor, ActorContext, PID } from '@bactor/core';
 import { ActorPool } from '../../src/actors/pool/actor_pool';
 
 // Mock worker actor class for testing
@@ -35,11 +35,15 @@ class TestWorkerActor extends Actor {
 
 describe('ActorPool', () => {
     let system: ActorSystem;
-    let poolRef: any;
+    let poolRef: PID;
+    let testSender: PID;
 
     beforeEach(async () => {
         // Create a new actor system for each test
         system = new ActorSystem('test-system');
+
+        // Create a test sender PID
+        testSender = { id: 'test-sender', address: undefined };
 
         // Create an actor pool
         poolRef = await system.spawn({
@@ -62,9 +66,9 @@ describe('ActorPool', () => {
 
     test('should create the specified number of workers', async () => {
         // Get stats from the pool
-        const response = await system.ask(poolRef, {
+        const response = await system.request(poolRef, {
             type: 'pool.stats',
-            sender: system.deadLetter
+            sender: testSender
         });
 
         expect(response.type).toBe('pool.stats.result');
@@ -79,10 +83,10 @@ describe('ActorPool', () => {
 
         // Send multiple work requests
         for (let i = 0; i < requests; i++) {
-            const response = await system.ask(poolRef, {
+            const response = await system.request(poolRef, {
                 type: 'work',
                 payload: `work-${i}`,
-                sender: system.deadLetter
+                sender: testSender
             });
 
             results.push(response.payload);
@@ -112,16 +116,16 @@ describe('ActorPool', () => {
         await system.send(poolRef, {
             type: 'pool.resize',
             payload: { size: 5 },
-            sender: system.deadLetter
+            sender: testSender
         });
 
         // Give some time for resize operation to complete
         await new Promise(resolve => setTimeout(resolve, 100));
 
         // Get stats from the pool
-        const response = await system.ask(poolRef, {
+        const response = await system.request(poolRef, {
             type: 'pool.stats',
-            sender: system.deadLetter
+            sender: testSender
         });
 
         expect(response.payload.size).toBe(5);

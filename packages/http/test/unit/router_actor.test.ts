@@ -1,12 +1,12 @@
 import { test, expect, describe, mock, beforeEach } from 'bun:test';
-import { ActorSystem, ActorContext } from '@bactor/core';
+import { ActorSystem, ActorContext, PID, Message } from '@bactor/core';
 import { RouterActor, RouteConfig, RouteGroupConfig } from '../../src/actors/router_actor';
-import { HttpRequest, HttpContext } from '../../src/types';
+import { HttpRequest, HttpContext, HttpResponse } from '../../src/types';
 
 describe('RouterActor', () => {
-    let system;
-    let context;
-    let router;
+    let system: ActorSystem;
+    let context: Partial<ActorContext>;
+    let router: RouterActor;
 
     // Setup before each test
     beforeEach(() => {
@@ -16,22 +16,23 @@ describe('RouterActor', () => {
         context = {
             self: { id: 'test-router' },
             send: mock(() => Promise.resolve()),
-            request: mock(() => Promise.resolve({
+            // Use as any to bypass the type check for the mock function
+            request: mock((_target: PID, _message: Message) => Promise.resolve({
                 type: 'router.response',
                 payload: {
                     status: 200,
                     headers: new Headers({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ message: 'Hello' })
                 }
-            }))
+            })) as any
         };
 
-        router = new RouterActor(context);
+        router = new RouterActor(context as ActorContext);
     });
 
     test('should add a single route', async () => {
         // Mock route handler
-        const mockHandler = mock(async (context) => {
+        const mockHandler = mock(async (context: HttpContext): Promise<HttpResponse> => {
             return {
                 status: 200,
                 headers: new Headers({ 'Content-Type': 'application/json' }),
@@ -40,7 +41,7 @@ describe('RouterActor', () => {
         });
 
         // Add route
-        const routeConfig = {
+        const routeConfig: RouteConfig = {
             method: 'GET',
             pattern: '/hello',
             handler: mockHandler
@@ -57,11 +58,23 @@ describe('RouterActor', () => {
 
     test('should add a route group', async () => {
         // Mock route handlers
-        const listHandler = mock(() => { });
-        const getHandler = mock(() => { });
+        const listHandler = mock((context: HttpContext): Promise<HttpResponse> => {
+            return Promise.resolve({
+                status: 200,
+                headers: new Headers(),
+                body: ''
+            });
+        });
+        const getHandler = mock((context: HttpContext): Promise<HttpResponse> => {
+            return Promise.resolve({
+                status: 200,
+                headers: new Headers(),
+                body: ''
+            });
+        });
 
         // Create route group
-        const groupConfig = {
+        const groupConfig: RouteGroupConfig = {
             prefix: '/api/users',
             routes: [
                 {
@@ -91,24 +104,33 @@ describe('RouterActor', () => {
     test('should match route with parameters', async () => {
         const params = router['matchRoute']('/users/123', '/users/:id');
         expect(params).not.toBe(null);
-        expect(params.id).toBe('123');
+        if (params) {
+            expect(params.id).toBe('123');
+        }
     });
 
     test('should match route with optional parameters when present', async () => {
         const params = router['matchRoute']('/users/123', '/users/:id?');
         expect(params).not.toBe(null);
-        expect(params.id).toBe('123');
+        if (params) {
+            expect(params.id).toBe('123');
+        }
     });
 
     test('should match route with optional parameters when missing', async () => {
         const params = router['matchRoute']('/users', '/users/:id?');
         expect(params).not.toBe(null);
-        expect(params.id).toBe(undefined);
+        if (params) {
+            // 使用 toBe(undefined) 或 toBeUndefined() 都可以
+            expect(params.id).toBeUndefined();
+        }
     });
 
     test('should match wildcard routes', async () => {
         const params = router['matchRoute']('/files/images/photo.jpg', '/files/*');
         expect(params).not.toBe(null);
-        expect(params['*']).toBe('images/photo.jpg');
+        if (params) {
+            expect(params['*']).toBe('images/photo.jpg');
+        }
     });
 }); 

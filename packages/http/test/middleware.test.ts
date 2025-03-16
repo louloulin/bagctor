@@ -137,7 +137,8 @@ describe('Middleware Tests', () => {
           method: 'GET',
           url: '/test',
           headers: new Headers(),
-          state: new Map()
+          state: new Map(),
+          body: null
         },
         state: new Map()
       };
@@ -157,7 +158,8 @@ describe('Middleware Tests', () => {
           method: 'OPTIONS',
           url: '/test',
           headers: new Headers(),
-          state: new Map()
+          state: new Map(),
+          body: null
         },
         state: new Map()
       };
@@ -178,7 +180,8 @@ describe('Middleware Tests', () => {
           method: 'GET',
           url: '/test',
           headers: new Headers(),
-          state: new Map()
+          state: new Map(),
+          body: null
         },
         state: new Map()
       };
@@ -200,7 +203,8 @@ describe('Middleware Tests', () => {
           headers: new Headers({
             'Authorization': 'Bearer demo-token'
           }),
-          state: new Map()
+          state: new Map(),
+          body: null
         },
         state: new Map()
       };

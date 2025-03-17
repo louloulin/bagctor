@@ -1,12 +1,12 @@
 import { Agent } from '@mastra/core/agent';
 import { openai } from '@ai-sdk/openai';
-import { Bagctor } from './bagctor';
+import { Bagctor } from '../bagctor';
 import {
     AgentInteractionProtocol,
     SharedAgentMemory,
     DistributedAgentOrchestrator
-} from './distributed-interaction';
-import { MessageType } from './types';
+} from '../distributed-interaction';
+import { MessageType } from '../types';
 
 /**
  * 分布式智能体交互示例

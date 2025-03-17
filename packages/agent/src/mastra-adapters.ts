@@ -121,17 +121,18 @@ export class MastraInstanceAdapter {
      * 获取Mastra实例的所有工作流
      */
     getWorkflows(): Record<string, any> {
-        return this.mastraInstance.workflows || {};
+        return this.mastraInstance.getWorkflows?.() || {};
     }
 
     /**
      * 获取指定名称的工作流
      */
     getWorkflow(name: string): any {
-        if (!this.mastraInstance.workflows || !this.mastraInstance.workflows[name]) {
+        const workflows = this.mastraInstance.getWorkflows?.() || {};
+        if (!workflows || !workflows[name]) {
             throw new Error(`工作流 ${name} 不存在`);
         }
-        return this.mastraInstance.workflows[name];
+        return workflows[name];
     }
 
     /**

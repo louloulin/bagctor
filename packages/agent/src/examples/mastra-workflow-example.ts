@@ -1,9 +1,9 @@
 import { Agent } from '@mastra/core/agent';
 import { Mastra } from '@mastra/core';
-import { Bagctor } from './bagctor';
+import { Bagctor } from '../bagctor';
 import { z } from 'zod';
-import { Step, Workflow } from './workflow-compat';
-import { MastraWorkflowAdapter, MastraInstanceAdapter } from './mastra-adapters';
+import { Step, Workflow } from '../workflow-compat';
+import { MastraWorkflowAdapter, MastraInstanceAdapter } from '../mastra-adapters';
 import { openai } from '@ai-sdk/openai';
 
 /**
@@ -91,7 +91,7 @@ async function bagctorMastraWorkflowExample() {
             article: z.string()
         }),
         execute: async ({ context }) => {
-            const research = context.machineContext.getStepPayload<{ research: string }>('researchStep').research;
+            const research = (context.machineContext.getStepPayload('researchStep') as any)?.research || '';
             const agent = context.agentsMap['writingAgent'];
 
             const result = await agent.generate(`根据以下研究内容创建一篇引人入胜的文章:\n\n${research}`);
@@ -106,7 +106,7 @@ async function bagctorMastraWorkflowExample() {
             finalArticle: z.string()
         }),
         execute: async ({ context }) => {
-            const article = context.machineContext.getStepPayload<{ article: string }>('writingStep').article;
+            const article = (context.machineContext.getStepPayload('writingStep') as any)?.article || '';
             const agent = context.agentsMap['editingAgent'];
 
             const result = await agent.generate(`请编辑和优化以下文章，提高其质量和专业性:\n\n${article}`);
@@ -192,12 +192,14 @@ async function integrateMastraWorkflowsExample() {
     // 创建Mastra实例
     const mastra = new Mastra({
         agents: { copywriterAgent, editorAgent },
-        workflows: { myWorkflow }
+        workflows: {
+            myWorkflow: myWorkflow as any
+        }
     });
 
     // 创建工作流适配器
     const workflowAdapter = new MastraWorkflowAdapter(
-        { ...bagctor.agents, ...mastra.agents },
+        { ...bagctor.agents, ...(mastra as any).getAgents?.() || {} },
         // @ts-ignore - 从Bagctor获取节点信息
         bagctor.distributedNodes ? new Map(bagctor.distributedNodes.map(node => [node.id, node])) : new Map(),
         'local-node'
@@ -256,8 +258,7 @@ async function distributedWorkflowErrorHandlingExample() {
         id: 'recoveryStep',
         execute: async ({ context }) => {
             try {
-                // 尝试获取前一步骤的结果
-                const prevResult = context.machineContext.getStepPayload<{ result: string }>('unreliableStep');
+                const prevResult = context.machineContext.getStepPayload('unreliableStep') as any;
                 return { finalResult: `恢复步骤处理结果: ${prevResult?.result || '无结果'}` };
             } catch (error) {
                 // 前一步骤失败，执行恢复逻辑

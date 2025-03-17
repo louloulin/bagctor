@@ -48,15 +48,15 @@ export class Bagctor {
             if (Array.isArray(config.mastra)) {
                 // 处理Mastra实例数组
                 config.mastra.forEach(mastraInstance => {
-                    if (mastraInstance.agents) {
-                        this.agentsMap = { ...this.agentsMap, ...mastraInstance.agents };
-                    }
+                    // 使用getter方法或安全地获取agents
+                    const mastraAgents = (mastraInstance as any).getAgents?.() || {};
+                    this.agentsMap = { ...this.agentsMap, ...mastraAgents };
                 });
             } else {
                 // 处理单个Mastra实例
-                if (config.mastra.agents) {
-                    this.agentsMap = { ...this.agentsMap, ...config.mastra.agents };
-                }
+                // 使用getter方法或安全地获取agents
+                const mastraAgents = (config.mastra as any).getAgents?.() || {};
+                this.agentsMap = { ...this.agentsMap, ...mastraAgents };
             }
         }
 
@@ -71,12 +71,17 @@ export class Bagctor {
      * 设置当前节点并建立与其他节点的连接
      */
     private async initializeDistributedEnvironment() {
+        // 确保distributionConfig存在
+        if (!this.distributionConfig) {
+            this.distributionConfig = {};
+        }
+
         // 创建当前节点
         const currentNode: DistributedNode = {
             id: `node-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-            type: this.distributionConfig.nodeType || 'primary',
+            type: this.distributionConfig?.nodeType || 'primary',
             host: 'localhost',
-            port: this.distributionConfig.serverPort || 9000,
+            port: this.distributionConfig?.serverPort || 9000,
             status: 'online',
             agents: Object.keys(this.agentsMap),
             resources: {
@@ -90,8 +95,8 @@ export class Bagctor {
         this.nodes.set(currentNode.id, currentNode);
 
         // 如果是工作节点，连接到主节点
-        if (currentNode.type === 'worker' && this.distributionConfig.primaryHost) {
-            await this.connectToPrimary(this.distributionConfig.primaryHost, this.distributionConfig.primaryPort || 9000);
+        if (currentNode.type === 'worker' && this.distributionConfig?.primaryHost) {
+            await this.connectToPrimary(this.distributionConfig.primaryHost, this.distributionConfig?.primaryPort || 9000);
         }
 
         console.log(`分布式环境已初始化。节点ID: ${currentNode.id}, 类型: ${currentNode.type}`);

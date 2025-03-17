@@ -4,7 +4,7 @@ import { Bagctor } from '../bagctor';
 import { z } from 'zod';
 import { Step, Workflow } from '../workflow-compat';
 import { MastraWorkflowAdapter, MastraInstanceAdapter } from '../mastra-adapters';
-import { openai } from '@ai-sdk/openai';
+import { createQwen } from 'qwen-ai-provider';
 
 /**
  * Mastra兼容的分布式工作流示例
@@ -12,23 +12,29 @@ import { openai } from '@ai-sdk/openai';
  * 这个示例展示了如何在Bagctor中使用兼容Mastra API的分布式工作流
  */
 
+// 配置Qwen模型
+const qwen = createQwen({
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: 'sk-bc977c4e31e542f1a34159cb42478198',
+});
+
 // 创建智能体
 const researchAgent = new Agent({
     name: 'researchAgent',
-    instructions: '你是一个专注于研究和收集信息的智能体，擅长深入分析主题并提供详细结果。',
-    model: openai('gpt-4o'),
+    instructions: 'You are a research assistant. Your task is to gather relevant information on the topic.',
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 const writingAgent = new Agent({
     name: 'writingAgent',
-    instructions: '你是一个专注于内容创作的智能体，擅长将研究结果转化为清晰、有吸引力的文章。',
-    model: openai('gpt-4o'),
+    instructions: 'You are a content writer. Your task is to create well-written articles based on research.',
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 const editingAgent = new Agent({
     name: 'editingAgent',
-    instructions: '你是一个专注于内容审核和优化的智能体，擅长改进文章质量，纠正错误，并提高其专业性。',
-    model: openai('gpt-4o'),
+    instructions: 'You are an editor. Your task is to improve and polish written content.',
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 // 创建Bagctor实例
@@ -136,14 +142,14 @@ async function integrateMastraWorkflowsExample() {
     // 创建Mastra实例和工作流
     const copywriterAgent = new Agent({
         name: 'copywriterAgent',
-        instructions: '你是一个专业的文案撰写者，擅长创建吸引人的营销内容。',
-        model: openai('gpt-4o-mini'),
+        instructions: 'You are a copywriter who creates engaging marketing content.',
+        model: qwen('qwen-plus-2024-12-20'),
     });
 
     const editorAgent = new Agent({
         name: 'editorAgent',
-        instructions: '你是一个专业的编辑，擅长优化和完善内容。',
-        model: openai('gpt-4o-mini'),
+        instructions: 'You are an editor who polishes and improves written content.',
+        model: qwen('qwen-plus-2024-12-20'),
     });
 
     // 创建Mastra步骤

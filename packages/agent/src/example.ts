@@ -1,7 +1,13 @@
 import { Agent } from '@mastra/core/agent';
 import { Mastra } from '@mastra/core';
-import { openai } from '@ai-sdk/openai';
+import { createQwen } from 'qwen-ai-provider';
 import { Bagctor } from './bagctor';
+
+// 配置Qwen模型
+const qwen = createQwen({
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: 'sk-bc977c4e31e542f1a34159cb42478198',
+});
 
 // Example usage of Bagctor with multiple agents and Mastra instances
 
@@ -9,19 +15,19 @@ import { Bagctor } from './bagctor';
 const researchAgent = new Agent({
     name: 'researchAgent',
     instructions: 'You research information thoroughly.',
-    model: openai('gpt-4o'),
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 const writingAgent = new Agent({
     name: 'writingAgent',
     instructions: 'You craft well-written content.',
-    model: openai('gpt-4o'),
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 const codeAgent = new Agent({
     name: 'codeAgent',
     instructions: 'You write clean and efficient code.',
-    model: openai('gpt-4o'),
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 // Create Mastra instances
@@ -62,7 +68,7 @@ const bagctorMixed = new Bagctor({
         customAgent: new Agent({
             name: 'customAgent',
             instructions: 'You handle custom tasks efficiently.',
-            model: openai('gpt-4o'),
+            model: qwen('qwen-plus-2024-12-20'),
         })
     },
     mastra: [mastra1, mastra2],

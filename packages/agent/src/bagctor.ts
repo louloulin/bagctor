@@ -8,21 +8,30 @@ import {
     SharedAgentMemory,
     DistributedErrorHandler
 } from './distributed-interaction';
+import { z } from 'zod';
+import { EventEmitter } from 'events';
+import { MCPIntegrationManager, MCPIntegrationOptions } from './mcp';
+import { MemoryManager, createMemoryManager, SharedMemoryContext } from './memory';
+import { WorkflowGraph, createWorkflowGraph } from './workflow-state';
 
 /**
  * Bagctor是一个分布式智能体系统，通过Actor模型扩展了Mastra的能力
  */
-export class Bagctor {
+export class Bagctor extends EventEmitter {
     private agentsMap: Record<string, Agent> = {};
     private distributionConfig: BagctorConfig['distribution'];
     private nodes: Map<NodeIdentifier, DistributedNode> = new Map();
     private isDistributedMode: boolean = false;
+    private mcpManager?: MCPIntegrationManager;
+    private _memoryManager?: MemoryManager;
+    private useWorkflowGraph: boolean = false;
 
     /**
      * 创建一个新的Bagctor实例
      * @param config Bagctor实例的配置
      */
     constructor(config: BagctorConfig = {}) {
+        super();
         this.distributionConfig = config.distribution || {};
         this.isDistributedMode = this.distributionConfig.clustered || false;
 
@@ -63,6 +72,48 @@ export class Bagctor {
         // 初始化分布式环境
         if (this.isDistributedMode) {
             this.initializeDistributedEnvironment();
+        }
+
+        // 初始化 MCP 集成
+        if (config.mcp) {
+            this.initializeMCPIntegration(config.mcp);
+        }
+
+        // 初始化记忆管理系统
+        if (config.memory?.enabled) {
+            this._memoryManager = createMemoryManager({
+                agents: this.agentsMap,
+                cacheSize: config.memory.cacheSize,
+                storage: config.memory.customStorage
+            });
+            console.log('记忆管理系统已初始化');
+        }
+
+        // 设置工作流图系统启用状态
+        this.useWorkflowGraph = !!config.workflow?.graphEnabled;
+        if (this.useWorkflowGraph) {
+            console.log('工作流图系统已启用');
+        }
+    }
+
+    /**
+     * 初始化 MCP 集成
+     */
+    private async initializeMCPIntegration(options: MCPIntegrationOptions): Promise<void> {
+        try {
+            this.mcpManager = new MCPIntegrationManager(options);
+            await this.mcpManager.initialize();
+
+            // 如果配置了自动发现工具，则为所有智能体注册 MCP 工具
+            if (options.autoDiscoverTools) {
+                for (const agent of Object.values(this.agentsMap)) {
+                    await this.mcpManager.registerToolsToAgent(agent);
+                }
+            }
+
+            console.log('MCP 集成初始化完成');
+        } catch (error) {
+            console.error('初始化 MCP 集成时出错:', error);
         }
     }
 
@@ -125,6 +176,50 @@ export class Bagctor {
     }
 
     /**
+     * 获取 MCP 管理器
+     */
+    get mcpIntegration() {
+        return this.mcpManager;
+    }
+
+    /**
+     * 启用 MCP 支持
+     * @param options MCP 集成选项
+     */
+    async enableMCP(options: MCPIntegrationOptions): Promise<void> {
+        await this.initializeMCPIntegration(options);
+    }
+
+    /**
+     * 为特定智能体注册 MCP 工具
+     * @param agentId 智能体 ID
+     * @param toolIds 要注册的工具 ID 列表，如果为空则注册所有可用工具
+     */
+    async registerMCPToolsToAgent(agentId: string, toolIds?: string[]): Promise<string[]> {
+        if (!this.mcpManager) {
+            throw new Error('MCP 集成未初始化');
+        }
+
+        const agent = this.agentsMap[agentId];
+        if (!agent) {
+            throw new Error(`找不到智能体: ${agentId}`);
+        }
+
+        if (toolIds && toolIds.length > 0) {
+            const registeredTools: string[] = [];
+            for (const toolId of toolIds) {
+                const success = await this.mcpManager.registerSpecificToolToAgent(agent, toolId);
+                if (success) {
+                    registeredTools.push(toolId);
+                }
+            }
+            return registeredTools;
+        } else {
+            return await this.mcpManager.registerToolsToAgent(agent);
+        }
+    }
+
+    /**
      * 注册远程智能体
      * @param agentName 要注册的远程智能体名称
      */
@@ -135,6 +230,31 @@ export class Bagctor {
 
         // 实现远程智能体注册逻辑
         return Promise.resolve({} as Agent);
+    }
+
+    /**
+     * 获取记忆管理器
+     */
+    get memoryManager(): MemoryManager | undefined {
+        return this._memoryManager;
+    }
+
+    /**
+     * 启用记忆管理系统
+     */
+    enableMemorySystem(options: {
+        cacheSize?: number;
+        customStorage?: any;
+    } = {}): MemoryManager {
+        if (!this._memoryManager) {
+            this._memoryManager = createMemoryManager({
+                agents: this.agentsMap,
+                cacheSize: options.cacheSize,
+                storage: options.customStorage
+            });
+            console.log('记忆管理系统已启用');
+        }
+        return this._memoryManager;
     }
 
     /**
@@ -151,7 +271,12 @@ export class Bagctor {
             }
         }
 
-        return new Workflow(config, this.agentsMap);
+        // 根据配置创建工作流
+        if (this.useWorkflowGraph) {
+            return createWorkflowGraph(config, this.agentsMap);
+        } else {
+            return new Workflow(config, this.agentsMap);
+        }
     }
 
     /**
@@ -161,9 +286,10 @@ export class Bagctor {
     async createTeam(config: TeamConfig) {
         if (this.isDistributedMode) {
             // 在分布式模式下使用DistributedAgentOrchestrator
+            const strategy = config.orchestrationStrategy || 'sequential';
             const orchestrator = new DistributedAgentOrchestrator({
                 agents: config.agents,
-                strategy: config.orchestrationStrategy
+                strategy: strategy as 'hierarchical' | 'parallel' | 'sequential'
             });
 
             return {
@@ -196,7 +322,7 @@ export class Bagctor {
             // 在分布式模式下使用分布式编排器
             const orchestrator = new DistributedAgentOrchestrator({
                 agents: config.agents,
-                strategy: config.orchestrationStrategy as any
+                strategy: config.orchestrationStrategy as 'hierarchical' | 'parallel' | 'sequential'
             });
 
             return {
@@ -238,27 +364,45 @@ export class Bagctor {
      * 创建共享内存空间
      * @param id 内存空间ID
      */
-    async createSharedMemory(id: string): Promise<string> {
-        return await SharedAgentMemory.createWorkflowContext(id);
+    async createSharedMemory(id: string): Promise<string | SharedMemoryContext> {
+        // 如果启用了高级记忆管理系统，使用它
+        if (this._memoryManager) {
+            // 确保记忆管理器已初始化
+            if (!this._memoryManager) {
+                this._memoryManager = this.enableMemorySystem();
+            }
+
+            // 创建共享记忆上下文
+            const sharedContext = new SharedMemoryContext(this._memoryManager, id);
+            return sharedContext;
+        }
+        // 否则使用原有的分布式内存系统
+        else {
+            return await SharedAgentMemory.createWorkflowContext(id);
+        }
     }
 
     /**
      * 启动Bagctor服务
      * @param config 服务配置
      */
-    async serve(config: ServeConfig) {
-        const { port, enablePlayground = false } = config;
+    async serve(config: ServeConfig = {}) {
+        const port = config.port || 4111;
+        const enablePlayground = config.enablePlayground !== false;
 
-        console.log(`启动Bagctor服务，端口: ${port}...`);
-        console.log(`Playground ${enablePlayground ? '已启用' : '已禁用'}`);
+        console.log(`Bagctor服务启动在端口 ${port}`);
 
-        // 实现启动服务的逻辑
+        if (enablePlayground) {
+            console.log('Playground可在 http://localhost:' + port + '/playground 访问');
+        }
+
+        // 实现服务启动逻辑
 
         return {
             port,
             stop: async () => {
                 console.log('正在停止Bagctor服务...');
-                // 实现停止服务的逻辑
+                // 实现服务停止逻辑
             }
         };
     }

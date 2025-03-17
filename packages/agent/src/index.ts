@@ -1,6 +1,7 @@
-export * from './bagctor';
-export * from './workflow';
+export { Bagctor } from './bagctor';
+export { Workflow } from './workflow';
 export * from './types';
+export * from './mcp';
 export {
     Step as MastraStep,
     Workflow as MastraWorkflow,

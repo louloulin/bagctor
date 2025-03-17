@@ -1,5 +1,6 @@
 import { Agent } from '@mastra/core/agent';
 import { Mastra } from '@mastra/core';
+import { MCPIntegrationOptions } from './mcp';
 
 export interface BagctorDistributionConfig {
     clustered?: boolean;
@@ -15,6 +16,19 @@ export interface BagctorConfig {
     agents?: Record<string, Agent> | Agent[];
     mastra?: Mastra | Mastra[];
     distribution?: BagctorDistributionConfig;
+    mcp?: MCPIntegrationOptions;
+    memory?: {
+        enabled?: boolean;
+        cacheSize?: number;
+        customStorage?: any;
+    };
+    workflow?: {
+        graphEnabled?: boolean;
+        defaultRetry?: {
+            maxAttempts: number;
+            delay: number;
+        };
+    };
 }
 
 export interface WorkflowStep {
@@ -27,16 +41,21 @@ export interface WorkflowConfig {
     name: string;
     steps: WorkflowStep[];
     nodeAssignment?: Record<string, string>;
+    timeout?: number;
+    retry?: {
+        maxAttempts: number;
+        delay: number;
+    };
 }
 
 export interface TeamConfig {
-    name: string;
+    name?: string;
     agents: string[];
-    orchestrationStrategy: 'hierarchical' | 'parallel' | 'sequential';
+    orchestrationStrategy?: 'hierarchical' | 'parallel' | 'sequential';
 }
 
 export interface ServeConfig {
-    port: number;
+    port?: number;
     enablePlayground?: boolean;
 }
 
@@ -108,7 +127,7 @@ export interface DistributedNode {
     type: 'primary' | 'worker'; // 节点类型
     host: string;              // 主机地址
     port: number;              // 端口
-    status: 'online' | 'offline' | 'error'; // 状态
+    status: 'online' | 'offline' | 'busy' | 'error'; // 状态
     agents: string[];          // 托管的智能体列表
     resources: {               // 节点资源信息
         cpu: number;             // CPU使用率

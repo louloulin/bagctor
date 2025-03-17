@@ -2,68 +2,118 @@ import { Agent } from '@mastra/core/agent';
 import { WorkflowConfig, WorkflowStep } from './types';
 
 /**
- * Workflow represents a sequence of agent operations
+ * 工作流执行结果
+ */
+interface WorkflowResult {
+    [key: string]: any;
+}
+
+/**
+ * 工作流执行上下文
+ */
+interface WorkflowContext {
+    [key: string]: any;
+}
+
+/**
+ * 工作流
+ * 用于编排多个智能体协同工作
  */
 export class Workflow {
     private config: WorkflowConfig;
-    private agentsMap: Record<string, Agent>;
+    private agents: Record<string, Agent>;
+    private context: WorkflowContext = {};
+    private maxRetries: number = 0;
+    private retryDelay: number = 1000;
 
     /**
-     * Create a new workflow
-     * @param config Workflow configuration
-     * @param agentsMap Map of available agents
+     * 创建一个新的工作流
+     * @param config 工作流配置
+     * @param agents 智能体映射或Bagctor实例
      */
-    constructor(config: WorkflowConfig, agentsMap: Record<string, Agent>) {
+    constructor(config: WorkflowConfig, agents: Record<string, Agent>) {
         this.config = config;
-        this.agentsMap = agentsMap;
+        this.agents = agents;
 
-        // Validate that all agents referenced in steps exist
-        for (const step of config.steps) {
-            if (!agentsMap[step.agent]) {
-                throw new Error(`Agent "${step.agent}" referenced in workflow "${config.name}" does not exist`);
-            }
+        // 设置重试配置
+        if (config.retry) {
+            this.maxRetries = config.retry.maxAttempts;
+            this.retryDelay = config.retry.delay;
         }
     }
 
     /**
-     * Execute the workflow
-     * @param initialInput Optional initial input to the workflow
+     * 执行工作流
+     * @returns 工作流执行结果
      */
-    async execute(initialInput?: string): Promise<Record<string, any>> {
-        const context: Record<string, any> = {};
+    async execute(): Promise<WorkflowResult> {
+        console.log(`开始执行工作流: ${this.config.name}`);
+        const context: WorkflowContext = {};
 
-        // Add initial input to context if provided
-        if (initialInput) {
-            context['initialInput'] = initialInput;
-        }
+        // 按顺序执行每个步骤
+        for (let i = 0; i < this.config.steps.length; i++) {
+            const step = this.config.steps[i];
+            console.log(`执行步骤 ${i + 1}/${this.config.steps.length}: ${step.agent}`);
 
-        // Execute each step in sequence
-        for (const step of this.config.steps) {
-            const agent = this.agentsMap[step.agent];
+            // 获取智能体
+            const agent = this.agents[step.agent];
+            if (!agent) {
+                throw new Error(`找不到智能体: ${step.agent}`);
+            }
 
-            // Determine input for this step
-            let stepInput: string;
+            // 生成输入
+            let input: string;
             if (typeof step.input === 'function') {
-                stepInput = step.input(context);
+                input = step.input(context);
             } else {
-                stepInput = step.input;
+                input = step.input;
+            }
 
-                // Replace placeholders in the input string if it's a template
-                if (stepInput.includes('${')) {
-                    Object.keys(context).forEach(key => {
-                        stepInput = stepInput.replace(`\${${key}}`, context[key]);
-                    });
+            // 执行步骤，带重试
+            let result = null;
+            let attempts = 0;
+            let success = false;
+
+            while (!success && attempts <= this.maxRetries) {
+                attempts++;
+                try {
+                    // 执行智能体
+                    result = await agent.generate(input);
+                    success = true;
+                } catch (error) {
+                    console.error(`步骤 ${i + 1} 执行失败 (尝试 ${attempts}/${this.maxRetries + 1}):`, error);
+
+                    if (attempts <= this.maxRetries) {
+                        console.log(`等待 ${this.retryDelay}ms 后重试...`);
+                        await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+                    } else {
+                        throw new Error(`步骤 ${i + 1} 执行失败: ${error instanceof Error ? error.message : String(error)}`);
+                    }
                 }
             }
 
-            // Execute the agent
-            const result = await agent.generate(stepInput);
-
-            // Store the result in the context with the specified output key
-            context[step.output] = result.text;
+            // 更新上下文
+            if (result) {
+                context[step.output] = result.text;
+            }
         }
 
+        console.log(`工作流 ${this.config.name} 执行完成`);
         return context;
+    }
+
+    /**
+     * 将对象转换为 JSON 字符串
+     */
+    toJSON(): string {
+        return JSON.stringify({
+            name: this.config.name,
+            steps: this.config.steps.map(step => ({
+                agent: step.agent,
+                input: typeof step.input === 'function' ? '<函数>' : step.input,
+                output: step.output
+            }))
+        }, null, 2);
     }
 
     /**

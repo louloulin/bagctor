@@ -44,12 +44,12 @@ Bagctor Agent模块整合Mastra的智能代理与Bagctor的Actor模型，创建�
 
 Bagctor完全实现了Mastra的API接口，支持直接替换使用。
 
-### 2.1 Agent创建
+### 2.1 Agent创建 ✅
 
 ```typescript
 // 标准Mastra导入方式
 import { Agent } from "@mastra/core/agent";
-import { openai } from "@ai-sdk/openai";
+import { createQwen } from "qwen-ai-provider";
 
 // 导入工具
 
@@ -57,14 +57,14 @@ import { openai } from "@ai-sdk/openai";
 export const myAgent = new Agent({
   name: "My Agent",
   instructions: "You are a helpful assistant that provides useful information.",
-  model: openai("gpt-4o-mini"),
+  model: qwen("qwen-plus-2024-12-20"),
   tools: {
     myTool: tools.myTool,
   },
 });
 ```
 
-### 2.2 Mastra实例创建
+### 2.2 Mastra实例创建 ✅
 
 ```typescript
 // 导入Mastra核心类
@@ -79,7 +79,7 @@ export const mastra = new Mastra({
 });
 ```
 
-### 2.3 Generate和Stream API
+### 2.3 Generate和Stream API ✅
 
 ```typescript
 // 使用Generate API
@@ -147,12 +147,12 @@ Bagctor完全兼容Mastra的单Agent和多Agent使用模式，支持灵活的Age
 ```typescript
 // 创建单个Agent并直接使用
 import { Agent } from "@mastra/core/agent";
-import { openai } from "@ai-sdk/openai";
+import { createQwen } from "qwen-ai-provider";
 
 const myAgent = new Agent({
   name: "SingleAgent",
   instructions: "You are a helpful assistant.",
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
 });
 
 // 直接使用单个Agent
@@ -528,7 +528,7 @@ Bagctor支持基于工具的智能体协作模式，与Mastra完全兼容，可�
 #### 3.8.1 智能体封装为工具
 
 ```typescript
-import { openai } from "@ai-sdk/openai";
+import { createQwen } from "qwen-ai-provider";
 import { anthropic } from "@ai-sdk/anthropic";
 import { Agent, createTool } from "@bagctor/agent";
 import { z } from "zod";
@@ -543,7 +543,7 @@ const copywriterAgent = new Agent({
 const editorAgent = new Agent({
   name: "Editor",
   instructions: "你是一个专业编辑，擅长修改和完善文章。",
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
 });
 
 // 将智能体封装为工具
@@ -599,7 +599,7 @@ const publisherAgent = new Agent({
 1. 首先调用文案撰写者创建初始内容
 2. 然后调用编辑完善文章
 3. 最后返回最终的高质量文章`,
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
   tools: { 
     copywriterTool, 
     editorTool 
@@ -1145,7 +1145,7 @@ const hybridWorkflow = workflowAdapter.createWorkflow({
 
 ```typescript
 // 创建混合模型智能体团队
-import { openai } from "@ai-sdk/openai";
+import { createQwen } from "qwen-ai-provider";
 import { anthropic } from "@ai-sdk/anthropic";
 import { mistral } from "@ai-sdk/mistral";
 import { baidu } from "@ai-sdk/baidu";
@@ -1160,7 +1160,7 @@ const creativeAgent = new Agent({
 const analyticalAgent = new Agent({
   name: "分析智能体",
   instructions: "你负责数据分析和逻辑推理",
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
 });
 
 const summaryAgent = new Agent({
@@ -1329,7 +1329,7 @@ const codeCapability = bagctor.createAgentCapability({
 const enhancedAgent = await bagctor.createAgent({
   name: "enhancedResearchAgent",
   instructions: "You are a versatile research assistant.",
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
   capabilities: [searchCapability, codeCapability]
 });
 
@@ -1361,7 +1361,7 @@ const longTermMemory = await bagctor.createLongTermMemory({
 const memoryEnhancedAgent = await bagctor.createAgent({
   name: "memoryEnhancedAgent",
   instructions: "You are an agent with long-term memory capabilities.",
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
   memory: longTermMemory
 });
 
@@ -1500,13 +1500,13 @@ AgentActor是核心组件，将Mastra的Agent与Actor模型结合。
 // 导入必要组件
 import { Bagctor } from "@bagctor/agent";
 import { Agent } from "@mastra/core/agent";
-import { openai } from "@ai-sdk/openai";
+import { createQwen } from "qwen-ai-provider";
 
 // 创建代理
 const myAgent = new Agent({
   name: "DistributedAgent",
   instructions: "您是一个分布式环境中运行的助手",
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
   // 工具定义
 });
 
@@ -1569,7 +1569,7 @@ Bagctor Agent模块与Mastra的集成主要包括以下几个方面:
 
 2. **AI SDK集成**:
    - 与`@ai-sdk`生态系统无缝集成
-   - 支持多种模型提供者（OpenAI, Anthropic等）
+   - 支持多种模型提供者（OpenAI, Anthropic, Qwen等）✅
    - 统一的API接口
 
 3. **分布式扩展**:
@@ -1585,13 +1585,13 @@ Bagctor Agent模块与Mastra的集成主要包括以下几个方面:
 ```typescript
 // 导入必要模块
 import { Agent } from "@mastra/core/agent";
-import { openai } from "@ai-sdk/openai";
+import { createQwen } from "qwen-ai-provider";
 
 // 创建股票代理
 export const stockAgent = new Agent({
   name: "Stock Agent",
   instructions: "You are a helpful assistant that provides current stock prices. When asked about a stock, use the stock price tool to fetch the stock price.",
-  model: openai("gpt-4o-mini"),
+  model: qwen("qwen-plus-2024-12-20"),
   tools: {
     stockPrices: tools.stockPrices,
   },
@@ -1619,7 +1619,7 @@ await bagctor.serve({ port: 4111 });
 const researchAgent = new Agent({
   name: "Research Agent",
   instructions: "You research information thoroughly.",
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
   tools: { search, browserTools }
 });
 
@@ -1627,7 +1627,7 @@ const researchAgent = new Agent({
 const writingAgent = new Agent({
   name: "Writing Agent",
   instructions: "You craft well-written content.",
-  model: openai("gpt-4o"),
+  model: qwen("qwen-plus-2024-12-20"),
   tools: { textAnalysis }
 });
 

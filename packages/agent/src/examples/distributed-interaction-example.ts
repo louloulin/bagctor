@@ -1,5 +1,5 @@
 import { Agent } from '@mastra/core/agent';
-import { openai } from '@ai-sdk/openai';
+import { createQwen } from 'qwen-ai-provider';
 import { Bagctor } from '../bagctor';
 import {
     AgentInteractionProtocol,
@@ -14,25 +14,31 @@ import { MessageType } from '../types';
  * 这个示例展示了如何设置分布式智能体环境，并实现不同智能体之间的交互
  */
 
+// 配置Qwen模型
+const qwen = createQwen({
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: 'sk-bc977c4e31e542f1a34159cb42478198',
+});
+
 // 创建研究智能体
 const researchAgent = new Agent({
     name: 'researchAgent',
     instructions: '你是一个专注于研究和收集信息的智能体。你擅长深入分析主题并提供详细的研究结果。',
-    model: openai('gpt-4o'),
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 // 创建写作智能体
 const writingAgent = new Agent({
     name: 'writingAgent',
     instructions: '你是一个专注于内容创作的智能体。你擅长将研究结果转化为清晰、有吸引力的文章。',
-    model: openai('gpt-4o'),
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 // 创建审核智能体
 const reviewAgent = new Agent({
     name: 'reviewAgent',
     instructions: '你是一个专注于内容审核和优化的智能体。你擅长改进文章质量，纠正错误，并提高其专业性。',
-    model: openai('gpt-4o'),
+    model: qwen('qwen-plus-2024-12-20'),
 });
 
 // 创建分布式Bagctor环境

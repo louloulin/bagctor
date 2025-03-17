@@ -1,0 +1,220 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chef Michel - 智能烹饪助手</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+      color: #333;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    h1 {
+      color: #d35400;
+    }
+    .chef-avatar {
+      font-size: 50px;
+      margin-bottom: 10px;
+    }
+    .chat-container {
+      background-color: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      padding: 20px;
+      height: 400px;
+      overflow-y: auto;
+      margin-bottom: 20px;
+    }
+    .message {
+      margin-bottom: 15px;
+      padding: 10px 15px;
+      border-radius: 18px;
+      max-width: 80%;
+      position: relative;
+    }
+    .user-message {
+      background-color: #e8f4fd;
+      align-self: flex-end;
+      margin-left: auto;
+    }
+    .assistant-message {
+      background-color: #f0f0f0;
+      align-self: flex-start;
+    }
+    .input-area {
+      display: flex;
+      gap: 10px;
+    }
+    #user-input {
+      flex-grow: 1;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 20px;
+      font-size: 16px;
+    }
+    button {
+      background-color: #d35400;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #e67e22;
+    }
+    .loading {
+      display: none;
+      text-align: center;
+      margin: 10px 0;
+    }
+    .loading-dots span {
+      animation: loading 1.4s infinite;
+      display: inline-block;
+      margin: 0 2px;
+    }
+    .loading-dots span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+    .loading-dots span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+    @keyframes loading {
+      0%, 80%, 100% { transform: scale(0); } 
+      40% { transform: scale(1.0); }
+    }
+    .recipe-card {
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 15px 0;
+      background-color: #fffaf0;
+    }
+    .recipe-title {
+      color: #d35400;
+      font-weight: bold;
+      margin-top: 0;
+    }
+    .ingredients-list, .steps-list {
+      padding-left: 20px;
+    }
+    .nutrition-section {
+      background-color: #f9f9f9;
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 10px;
+    }
+    pre {
+      white-space: pre-wrap;
+      font-family: inherit;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="chef-avatar">👨‍🍳</div>
+    <h1>Chef Michel</h1>
+    <p>您的智能烹饪助手</p>
+  </header>
+  
+  <div class="chat-container" id="chat-container">
+    <div class="message assistant-message">
+      <p>您好！我是Chef Michel，您的智能烹饪助手。请告诉我您有哪些食材，我会给您提供烹饪建议。</p>
+    </div>
+  </div>
+  
+  <div class="loading" id="loading">
+    <div class="loading-dots">
+      <span>●</span><span>●</span><span>●</span>
+    </div>
+    <p>Chef Michel正在思考...</p>
+  </div>
+  
+  <div class="input-area">
+    <input type="text" id="user-input" placeholder="输入您有的食材，例如：鸡胸肉，西兰花，大蒜">
+    <button id="send-btn">发送</button>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const chatContainer = document.getElementById('chat-container');
+      const userInput = document.getElementById('user-input');
+      const sendButton = document.getElementById('send-btn');
+      const loading = document.getElementById('loading');
+      
+      // 发送消息
+      async function sendMessage() {
+        const message = userInput.value.trim();
+        if (!message) return;
+        
+        // 显示用户消息
+        addMessage(message, 'user');
+        userInput.value = '';
+        
+        // 显示加载动画
+        loading.style.display = 'block';
+        
+        try {
+          // 发送请求到服务器
+          const response = await fetch('/generate', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+              message: `我有这些食材：${message}。我可以做什么料理？请提供详细的烹饪步骤和营养分析。` 
+            })
+          });
+          
+          const data = await response.json();
+          
+          // 显示助手回复
+          addMessage(data.text, 'assistant');
+        } catch (error) {
+          console.error('发生错误:', error);
+          addMessage('抱歉，发生了错误，请重试。', 'assistant');
+        } finally {
+          // 隐藏加载动画
+          loading.style.display = 'none';
+        }
+      }
+      
+      // 添加消息到聊天界面
+      function addMessage(text, sender) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${sender}-message`;
+        
+        const messagePara = document.createElement('pre');
+        messagePara.textContent = text;
+        messageDiv.appendChild(messagePara);
+        
+        chatContainer.appendChild(messageDiv);
+        
+        // 滚动到底部
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+      
+      // 点击发送按钮发送消息
+      sendButton.addEventListener('click', sendMessage);
+      
+      // 按Enter键发送消息
+      userInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          sendMessage();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

@@ -28,6 +28,8 @@
   "devDependencies": {
     "@ai-sdk/cohere": "1.1.14",
     "@ai-sdk/openai": "1.2.3",
+    "@types/cors": "2.8.17",
+    "@types/express": "5.0.0",
     "@types/jest": "29.5.14",
     "@types/node": "^20.0.0",
     "jest": "^29.5.0",
@@ -41,8 +43,12 @@
   "dependencies": {
     "@libp2p/plaintext": "^2.0.13",
     "colorette": "2.0.20",
+    "cors": "2.8.5",
+    "event-source-polyfill": "1.0.31",
+    "express": "4.21.2",
     "lru-cache": "^11.0.2",
-    "qwen-ai-provider": "0.1.0"
+    "qwen-ai-provider": "0.1.0",
+    "xstate": "5.19.2"
   },
   "packageManager": "bun@1.0.28"
 }

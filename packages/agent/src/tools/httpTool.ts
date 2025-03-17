@@ -42,7 +42,7 @@ export type HttpToolMessage = ExecuteHttpRequestMessage;
 /**
  * HTTP工具Actor，用于发送HTTP请求并返回响应
  */
-export class HttpToolActor extends Actor<any, HttpToolMessage> {
+export class HttpToolActor extends Actor<any, Message> {
     constructor(context: ActorContext) {
         super(context);
     }
@@ -57,10 +57,11 @@ export class HttpToolActor extends Actor<any, HttpToolMessage> {
     /**
      * 处理HTTP请求
      */
-    private async handleRequest(message: HttpToolMessage): Promise<void> {
+    private async handleRequest(message: Message): Promise<void> {
         if (message.type !== 'execute') return;
 
-        const { url, method = 'GET', headers = {}, body, timeout = 10000 } = message.params;
+        const execMessage = message as ExecuteHttpRequestMessage;
+        const { url, method = 'GET', headers = {}, body, timeout = 10000 } = execMessage.params;
         const responseId = (message as any).responseId;
 
         try {
@@ -121,16 +122,16 @@ export class HttpToolActor extends Actor<any, HttpToolMessage> {
                     responseId
                 } as HttpResponseMessage);
             }
-        } catch (error) {
+        } catch (error: any) {
             // 处理错误
             if (message.sender) {
                 await this.send(message.sender, {
                     type: 'error',
-                    error: `HTTP request failed: ${error.message}`,
+                    error: `HTTP request failed: ${error?.message || String(error)}`,
                     details: {
                         url,
                         method,
-                        error: error.toString()
+                        error: error?.toString() || String(error)
                     },
                     responseId
                 } as HttpErrorMessage);

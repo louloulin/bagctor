@@ -77,7 +77,7 @@ import { Actor, Message } from '@bactor/core';
 import { PID } from '@bactor/common';
 import type { ActorContext } from '@bactor/core';
 
-export class AgentActor extends Actor<AgentActorState, AgentMessage> {
+export class AgentActor extends Actor<AgentActorState, Message> {
   private agent: Agent;
   
   constructor(context: ActorContext, initialState?: AgentActorState) {
@@ -85,7 +85,7 @@ export class AgentActor extends Actor<AgentActorState, AgentMessage> {
     this.agent = this.createMockAgent(this.state.name, this.state.instructions);
   }
   
-  async defaultBehavior(message: AgentMessage): Promise<void> {
+  async defaultBehavior(message: Message): Promise<void> {
     // 处理生成请求、工具调用等
   }
   
@@ -197,6 +197,7 @@ const orchestrator = agentSystem.createAgent({
 3. AgentSystem实现
 4. HTTP工具Actor
 5. 基本消息处理和工具注册
+6. 构建配置优化 - 参考HTTP包解决了构建和类型问题
 
 🔜 进行中:
 1. 测试套件完善
@@ -206,7 +207,7 @@ const orchestrator = agentSystem.createAgent({
 
 ## 下一步行动
 
-1. **修复构建错误**: 解决模块依赖和类型问题
+1. ✅ **修复构建错误**: 已解决模块依赖和类型问题
 2. **完善测试**: 添加更多自动化测试用例
 3. **实现AgentMemory**: 开发基于Actor的内存系统
 4. **扩展工具集**: 添加更多实用工具
@@ -217,10 +218,10 @@ const orchestrator = agentSystem.createAgent({
 1. **状态管理**: 使用Actor状态机制管理代理状态
 2. **消息序列化**: 已实现基本的消息处理机制
 3. **错误处理**: 实现了基本的错误处理和超时机制
-4. **类型兼容性**: 需要解决构建时的类型错误
+4. **类型兼容性**: ✅ 已解决构建时的类型错误，参照HTTP包配置
 
 ## 结论
 
 Bagctor Agent 模块的基础框架已经实现，包括核心AgentActor和AgentSystem组件，以及HTTP工具集成。通过Actor模型，我们创建了可扩展的代理系统基础架构，能够支持多代理协作和工具使用。
 
-后续工作将聚焦于解决构建错误、扩展工具集、实现内存系统和RAG集成，以及与真实LLM的集成。 
+模块现在可以成功构建，并已通过基本测试。后续工作将聚焦于扩展测试套件、实现内存系统、扩展工具集和RAG集成，以及与真实LLM的集成。 

@@ -80,7 +80,7 @@ export type ResponseMessage = ErrorResponseMessage | ResultResponseMessage | Exe
  * AgentActor将Mastra的Agent集成到Bagctor的Actor模型中
  * 允许通过Actor系统进行智能代理的分布式协作
  */
-export class AgentActor extends Actor<AgentActorState, AgentMessage> {
+export class AgentActor extends Actor<AgentActorState, Message> {
     private agent: Agent;
     private toolMap: Map<string, (params: any) => Promise<any>>;
 
@@ -135,14 +135,15 @@ export class AgentActor extends Actor<AgentActorState, AgentMessage> {
     /**
      * 默认行为处理函数
      */
-    private async defaultBehavior(message: AgentMessage): Promise<void> {
+    private async defaultBehavior(message: Message): Promise<void> {
         try {
             const responseId = (message as any).responseId;
 
             if (message.type === 'generate') {
                 // 处理文本生成请求
                 try {
-                    const result = await this.agent.generate(message.content);
+                    const generateMsg = message as GenerateMessage;
+                    const result = await this.agent.generate(generateMsg.content);
                     if (message.sender) {
                         await this.send(message.sender, {
                             type: 'result',
@@ -150,18 +151,19 @@ export class AgentActor extends Actor<AgentActorState, AgentMessage> {
                             responseId
                         } as ResultResponseMessage);
                     }
-                } catch (error) {
+                } catch (error: any) {
                     if (message.sender) {
                         await this.send(message.sender, {
                             type: 'error',
-                            error: error.message,
+                            error: error?.message || String(error),
                             responseId
                         } as ErrorResponseMessage);
                     }
                 }
             } else if (message.type === 'tool_call') {
                 // 处理工具调用请求
-                const { toolName, params } = message;
+                const toolCallMsg = message as ToolCallMessage;
+                const { toolName, params } = toolCallMsg;
 
                 // 首先检查内部工具映射
                 if (this.toolMap.has(toolName)) {
@@ -175,11 +177,11 @@ export class AgentActor extends Actor<AgentActorState, AgentMessage> {
                                 responseId
                             } as ResultResponseMessage);
                         }
-                    } catch (error) {
+                    } catch (error: any) {
                         if (message.sender) {
                             await this.send(message.sender, {
                                 type: 'error',
-                                error: `Error executing tool '${toolName}': ${error.message}`,
+                                error: `Error executing tool '${toolName}': ${error?.message || String(error)}`,
                                 responseId
                             } as ErrorResponseMessage);
                         }
@@ -208,31 +210,32 @@ export class AgentActor extends Actor<AgentActorState, AgentMessage> {
                         sender: this.context.self,
                         responseId
                     } as ExecuteToolMessage);
-                } catch (error) {
+                } catch (error: any) {
                     if (message.sender) {
                         await this.send(message.sender, {
                             type: 'error',
-                            error: `Error calling tool '${toolName}': ${error.message}`,
+                            error: `Error calling tool '${toolName}': ${error?.message || String(error)}`,
                             responseId
                         } as ErrorResponseMessage);
                     }
                 }
             } else if (message.type === 'tool_result') {
                 // 处理来自工具Actor的结果
+                const toolResultMsg = message as ToolResultMessage;
                 if (message.sender) {
                     await this.send(message.sender, {
                         type: 'result',
-                        payload: message.result,
+                        payload: toolResultMsg.result,
                         responseId
                     } as ResultResponseMessage);
                 }
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("AgentActor处理消息出错:", error);
             if (message.sender) {
                 await this.send(message.sender, {
                     type: 'error',
-                    error: `Internal error: ${error.message}`,
+                    error: `Internal error: ${error?.message || String(error)}`,
                     responseId: (message as any).responseId
                 } as ErrorResponseMessage);
             }
@@ -266,7 +269,7 @@ export class AgentActor extends Actor<AgentActorState, AgentMessage> {
                     } as ExecuteToolMessage).then(() => {
                         // 工具执行请求已发送，结果将通过消息异步返回
                         resolve({ status: 'pending', message: `Tool ${toolName} execution requested` });
-                    }).catch(error => {
+                    }).catch((error: any) => {
                         reject(error);
                     });
                 });

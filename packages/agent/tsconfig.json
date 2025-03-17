@@ -1,15 +1,35 @@
 {
-    "extends": "../../tsconfig.base.json",
+    "extends": "../../tsconfig.json",
     "compilerOptions": {
         "outDir": "dist",
-        "rootDir": "src"
+        "rootDir": "src",
+        "target": "ES2022",
+        "module": "ES2022",
+        "moduleResolution": "bundler",
+        "typeRoots": [
+            "./src/types",
+            "./node_modules/@types"
+        ],
+        "paths": {
+            "@/*": [
+                "./src/*"
+            ]
+        }
     },
     "include": [
-        "src/**/*.ts"
+        "src/**/*"
     ],
     "exclude": [
         "node_modules",
         "dist",
-        "test"
+        "test/**/*"
+    ],
+    "references": [
+        {
+            "path": "../core"
+        },
+        {
+            "path": "../common"
+        }
     ]
 }

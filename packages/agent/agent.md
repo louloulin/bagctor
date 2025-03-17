@@ -257,7 +257,141 @@ const result = await orchestrator.execute(
 );
 ```
 
-### 3.4 Bagctor的Agent传递扩展
+### 3.4 分布式工作流
+
+Bagctor提供了强大的分布式工作流功能，完全兼容Mastra的工作流API，同时扩展了分布式执行能力。
+
+#### 3.4.1 创建分布式工作流
+
+```typescript
+import { Step, MastraWorkflow } from "@bagctor/agent";
+import { z } from "zod";
+
+// 创建工作流适配器
+const workflowAdapter = bagctor.createWorkflowAdapter();
+
+// 定义工作流触发模式
+const triggerSchema = z.object({
+  topic: z.string().describe('文章主题'),
+});
+
+// 创建兼容Mastra的工作流
+const contentWorkflow = workflowAdapter.createWorkflow({
+  name: 'content-creation-workflow',
+  triggerSchema,
+  // 分配步骤到不同节点
+  nodeAssignment: {
+    researchStep: 'node-1',
+    writingStep: 'node-2',
+    editingStep: 'node-3'
+  }
+});
+
+// 创建研究步骤
+const researchStep = workflowAdapter.createStep({
+  id: 'researchStep',
+  outputSchema: z.object({
+    research: z.string()
+  }),
+  execute: async ({ context }) => {
+    const topic = context.machineContext.triggerData?.topic;
+    const agent = context.agentsMap['researchAgent'];
+    
+    const result = await agent.generate(`研究主题: ${topic}`);
+    return { research: result.text };
+  }
+});
+
+// 创建写作步骤
+const writingStep = workflowAdapter.createStep({
+  id: 'writingStep',
+  execute: async ({ context }) => {
+    const research = context.machineContext.getStepPayload('researchStep').research;
+    const agent = context.agentsMap['writingAgent'];
+    
+    const result = await agent.generate(`基于研究创建文章: ${research}`);
+    return { article: result.text };
+  }
+});
+
+// 按顺序添加步骤并提交工作流
+contentWorkflow.step(researchStep).then(writingStep).commit();
+```
+
+#### 3.4.2 执行分布式工作流
+
+```typescript
+// 创建运行实例
+const { runId, start } = contentWorkflow.createRun();
+
+// 执行工作流
+const results = await start({
+  triggerData: { topic: '分布式系统的优势' }
+});
+
+console.log('工作流执行结果:', results.results);
+```
+
+#### 3.4.3 工作流容错与恢复
+
+Bagctor的分布式工作流提供了自动容错和恢复能力：
+
+```typescript
+// 创建带有容错特性的工作流
+const robustWorkflow = workflowAdapter.createWorkflow({
+  name: 'robust-workflow',
+  // 启用自动恢复
+  recovery: {
+    enabled: true,
+    maxRetries: 3,
+    retryDelay: 1000
+  }
+});
+
+// 创建可能失败的步骤
+const unreliableStep = workflowAdapter.createStep({
+  id: 'unreliableStep',
+  execute: async ({ context }) => {
+    // 业务逻辑
+    // 如果步骤失败，Bagctor会自动尝试在其他节点上重新执行
+  }
+});
+
+// 创建恢复步骤
+const recoveryStep = workflowAdapter.createStep({
+  id: 'recoveryStep',
+  execute: async ({ context }) => {
+    try {
+      // 尝试获取前一步骤的结果
+      const prevResult = context.machineContext.getStepPayload('unreliableStep');
+      return { finalResult: prevResult };
+    } catch (error) {
+      // 前一步骤失败，执行恢复逻辑
+      return { finalResult: '备用结果' };
+    }
+  }
+});
+
+robustWorkflow.step(unreliableStep).then(recoveryStep).commit();
+```
+
+### 3.5 智能体交互协议
+
+Bagctor提供了智能体之间的直接通信机制：
+
+```typescript
+// 直接在智能体之间发送消息
+const response = await bagctor.sendMessage(
+  'sourceAgentId',
+  'targetAgentId',
+  '处理这个研究数据并提供分析'
+);
+
+// 创建共享内存空间
+const memoryId = await bagctor.createSharedMemory('project-xyz');
+```
+
+### 3.6 Bagctor的Agent传递扩展
 
 Bagctor通过Actor模型增强了Mastra的Agent传递能力，支持分布式环境下的高效Agent协作。
 
@@ -325,6 +459,941 @@ const distributedWorkflow = await bagctor.createWorkflow({
 
 // 执行分布式工作流
 const distributedResult = await distributedWorkflow.execute();
+```
+
+### 3.7 分布式调度系统
+
+Bagctor实现了强大的分布式调度系统，用于在集群中高效分配和执行任务：
+
+```typescript
+// 配置分布式调度策略
+const bagctor = new Bagctor({
+  agents: { myAgent },
+  distribution: {
+    clustered: true,
+    scheduler: {
+      strategy: "load-balanced", // 负载均衡策略
+      priorityQueues: true,      // 启用优先级队列
+      resourceAwareness: {       // 资源感知调度
+        enabled: true,
+        cpuThreshold: 80,        // CPU利用率阈值
+        memoryThreshold: 70      // 内存利用率阈值
+      }
+    }
+  }
+});
+```
+
+#### 3.7.1 调度策略
+
+Bagctor支持多种分布式调度策略：
+
+1. **负载均衡**: 根据节点负载分配任务
+2. **就近执行**: 将任务分配到数据所在节点，减少数据传输
+3. **资源感知**: 考虑CPU、内存等资源状况进行任务分配
+4. **亲和性调度**: 相关任务分配到同一节点
+5. **容错式调度**: 考虑节点可靠性进行任务分配
+
+#### 3.7.2 优先级调度
+
+```typescript
+// 创建不同优先级的任务
+const criticalTask = await bagctor.schedule({
+  agentId: "emergencyAgent",
+  input: "处理紧急情况",
+  priority: "critical" // 最高优先级
+});
+
+const normalTask = await bagctor.schedule({
+  agentId: "regularAgent",
+  input: "处理常规请求",
+  priority: "normal"  // 正常优先级
+});
+
+// 批量调度任务
+const tasks = await bagctor.scheduleBatch([
+  { agentId: "agent1", input: "任务1", priority: "high" },
+  { agentId: "agent2", input: "任务2", priority: "medium" },
+  { agentId: "agent3", input: "任务3", priority: "low" }
+]);
+
+// 等待所有任务完成
+const results = await Promise.all(tasks.map(task => task.completed()));
+```
+
+### 3.8 基于工具的智能体协作
+
+Bagctor支持基于工具的智能体协作模式，与Mastra完全兼容，可以用工具封装智能体，创建层次化的协作系统。
+
+#### 3.8.1 智能体封装为工具
+
+```typescript
+import { openai } from "@ai-sdk/openai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { Agent, createTool } from "@bagctor/agent";
+import { z } from "zod";
+
+// 创建专业领域智能体
+const copywriterAgent = new Agent({
+  name: "Copywriter",
+  instructions: "你是一个专业文案撰写者，能够创作高质量的博客文章。",
+  model: anthropic("claude-3-5-sonnet-20241022"),
+});
+
+const editorAgent = new Agent({
+  name: "Editor",
+  instructions: "你是一个专业编辑，擅长修改和完善文章。",
+  model: openai("gpt-4o"),
+});
+
+// 将智能体封装为工具
+const copywriterTool = createTool({
+  id: "copywriter-agent",
+  description: "调用文案撰写智能体来创作博客文章。",
+  inputSchema: z.object({
+    topic: z.string().describe("博客主题"),
+    keywords: z.array(z.string()).optional().describe("关键词列表")
+  }),
+  outputSchema: z.object({
+    copy: z.string().describe("博客文章内容")
+  }),
+  execute: async ({ context }) => {
+    const prompt = context.keywords 
+      ? `创作一篇关于${context.topic}的博客文章，包含以下关键词：${context.keywords.join(', ')}`
+      : `创作一篇关于${context.topic}的博客文章`;
+      
+    const result = await copywriterAgent.generate(prompt);
+    return { copy: result.text };
+  }
+});
+
+const editorTool = createTool({
+  id: "editor-agent",
+  description: "调用编辑智能体来修改和完善文章。",
+  inputSchema: z.object({
+    copy: z.string().describe("待编辑的文章"),
+    focus: z.string().optional().describe("编辑重点")
+  }),
+  outputSchema: z.object({
+    editedCopy: z.string().describe("编辑后的文章")
+  }),
+  execute: async ({ context }) => {
+    const prompt = context.focus
+      ? `编辑以下文章，重点关注${context.focus}：\n\n${context.copy}`
+      : `编辑以下文章，提升质量：\n\n${context.copy}`;
+      
+    const result = await editorAgent.generate(prompt);
+    return { editedCopy: result.text };
+  }
+});
+```
+
+#### 3.8.2 协调智能体（发布者模式）
+
+```typescript
+// 创建协调者智能体
+const publisherAgent = new Agent({
+  name: "Publisher",
+  instructions: `你是一个内容发布协调者。
+你的任务是协调文章创作过程：
+1. 首先调用文案撰写者创建初始内容
+2. 然后调用编辑完善文章
+3. 最后返回最终的高质量文章`,
+  model: openai("gpt-4o"),
+  tools: { 
+    copywriterTool, 
+    editorTool 
+  }
+});
+
+// 创建Bagctor实例
+const bagctor = new Bagctor({
+  agents: { 
+    publisherAgent,
+    copywriterAgent,
+    editorAgent
+  },
+  distribution: {
+    clustered: true,
+    // 分配智能体到不同节点
+    nodeAssignment: {
+      "publisherAgent": "primary-node",
+      "copywriterAgent": "worker-node-1",
+      "editorAgent": "worker-node-2"
+    }
+  }
+});
+
+// 使用协调智能体
+const result = await bagctor.agents.publisherAgent.generate(
+  "创建一篇关于分布式系统架构的博客文章"
+);
+
+console.log("最终文章:", result.text);
+```
+
+#### 3.8.3 工具链模式
+
+```typescript
+// 创建工具链
+const contentCreationChain = bagctor.createToolChain()
+  .add(copywriterTool, { 
+    id: "writing", 
+    input: (input) => ({ topic: input.topic, keywords: input.keywords })
+  })
+  .add(editorTool, {
+    id: "editing",
+    input: (input, results) => ({ copy: results.writing.copy, focus: input.focus })
+  })
+  .build();
+
+// 执行工具链
+const articleResult = await contentCreationChain.execute({
+  topic: "微服务架构",
+  keywords: ["容器化", "服务发现", "API网关"],
+  focus: "实践案例"
+});
+
+console.log("最终文章:", articleResult.editing.editedCopy);
+```
+
+### 3.9 智能体团队构建
+
+Bagctor提供了创建智能体团队的高级API，支持复杂协作场景。
+
+```typescript
+// 创建内容创作团队
+const contentTeam = await bagctor.createTeam({
+  name: "内容创作团队",
+  agents: {
+    manager: {
+      agent: "managerAgent",
+      role: "coordinator",
+      permissions: ["tool_access", "agent_delegation"]
+    },
+    writer: {
+      agent: "writerAgent",
+      role: "specialist"
+    },
+    editor: {
+      agent: "editorAgent",
+      role: "specialist"
+    },
+    researcher: {
+      agent: "researcherAgent",
+      role: "supporter",
+      tools: ["search", "dataRetrieval"]
+    }
+  },
+  collaborationModel: "hierarchical",
+  communicationProtocol: "event-based"
+});
+
+// 执行团队任务
+const result = await contentTeam.execute({
+  task: "创建一篇关于量子计算的综合报告",
+  parameters: {
+    length: "2000字",
+    audience: "技术读者",
+    deadline: "24小时"
+  }
+});
+
+// 监控团队活动
+contentTeam.on("agentActivity", (event) => {
+  console.log(`智能体 ${event.agentId} 正在执行: ${event.activity}`);
+});
+
+contentTeam.on("taskCompleted", (event) => {
+  console.log(`子任务完成: ${event.taskId}`);
+});
+```
+
+### 3.10 智能体知识共享和同步
+
+在分布式环境中，Bagctor提供了智能体间的知识共享机制。
+
+```typescript
+// 创建共享知识库
+const knowledgeSpace = await bagctor.createKnowledgeSpace("project-quantum");
+
+// 智能体贡献知识
+await knowledgeSpace.contribute({
+  agentId: "researchAgent",
+  knowledge: "量子比特的纠缠性质可以用于实现超密集编码。",
+  metadata: {
+    domain: "量子信息学",
+    confidence: 0.95,
+    source: "研究论文分析"
+  }
+});
+
+// 其他智能体访问知识
+const quantumKnowledge = await knowledgeSpace.query({
+  topic: "量子计算",
+  minConfidence: 0.8,
+  limit: 10
+});
+
+// 创建可同步的分布式内存
+const syncedMemory = await bagctor.createSyncedMemory({
+  id: "quantum-project-memory",
+  syncInterval: 500, // 毫秒
+  persistenceEnabled: true,
+  accessControl: {
+    writeAccess: ["researchAgent", "scientistAgent"],
+    readAccess: "all"
+  }
+});
+
+// 智能体使用同步内存
+await researchAgent.useMemory(syncedMemory);
+await scientistAgent.useMemory(syncedMemory);
+```
+
+### 3.11 高级工作流模式
+
+Bagctor支持多种高级工作流模式，适用于复杂的业务场景。
+
+#### 3.11.1 并行执行工作流
+
+```typescript
+// 创建并行执行工作流
+const parallelWorkflow = workflowAdapter.createWorkflow({
+  name: "parallel-processing",
+  triggerSchema: z.object({
+    topic: z.string().describe("分析主题"),
+  })
+});
+
+// 创建多个并行执行的步骤
+const marketAnalysisStep = workflowAdapter.createStep({
+  id: "marketAnalysis",
+  execute: async ({ context }) => {
+    const topic = context.machineContext.triggerData?.topic;
+    const result = await context.agentsMap.marketAnalyst.generate(
+      `分析${topic}的市场前景`
+    );
+    return { marketAnalysis: result.text };
+  }
+});
+
+const techAnalysisStep = workflowAdapter.createStep({
+  id: "techAnalysis",
+  execute: async ({ context }) => {
+    const topic = context.machineContext.triggerData?.topic;
+    const result = await context.agentsMap.techAnalyst.generate(
+      `分析${topic}的技术可行性`
+    );
+    return { techAnalysis: result.text };
+  }
+});
+
+const riskAnalysisStep = workflowAdapter.createStep({
+  id: "riskAnalysis",
+  execute: async ({ context }) => {
+    const topic = context.machineContext.triggerData?.topic;
+    const result = await context.agentsMap.riskAnalyst.generate(
+      `评估${topic}的潜在风险`
+    );
+    return { riskAnalysis: result.text };
+  }
+});
+
+// 合并步骤将并行结果整合
+const summaryStep = workflowAdapter.createStep({
+  id: "summary",
+  execute: async ({ context }) => {
+    const marketAnalysis = context.machineContext.getStepPayload("marketAnalysis").marketAnalysis;
+    const techAnalysis = context.machineContext.getStepPayload("techAnalysis").techAnalysis;
+    const riskAnalysis = context.machineContext.getStepPayload("riskAnalysis").riskAnalysis;
+    
+    const result = await context.agentsMap.summaryAgent.generate(`
+      根据以下分析创建综合报告:
+      
+      市场分析:
+      ${marketAnalysis}
+      
+      技术分析:
+      ${techAnalysis}
+      
+      风险分析:
+      ${riskAnalysis}
+    `);
+    
+    return { summary: result.text };
+  }
+});
+
+// 定义并行工作流
+parallelWorkflow
+  .step(marketAnalysisStep, { parallel: true })
+  .step(techAnalysisStep, { parallel: true })
+  .step(riskAnalysisStep, { parallel: true })
+  .after(["marketAnalysis", "techAnalysis", "riskAnalysis"], summaryStep)
+  .commit();
+```
+
+#### 3.11.2 条件分支工作流
+
+```typescript
+// 创建条件分支工作流
+const conditionalWorkflow = workflowAdapter.createWorkflow({
+  name: "content-review-workflow",
+  triggerSchema: z.object({
+    content: z.string().describe("待审核内容"),
+  })
+});
+
+// 审核步骤
+const reviewStep = workflowAdapter.createStep({
+  id: "review",
+  outputSchema: z.object({
+    quality: z.number().describe("内容质量分数"),
+    feedback: z.string().describe("反馈意见")
+  }),
+  execute: async ({ context }) => {
+    const content = context.machineContext.triggerData?.content;
+    const result = await context.agentsMap.reviewAgent.generate(
+      `审核以下内容并给出1-10的质量评分和反馈意见:\n${content}`
+    );
+    
+    // 假设结果解析能够获取评分
+    const quality = parseQualityScore(result.text);
+    const feedback = extractFeedback(result.text);
+    
+    return { quality, feedback };
+  }
+});
+
+// 高质量内容发布步骤
+const publishStep = workflowAdapter.createStep({
+  id: "publish",
+  execute: async ({ context }) => {
+    const content = context.machineContext.triggerData?.content;
+    const feedback = context.machineContext.getStepPayload("review").feedback;
+    
+    // 发布内容
+    await context.agentsMap.publishAgent.generate(
+      `发布以下内容，并附上编辑反馈:\n内容:${content}\n反馈:${feedback}`
+    );
+    
+    return { status: "published" };
+  }
+});
+
+// 低质量内容修改步骤
+const reviseStep = workflowAdapter.createStep({
+  id: "revise",
+  execute: async ({ context }) => {
+    const content = context.machineContext.triggerData?.content;
+    const feedback = context.machineContext.getStepPayload("review").feedback;
+    
+    const result = await context.agentsMap.revisionAgent.generate(
+      `根据以下反馈修改内容:\n原内容:${content}\n反馈:${feedback}`
+    );
+    
+    return { revisedContent: result.text };
+  }
+});
+
+// 定义条件分支工作流
+conditionalWorkflow
+  .step(reviewStep)
+  .when({
+    condition: (context) => context.getStepPayload("review").quality >= 7,
+    then: publishStep,
+    else: reviseStep
+  })
+  .commit();
+```
+
+#### 3.11.3 递归工作流
+
+```typescript
+// 创建递归迭代工作流
+const recursiveWorkflow = workflowAdapter.createWorkflow({
+  name: "content-improvement-workflow",
+  triggerSchema: z.object({
+    content: z.string().describe("初始内容"),
+    iterations: z.number().default(3).describe("最大迭代次数")
+  })
+});
+
+// 优化步骤
+const improveStep = workflowAdapter.createStep({
+  id: "improve",
+  outputSchema: z.object({
+    improvedContent: z.string(),
+    iteration: z.number(),
+    qualityScore: z.number()
+  }),
+  execute: async ({ context }) => {
+    // 获取当前内容和迭代次数
+    const prevIteration = context.machineContext.getVariable("currentIteration") || 0;
+    const currentIteration = prevIteration + 1;
+    const maxIterations = context.machineContext.triggerData?.iterations || 3;
+    
+    // 获取上一次的内容，或使用初始内容
+    const prevContent = prevIteration === 0 
+      ? context.machineContext.triggerData?.content 
+      : context.machineContext.getStepPayload("improve").improvedContent;
+    
+    // 调用改进Agent
+    const result = await context.agentsMap.improvementAgent.generate(
+      `这是第${currentIteration}次迭代。请改进以下内容:\n${prevContent}`
+    );
+    
+    // 评估质量
+    const qualityResult = await context.agentsMap.qualityAgent.generate(
+      `评估以下内容的质量，返回1-10的分数:\n${result.text}`
+    );
+    const qualityScore = parseQualityScore(qualityResult.text);
+    
+    // 更新迭代计数
+    context.machineContext.setVariable("currentIteration", currentIteration);
+    
+    return { 
+      improvedContent: result.text, 
+      iteration: currentIteration,
+      qualityScore: qualityScore
+    };
+  }
+});
+
+// 递归步骤条件
+const shouldContinue = (context) => {
+  const currentResult = context.getStepPayload("improve");
+  const maxIterations = context.triggerData?.iterations || 3;
+  
+  // 如果达到足够质量或最大迭代次数，则停止
+  return currentResult.iteration < maxIterations && currentResult.qualityScore < 8;
+};
+
+// 最终化步骤
+const finalizeStep = workflowAdapter.createStep({
+  id: "finalize",
+  execute: async ({ context }) => {
+    const finalContent = context.machineContext.getStepPayload("improve").improvedContent;
+    const iterations = context.machineContext.getStepPayload("improve").iteration;
+    
+    return { 
+      finalContent, 
+      iterations,
+      status: "completed" 
+    };
+  }
+});
+
+// 定义递归工作流
+recursiveWorkflow
+  .step(improveStep)
+  .when({
+    condition: shouldContinue,
+    then: improveStep,
+    else: finalizeStep
+  })
+  .commit();
+```
+
+### 3.12 智能体事件系统
+
+Bagctor提供了强大的事件系统，用于监控和响应智能体活动。
+
+```typescript
+// 配置事件系统
+const bagctor = new Bagctor({
+  agents: { myAgent },
+  distribution: {
+    clustered: true
+  },
+  events: {
+    enabled: true,
+    persistence: true,
+    historyLimit: 1000
+  }
+});
+
+// 注册事件监听器
+bagctor.on("agent:start", (event) => {
+  console.log(`智能体 ${event.agentId} 开始执行任务: ${event.taskId}`);
+});
+
+bagctor.on("agent:complete", (event) => {
+  console.log(`智能体 ${event.agentId} 完成任务: ${event.taskId}`);
+  console.log(`执行时间: ${event.duration}ms`);
+});
+
+bagctor.on("agent:error", (event) => {
+  console.error(`智能体 ${event.agentId} 执行错误:`, event.error);
+});
+
+bagctor.on("workflow:step:start", (event) => {
+  console.log(`工作流 ${event.workflowId} 步骤 ${event.stepId} 开始执行`);
+});
+
+bagctor.on("workflow:step:complete", (event) => {
+  console.log(`工作流 ${event.workflowId} 步骤 ${event.stepId} 完成`);
+});
+
+// 创建自定义事件
+bagctor.emit("custom:projectStarted", {
+  projectId: "quantum-research",
+  timestamp: Date.now()
+});
+
+// 事件查询
+const recentErrors = await bagctor.queryEvents({
+  type: "agent:error",
+  timeRange: {
+    start: Date.now() - 24 * 60 * 60 * 1000, // 过去24小时
+    end: Date.now()
+  },
+  limit: 20
+});
+```
+
+### 3.13 智能体性能监控与可观察性
+
+```typescript
+// 启用性能监控
+const bagctor = new Bagctor({
+  agents: { myAgent },
+  monitoring: {
+    enabled: true,
+    metrics: {
+      agentLatency: true,
+      tokenUsage: true,
+      memoryUsage: true,
+      errorRates: true
+    },
+    exporters: {
+      prometheus: true,
+      openTelemetry: {
+        endpoint: "http://otel-collector:4318"
+      }
+    }
+  }
+});
+
+// 获取性能指标
+const metrics = await bagctor.getMetrics({
+  timeRange: {
+    start: Date.now() - 3600 * 1000, // 过去1小时
+    end: Date.now()
+  }
+});
+
+console.log("智能体延迟:", metrics.agentLatency);
+console.log("Token用量:", metrics.tokenUsage);
+console.log("内存使用:", metrics.memoryUsage);
+
+// 获取特定智能体的性能
+const agentMetrics = await bagctor.getAgentMetrics("researchAgent");
+console.log("调用次数:", agentMetrics.calls);
+console.log("平均响应时间:", agentMetrics.averageLatency);
+console.log("错误率:", agentMetrics.errorRate);
+
+// 跟踪分布式追踪
+const traceId = "trace-123456";
+const traces = await bagctor.getDistributedTraces(traceId);
+console.log("分布式追踪:", traces);
+```
+
+### 3.14 多智能体系统集成模式
+
+#### 3.14.1 外部智能体集成
+
+```typescript
+// 集成外部智能体系统
+const externalSystemAdapter = bagctor.createExternalSystemAdapter({
+  type: "restApi",
+  baseUrl: "https://external-ai-system.com/api",
+  authentication: {
+    type: "apiKey",
+    headerName: "X-API-Key",
+    value: process.env.EXTERNAL_API_KEY
+  }
+});
+
+// 注册外部智能体
+const externalAgent = await externalSystemAdapter.registerAgent({
+  id: "external-research-agent",
+  capabilities: ["research", "data-analysis"],
+  endpoint: "/agents/research"
+});
+
+// 在工作流中使用外部智能体
+const hybridWorkflow = workflowAdapter.createWorkflow({
+  name: "hybrid-workflow",
+  steps: [
+    {
+      id: "externalResearch",
+      agent: externalAgent,
+      input: (context) => `研究主题: ${context.topic}`
+    },
+    {
+      id: "internalProcessing",
+      agent: "localAgent",
+      input: (context) => `处理以下研究结果: ${context.getStepResult("externalResearch")}`
+    }
+  ]
+});
+```
+
+#### 3.14.2 混合模型智能体团队
+
+```typescript
+// 创建混合模型智能体团队
+import { openai } from "@ai-sdk/openai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { mistral } from "@ai-sdk/mistral";
+import { baidu } from "@ai-sdk/baidu";
+
+// 创建不同模型的智能体
+const creativeAgent = new Agent({
+  name: "创意智能体",
+  instructions: "你负责创意生成和创新思维",
+  model: anthropic("claude-3-5-sonnet-20241022"),
+});
+
+const analyticalAgent = new Agent({
+  name: "分析智能体",
+  instructions: "你负责数据分析和逻辑推理",
+  model: openai("gpt-4o"),
+});
+
+const summaryAgent = new Agent({
+  name: "总结智能体",
+  instructions: "你负责提炼要点和简明总结",
+  model: mistral("mistral-medium"),
+});
+
+const translationAgent = new Agent({
+  name: "翻译智能体",
+  instructions: "你负责多语言翻译",
+  model: baidu("ernie-4.0"),
+});
+
+// 创建混合团队
+const hybridTeam = await bagctor.createTeam({
+  name: "多模型智能体团队",
+  agents: {
+    creative: creativeAgent,
+    analytical: analyticalAgent,
+    summary: summaryAgent,
+    translation: translationAgent
+  },
+  collaborationModel: "specialized"
+});
+
+// 执行跨模型协作任务
+const result = await hybridTeam.execute({
+  task: "创建一个关于可持续发展的多语言报告，包括创意解决方案、数据分析和简明总结",
+  parameters: {
+    languages: ["英语", "中文", "法语", "西班牙语"]
+  }
+});
+```
+
+### 3.15 智能体系统部署模式
+
+#### 3.15.1 微服务部署模式
+
+```typescript
+// 主协调服务
+const coordinatorService = new Bagctor({
+  distribution: {
+    nodeType: "primary",
+    serviceDiscovery: {
+      type: "kubernetes",
+      namespace: "ai-services"
+    }
+  }
+});
+
+// 注册API路由
+coordinatorService.registerRoutes({
+  "/api/workflows": workflowRouter,
+  "/api/agents": agentRouter,
+  "/api/monitoring": monitoringRouter
+});
+
+// 工具微服务
+const toolService = new Bagctor({
+  distribution: {
+    nodeType: "worker",
+    workerType: "tool",
+    primaryDiscovery: {
+      type: "kubernetes",
+      service: "coordinator-service"
+    }
+  }
+});
+
+// 注册工具
+toolService.registerTools([
+  searchTool,
+  databaseTool,
+  calculationTool
+]);
+
+// 智能体微服务
+const agentService = new Bagctor({
+  agents: { 
+    researchAgent, 
+    writingAgent 
+  },
+  distribution: {
+    nodeType: "worker",
+    workerType: "agent",
+    primaryDiscovery: {
+      type: "kubernetes",
+      service: "coordinator-service"
+    },
+    healthCheck: {
+      enabled: true,
+      interval: 10000
+    }
+  }
+});
+
+// 内存微服务
+const memoryService = new Bagctor({
+  distribution: {
+    nodeType: "worker",
+    workerType: "memory",
+    primaryDiscovery: {
+      type: "kubernetes",
+      service: "coordinator-service"
+    },
+    storage: {
+      type: "distributed",
+      provider: "redis"
+    }
+  }
+});
+
+// 配置微服务网关
+const apiGateway = bagctor.createApiGateway({
+  port: 80,
+  routes: [
+    { path: "/api/workflows", service: "coordinator-service", port: 4111 },
+    { path: "/api/agents", service: "agent-service", port: 4112 },
+    { path: "/api/tools", service: "tool-service", port: 4113 },
+    { path: "/api/memory", service: "memory-service", port: 4114 }
+  ],
+  authentication: {
+    enabled: true,
+    type: "jwt"
+  },
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000,
+    max: 100
+  }
+});
+```
+
+### 3.16 智能体能力扩展
+
+#### 3.16.1 智能体能力增强插件
+
+```typescript
+// 创建智能体能力增强插件
+const searchCapability = bagctor.createAgentCapability({
+  name: "webSearch",
+  description: "Enhances agent with web search abilities",
+  tools: [searchTool, browserTool],
+  memoryTypes: ["searchResults", "browsingHistory"],
+  setup: async (agent) => {
+    // 配置Agent以使用搜索能力
+    agent.instructions += "\n\nYou have access to web search capabilities. Use the search tool when you need to find information online.";
+    return agent;
+  }
+});
+
+const codeCapability = bagctor.createAgentCapability({
+  name: "codeDevelopment",
+  description: "Enhances agent with code development abilities",
+  tools: [repositoryTool, compilerTool, testingTool],
+  memoryTypes: ["codeSnippets", "errorMessages"],
+  setup: async (agent) => {
+    // 配置Agent以使用代码开发能力
+    agent.instructions += "\n\nYou can develop code using repository access, compilation and testing tools.";
+    return agent;
+  }
+});
+
+// 创建增强智能体
+const enhancedAgent = await bagctor.createAgent({
+  name: "enhancedResearchAgent",
+  instructions: "You are a versatile research assistant.",
+  model: openai("gpt-4o"),
+  capabilities: [searchCapability, codeCapability]
+});
+
+// 使用增强智能体
+const result = await enhancedAgent.generate(
+  "研究最新的Transformer架构并提供Python实现"
+);
+```
+
+#### 3.16.2 智能体长期记忆增强
+
+```typescript
+// 配置长期记忆系统
+const longTermMemory = await bagctor.createLongTermMemory({
+  type: "structuredKnowledge",
+  storage: {
+    type: "vectorDatabase",
+    provider: "pgVector"
+  },
+  retrieval: {
+    strategy: "hybrid",
+    semanticWeight: 0.7,
+    keywordWeight: 0.3
+  },
+  persistence: true
+});
+
+// 记忆增强智能体
+const memoryEnhancedAgent = await bagctor.createAgent({
+  name: "memoryEnhancedAgent",
+  instructions: "You are an agent with long-term memory capabilities.",
+  model: openai("gpt-4o"),
+  memory: longTermMemory
+});
+
+// 存储到长期记忆
+await memoryEnhancedAgent.remember({
+  type: "fact",
+  content: "量子计算机利用量子叠加和纠缠原理执行计算。",
+  metadata: {
+    domain: "量子计算",
+    confidence: 0.95,
+    source: "研究论文"
+  }
+});
+
+// 查询长期记忆
+const quantumMemories = await memoryEnhancedAgent.recall({
+  query: "量子计算原理",
+  limit: 5,
+  minRelevance: 0.8
+});
+
+// 使用长期记忆的智能体
+const result = await memoryEnhancedAgent.generate({
+  messages: [
+    { role: "user", content: "解释量子计算的工作原理" }
+  ],
+  memoryOptions: {
+    useQueriedMemory: true,
+    memoryQuery: "量子计算",
+    memoryResults: 3
+  }
+});
 ```
 
 ## 4. 服务API层

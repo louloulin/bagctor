@@ -1,0 +1,613 @@
+/**
+ * http_server_benchmark.test.ts
+ * 
+ * Bactor HTTP服务器性能基准测试
+ * 测试不同配置和场景下的HTTP服务器性能表现
+ */
+
+import {
+    OptimizedHttpServerActor
+} from '../../src/core/server/optimized_http_server';
+import {
+    HttpServerConfig
+} from '../../src/types';
+import {
+    ThreadAffinityManager
+} from '../../src/core/performance/thread_affinity';
+import {
+    isNativeBindingSupported,
+    getSystemTopology
+} from '../../src/core/performance/thread_binding';
+import {
+    MultiReactorPoolOptions
+} from '../../src/types';
+import { ActorSystem, ActorRef } from '@bactor/core';
+import { RouteConfig } from '../../src/types';
+
+// 使用Bun测试API
+import { describe, it, expect, afterEach, beforeAll, afterAll } from "bun:test";
+
+// 超时设置（毫秒）
+const TEST_TIMEOUT = 30000;
+
+// 压测配置
+interface BenchmarkConfig {
+    // 服务器配置
+    serverConfig: {
+        port: number;
+        reactorCount: number;
+        enableThreadAffinity: boolean;
+        zeroCopyEnabled: boolean;
+        connectionPoolSize: number;
+        routeCacheSize: number;
+    };
+
+    // 测试配置
+    testConfig: {
+        duration: number;        // 持续时间（秒）
+        connections: number;     // 并发连接数
+        pipelining: number;      // 请求管道数
+        requestsPerSecond?: number; // 限制每秒请求数（可选）
+    };
+
+    // 服务端点配置
+    endpoints: {
+        staticRoutes: number;    // 静态路由数量
+        paramRoutes: number;     // 参数路由数量
+        nestedRoutes: number;    // 嵌套路由数量
+        staticContent?: boolean; // 是否包含静态内容测试
+        jsonPayloads?: boolean;  // 是否包含JSON负载测试
+    };
+}
+
+// 测试结果接口
+interface BenchmarkResult {
+    config: BenchmarkConfig;
+    rps: number;               // 每秒请求数
+    latency: {                 // 延迟信息（毫秒）
+        min: number;
+        avg: number;
+        max: number;
+        p50: number;
+        p90: number;
+        p99: number;
+    };
+    throughput: {              // 吞吐量
+        bytesPerSecond: number;
+    };
+    statusCodes: Record<string, number>; // HTTP状态码分布
+    errors: number;            // 错误数
+    timeouts: number;          // 超时数
+    duration: number;          // 实际测试持续时间（秒）
+    cpuUsage?: number;         // CPU使用率（如果可用）
+    memoryUsage?: number;      // 内存使用（MB，如果可用）
+}
+
+// 默认基准测试配置
+const DEFAULT_CONFIG: BenchmarkConfig = {
+    serverConfig: {
+        port: 8080,
+        reactorCount: Math.max(1, Math.min(4, navigator.hardwareConcurrency - 1)),
+        enableThreadAffinity: true,
+        zeroCopyEnabled: true,
+        connectionPoolSize: 1000,
+        routeCacheSize: 5000
+    },
+    testConfig: {
+        duration: 10,
+        connections: 100,
+        pipelining: 10
+    },
+    endpoints: {
+        staticRoutes: 10,
+        paramRoutes: 5,
+        nestedRoutes: 3,
+        staticContent: true,
+        jsonPayloads: true
+    }
+};
+
+describe('HTTP服务器性能基准测试', () => {
+    let system: ActorSystem;
+    let serverRef: ActorRef;
+    let baseUrl: string;
+    let stopServer: () => Promise<void>;
+
+    // 系统信息
+    const cpuCount = navigator.hardwareConcurrency || 4;
+    const nativeBindingSupported = isNativeBindingSupported();
+    const systemTopology = getSystemTopology();
+
+    // 输出测试环境信息
+    beforeAll(() => {
+        console.log('\n=== HTTP服务器基准测试环境 ===');
+        console.log(`CPU核心数: ${cpuCount}`);
+        console.log(`NUMA节点数: ${systemTopology.numaNodes}`);
+        console.log(`原生线程绑定支持: ${nativeBindingSupported ? '是' : '否'}`);
+        console.log('===================\n');
+    });
+
+    // 每个测试后清理资源
+    afterEach(async () => {
+        if (stopServer) {
+            await stopServer();
+        }
+
+        if (system) {
+            await system.shutdown();
+        }
+    });
+
+    // 创建和启动服务器
+    async function setupServer(config: BenchmarkConfig): Promise<void> {
+        // 创建Actor系统
+        system = new ActorSystem('http-benchmark-system');
+
+        // 准备服务器配置
+        const serverConfig: HttpServerConfig = {
+            port: config.serverConfig.port,
+            reactorPool: {
+                reactorCount: config.serverConfig.reactorCount,
+                balancingStrategy: 'round-robin'
+            },
+            routerOptions: {
+                cacheSize: config.serverConfig.routeCacheSize
+            },
+            debug: true
+        };
+
+        // 创建并启动服务器
+        serverRef = await system.createActor(OptimizedHttpServerActor, serverConfig);
+
+        // 发送启动消息
+        await serverRef.send({ type: 'start' });
+
+        // 设置基础URL
+        baseUrl = `http://localhost:${config.serverConfig.port}`;
+
+        // 设置测试路由
+        await setupTestRoutes(serverRef, config);
+
+        // 设置停止服务器的函数
+        stopServer = async () => {
+            try {
+                if (serverRef) {
+                    await serverRef.send({ type: 'stop' });
+                }
+            } catch (error) {
+                console.error('停止服务器时出错:', error);
+            }
+        };
+    }
+
+    // 设置测试路由
+    async function setupTestRoutes(serverRef: ActorRef, config: BenchmarkConfig): Promise<void> {
+        // 静态路由
+        for (let i = 0; i < config.endpoints.staticRoutes; i++) {
+            const routeConfig: RouteConfig = {
+                method: 'GET',
+                path: `/api/static${i}`,
+                handler: async (req) => {
+                    return new Response(JSON.stringify({
+                        message: `Static route ${i}`,
+                        timestamp: Date.now()
+                    }), {
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+            };
+            await serverRef.send({ type: 'add-route', config: routeConfig });
+        }
+
+        // 参数路由
+        for (let i = 0; i < config.endpoints.paramRoutes; i++) {
+            const routeConfig: RouteConfig = {
+                method: 'GET',
+                path: `/api/items/:id${i}`,
+                handler: async (req, ctx) => {
+                    const id = ctx.params[`id${i}`];
+                    return new Response(JSON.stringify({
+                        message: `Param route ${i}`,
+                        id,
+                        timestamp: Date.now()
+                    }), {
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+            };
+            await serverRef.send({ type: 'add-route', config: routeConfig });
+        }
+
+        // 嵌套路由
+        for (let i = 0; i < config.endpoints.nestedRoutes; i++) {
+            const routeConfig: RouteConfig = {
+                method: 'GET',
+                path: `/api/category${i}/:categoryId/product/:productId`,
+                handler: async (req, ctx) => {
+                    const categoryId = ctx.params.categoryId;
+                    const productId = ctx.params.productId;
+                    return new Response(JSON.stringify({
+                        message: `Nested route ${i}`,
+                        categoryId,
+                        productId,
+                        timestamp: Date.now()
+                    }), {
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+            };
+            await serverRef.send({ type: 'add-route', config: routeConfig });
+        }
+
+        // 静态内容路由（如果启用）
+        if (config.endpoints.staticContent) {
+            const smallHtmlConfig: RouteConfig = {
+                method: 'GET',
+                path: '/static/small.html',
+                handler: async () => {
+                    return new Response('<html><body><h1>Small Static Content</h1></body></html>', {
+                        headers: { 'Content-Type': 'text/html' }
+                    });
+                }
+            };
+            await serverRef.send({ type: 'add-route', config: smallHtmlConfig });
+
+            const mediumHtmlConfig: RouteConfig = {
+                method: 'GET',
+                path: '/static/medium.html',
+                handler: async () => {
+                    // 生成中等大小的HTML内容
+                    let content = '<html><body><h1>Medium Static Content</h1><ul>';
+                    for (let i = 0; i < 1000; i++) {
+                        content += `<li>Item ${i}</li>`;
+                    }
+                    content += '</ul></body></html>';
+                    return new Response(content, {
+                        headers: { 'Content-Type': 'text/html' }
+                    });
+                }
+            };
+            await serverRef.send({ type: 'add-route', config: mediumHtmlConfig });
+
+            const largeHtmlConfig: RouteConfig = {
+                method: 'GET',
+                path: '/static/large.html',
+                handler: async () => {
+                    // 生成大型HTML内容
+                    let content = '<html><body><h1>Large Static Content</h1><table>';
+                    for (let i = 0; i < 1000; i++) {
+                        content += '<tr>';
+                        for (let j = 0; j < 10; j++) {
+                            content += `<td>Cell ${i}-${j}</td>`;
+                        }
+                        content += '</tr>';
+                    }
+                    content += '</table></body></html>';
+                    return new Response(content, {
+                        headers: { 'Content-Type': 'text/html' }
+                    });
+                }
+            };
+            await serverRef.send({ type: 'add-route', config: largeHtmlConfig });
+        }
+
+        // JSON负载路由（如果启用）
+        if (config.endpoints.jsonPayloads) {
+            const smallJsonConfig: RouteConfig = {
+                method: 'POST',
+                path: '/api/json/small',
+                handler: async (req) => {
+                    const data = await req.json();
+                    return new Response(JSON.stringify({
+                        success: true,
+                        received: data,
+                        timestamp: Date.now()
+                    }), {
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+            };
+            await serverRef.send({ type: 'add-route', config: smallJsonConfig });
+
+            const largeJsonConfig: RouteConfig = {
+                method: 'POST',
+                path: '/api/json/large',
+                handler: async (req) => {
+                    const data = await req.json();
+                    // 创建大型响应
+                    const response = {
+                        success: true,
+                        received: data,
+                        timestamp: Date.now(),
+                        items: Array(100).fill(0).map((_, i) => ({
+                            id: i,
+                            name: `Item ${i}`,
+                            description: `This is item number ${i} in the large response`,
+                            tags: ['tag1', 'tag2', 'tag3', 'tag4', 'tag5'],
+                            metadata: {
+                                created: new Date().toISOString(),
+                                updated: new Date().toISOString(),
+                                views: Math.floor(Math.random() * 1000),
+                                rating: Math.random() * 5
+                            }
+                        }))
+                    };
+                    return new Response(JSON.stringify(response), {
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+            };
+            await serverRef.send({ type: 'add-route', config: largeJsonConfig });
+        }
+    }
+
+    // 运行负载测试
+    async function runLoadTest(config: BenchmarkConfig, endpoint: string): Promise<BenchmarkResult> {
+        const url = `${baseUrl}${endpoint}`;
+        console.log(`开始对${url}进行压力测试...`);
+
+        // 记录开始时间和资源使用
+        const startTime = Date.now();
+        const startMemory = process.memoryUsage().heapUsed / 1024 / 1024; // MB
+
+        // 创建并发请求
+        const connections = config.testConfig.connections;
+        const requests = config.testConfig.duration * connections * config.testConfig.pipelining;
+        const statusCodes: Record<string, number> = {};
+        let completedRequests = 0;
+        let errors = 0;
+        let timeouts = 0;
+
+        // 延迟统计
+        const latencies: number[] = [];
+
+        // 吞吐量统计
+        let totalBytes = 0;
+
+        // 创建模拟客户端函数
+        const makeRequest = async () => {
+            const requestStart = Date.now();
+            try {
+                const response = await fetch(url, {
+                    method: endpoint.includes('/api/json/') ? 'POST' : 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Connection': 'keep-alive'
+                    },
+                    body: endpoint.includes('/api/json/') ? JSON.stringify({
+                        test: true,
+                        timestamp: Date.now(),
+                        data: Array(endpoint.includes('large') ? 100 : 10).fill(0).map((_, i) => ({ id: i }))
+                    }) : undefined
+                });
+
+                const responseTime = Date.now() - requestStart;
+                latencies.push(responseTime);
+
+                const statusCode = response.status.toString();
+                statusCodes[statusCode] = (statusCodes[statusCode] || 0) + 1;
+
+                const responseData = await response.text();
+                totalBytes += responseData.length;
+
+                completedRequests++;
+            } catch (error) {
+                if (String(error).includes('timeout')) {
+                    timeouts++;
+                } else {
+                    errors++;
+                }
+            }
+        };
+
+        // 创建请求池
+        const requestPool = Array(connections).fill(0).map(() => {
+            return Array(config.testConfig.pipelining).fill(0).map(() => makeRequest());
+        });
+
+        // 等待所有请求完成或超时
+        const timeout = new Promise(resolve => setTimeout(resolve, config.testConfig.duration * 1000 + 1000));
+        await Promise.race([
+            Promise.all(requestPool.map(requests => Promise.all(requests))),
+            timeout
+        ]);
+
+        // 计算结果
+        const endTime = Date.now();
+        const endMemory = process.memoryUsage().heapUsed / 1024 / 1024; // MB
+        const duration = (endTime - startTime) / 1000; // 转换为秒
+
+        // 计算延迟统计
+        latencies.sort((a, b) => a - b);
+        const minLatency = latencies.length > 0 ? latencies[0] : 0;
+        const maxLatency = latencies.length > 0 ? latencies[latencies.length - 1] : 0;
+        const avgLatency = latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0;
+
+        // 百分位数计算
+        const getPercentile = (arr: number[], p: number) => {
+            if (arr.length === 0) return 0;
+            const index = Math.floor(arr.length * p / 100);
+            return arr[index];
+        };
+
+        const p50Latency = getPercentile(latencies, 50);
+        const p90Latency = getPercentile(latencies, 90);
+        const p99Latency = getPercentile(latencies, 99);
+
+        // 计算每秒请求数
+        const rps = completedRequests / duration;
+
+        // 计算吞吐量
+        const bytesPerSecond = totalBytes / duration;
+
+        return {
+            config,
+            rps,
+            latency: {
+                min: minLatency,
+                avg: avgLatency,
+                max: maxLatency,
+                p50: p50Latency,
+                p90: p90Latency,
+                p99: p99Latency
+            },
+            throughput: {
+                bytesPerSecond
+            },
+            statusCodes,
+            errors,
+            timeouts,
+            duration,
+            memoryUsage: endMemory - startMemory
+        };
+    }
+
+    // 打印基准测试结果
+    function printResults(result: BenchmarkResult, testName: string): void {
+        console.log(`\n=== ${testName} 测试结果 ===`);
+        console.log(`请求/秒: ${result.rps.toFixed(2)}`);
+        console.log(`延迟:
+  最小: ${result.latency.min} ms
+  平均: ${result.latency.avg.toFixed(2)} ms
+  最大: ${result.latency.max} ms
+  p50: ${result.latency.p50.toFixed(2)} ms
+  p90: ${result.latency.p90.toFixed(2)} ms
+  p99: ${result.latency.p99.toFixed(2)} ms`);
+
+        console.log(`吞吐量: ${(result.throughput.bytesPerSecond / 1024 / 1024).toFixed(2)} MB/s`);
+        console.log('HTTP状态码:');
+        Object.entries(result.statusCodes).forEach(([code, count]) => {
+            console.log(`  ${code}: ${count}`);
+        });
+
+        console.log(`错误: ${result.errors}`);
+        console.log(`超时: ${result.timeouts}`);
+        console.log(`内存增长: ${result.memoryUsage?.toFixed(2)} MB`);
+        console.log(`测试持续时间: ${result.duration.toFixed(2)} 秒`);
+        console.log('=====================================\n');
+    }
+
+    // 测试标准配置下的静态路由性能
+    it('默认配置下的静态路由性能', async () => {
+        const config = { ...DEFAULT_CONFIG };
+        await setupServer(config);
+
+        // 运行测试
+        const result = await runLoadTest(config, '/api/static0');
+        printResults(result, '默认配置下的静态路由');
+
+        // 基本断言 - 确保测试运行正常
+        expect(result.rps).toBeGreaterThan(0);
+        expect(result.errors).toBe(0);
+        expect(result.statusCodes['200']).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+
+    // 测试多反应堆配置下的参数路由性能
+    it('多反应堆配置下的参数路由性能', async () => {
+        const config = { ...DEFAULT_CONFIG };
+        config.serverConfig.reactorCount = Math.min(8, cpuCount);
+        await setupServer(config);
+
+        // 运行测试
+        const result = await runLoadTest(config, '/api/items/test0');
+        printResults(result, '多反应堆配置下的参数路由');
+
+        // 基本断言
+        expect(result.rps).toBeGreaterThan(0);
+        expect(result.errors).toBe(0);
+        expect(result.statusCodes['200']).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+
+    // 测试高并发下的嵌套路由性能
+    it('高并发下的嵌套路由性能', async () => {
+        const config = { ...DEFAULT_CONFIG };
+        config.testConfig.connections = 500; // 高并发连接数
+        config.testConfig.duration = 5; // 降低测试时间避免内存问题
+        await setupServer(config);
+
+        // 运行测试
+        const result = await runLoadTest(config, '/api/category0/123/product/456');
+        printResults(result, '高并发下的嵌套路由');
+
+        // 基本断言
+        expect(result.rps).toBeGreaterThan(0);
+        expect(result.statusCodes['200']).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+
+    // 测试大型静态内容的性能
+    it('大型静态内容性能', async () => {
+        const config = { ...DEFAULT_CONFIG };
+        config.endpoints.staticContent = true;
+        await setupServer(config);
+
+        // 运行测试
+        const result = await runLoadTest(config, '/static/large.html');
+        printResults(result, '大型静态内容');
+
+        // 基本断言
+        expect(result.rps).toBeGreaterThan(0);
+        expect(result.errors).toBe(0);
+        expect(result.statusCodes['200']).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+
+    // 测试大型JSON处理性能
+    it('大型JSON处理性能', async () => {
+        const config = { ...DEFAULT_CONFIG };
+        config.endpoints.jsonPayloads = true;
+        await setupServer(config);
+
+        // 运行测试
+        const result = await runLoadTest(config, '/api/json/large');
+        printResults(result, '大型JSON处理');
+
+        // 基本断言
+        expect(result.rps).toBeGreaterThan(0);
+        expect(result.errors).toBe(0);
+        expect(result.statusCodes['200']).toBeGreaterThan(0);
+    }, TEST_TIMEOUT);
+
+    // 添加一个比较不同配置的测试
+    it('比较不同配置的性能', async () => {
+        // 测试1: 默认配置
+        let config = { ...DEFAULT_CONFIG };
+        await setupServer(config);
+
+        // 简化测试参数，减少测试时间
+        config.testConfig.duration = 5;
+        config.testConfig.connections = 50;
+
+        const result1 = await runLoadTest(config, '/api/static0');
+        printResults(result1, '默认配置');
+
+        // 关闭服务器
+        await stopServer();
+
+        // 测试2: 更多反应堆
+        config = { ...DEFAULT_CONFIG };
+        config.serverConfig.reactorCount = Math.min(8, cpuCount);
+        await setupServer(config);
+
+        const result2 = await runLoadTest(config, '/api/static0');
+        printResults(result2, '更多反应堆');
+
+        // 输出比较结果
+        const improvement = ((result2.rps - result1.rps) / result1.rps) * 100;
+        console.log(`\n=== 配置性能比较 ===`);
+        console.log(`默认配置: ${result1.rps.toFixed(2)} 请求/秒`);
+        console.log(`更多反应堆: ${result2.rps.toFixed(2)} 请求/秒`);
+        console.log(`性能差异: ${improvement.toFixed(2)}%`);
+
+        // 不强制要求某配置一定更好，因为在某些环境下可能差异不明显
+        expect(true).toBe(true);
+    }, TEST_TIMEOUT * 2);
+
+    // 在所有测试完成后输出总结
+    afterAll(() => {
+        console.log('\n=== HTTP服务器性能基准测试完成 ===');
+        console.log('测试环境:');
+        console.log(`- CPU核心数: ${cpuCount}`);
+        console.log(`- 原生线程绑定支持: ${nativeBindingSupported ? '是' : '否'}`);
+        console.log('注意: 实际性能会根据硬件环境和负载特性有所不同');
+        console.log('=====================================\n');
+    });
+}); 

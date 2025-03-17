@@ -1,10 +1,18 @@
 import { HttpToolActor } from './httpTool';
+import { FileToolActor } from './fileTool';
 
-export {
-    HttpToolActor
+/**
+ * 工具名称常量
+ */
+export const TOOL_NAMES = {
+    HTTP: 'http',
+    FILE: 'file'
 };
 
-// 标准工具名称常量
-export const TOOL_NAMES = {
-    HTTP: 'http'
+export {
+    // HTTP 工具
+    HttpToolActor,
+
+    // 文件工具
+    FileToolActor
 }; 

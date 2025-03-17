@@ -1,9 +1,11 @@
 // 导出核心组件
 import { AgentActor } from './core/agentActor';
 import { AgentSystem } from './core/agentSystem';
+import { AgentMemory, AgentMemoryActor } from './core/agentMemory';
 
 // 导出工具
 import { HttpToolActor, TOOL_NAMES } from './tools';
+import { FileToolActor } from './tools/fileTool';
 
 // 导出类型
 import {
@@ -32,12 +34,39 @@ import {
     HttpToolMessage
 } from './tools/httpTool';
 
+import {
+    FileOperationParams,
+    ReadFileMessage,
+    WriteFileMessage,
+    ListDirectoryMessage,
+    FileResponseMessage,
+    FileErrorMessage,
+    FileToolMessage
+} from './tools/fileTool';
+
+import {
+    MemoryItem,
+    MemoryQueryOptions,
+    MemoryState,
+    AddMemoryMessage,
+    QueryMemoryMessage,
+    MemoryResultMessage,
+    MemoryErrorMessage,
+    MemoryMessage,
+    MemoryResponseMessage
+} from './core/agentMemory';
+
 // 核心导出
 export {
     // 核心组件
     AgentActor,
     AgentSystem,
+    AgentMemory,
+    AgentMemoryActor,
+
+    // 工具
     HttpToolActor,
+    FileToolActor,
     TOOL_NAMES,
 
     // Agent Actor 类型
@@ -61,7 +90,27 @@ export {
     ExecuteHttpRequestMessage,
     HttpResponseMessage,
     HttpErrorMessage,
-    HttpToolMessage
+    HttpToolMessage,
+
+    // File Tool 类型
+    FileOperationParams,
+    ReadFileMessage,
+    WriteFileMessage,
+    ListDirectoryMessage,
+    FileResponseMessage,
+    FileErrorMessage,
+    FileToolMessage,
+
+    // Memory 类型
+    MemoryItem,
+    MemoryQueryOptions,
+    MemoryState,
+    AddMemoryMessage,
+    QueryMemoryMessage,
+    MemoryResultMessage,
+    MemoryErrorMessage,
+    MemoryMessage,
+    MemoryResponseMessage
 };
 
 // 类型命名空间 (兼容性)
@@ -69,6 +118,8 @@ export namespace Types {
     export type AgentActorConfig = import('./core/agentActor').AgentActorConfig;
     export type AgentActorState = import('./core/agentActor').AgentActorState;
     export type AgentSystemConfig = import('./core/agentSystem').AgentSystemConfig;
+    export type MemoryItem = import('./core/agentMemory').MemoryItem;
+    export type FileOperationParams = import('./tools/fileTool').FileOperationParams;
 }
 
 /**

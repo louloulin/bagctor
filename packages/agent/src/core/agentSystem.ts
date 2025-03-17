@@ -1,137 +1,165 @@
 import { ActorSystem, PropsBuilder } from '@bactor/core';
-import { PID, Message } from '@bactor/common';
-import { AgentActor, AgentActorConfig, ResponseMessage } from './agentActor';
+import { PID } from '@bactor/common';
+import { AgentActor, AgentActorConfig } from './agentActor';
+import { AgentMemoryActor } from './agentMemory';
+import { HttpToolActor, FileToolActor, TOOL_NAMES } from '../tools';
 
+/**
+ * 代理系统配置
+ */
 export interface AgentSystemConfig {
     systemId?: string;
-    host?: string;
-    port?: number;
+    enableMemory?: boolean;
 }
 
 /**
- * AgentSystem负责管理多个智能代理Actor，提供创建、发送消息和协调的功能
+ * 代理系统，管理多个代理Actor
  */
 export class AgentSystem {
     private actorSystem: ActorSystem;
-    private messageHandlers: Map<string, (response: any) => void> = new Map();
+    private agents: Map<string, PID> = new Map();
+    private toolActors: Map<string, PID> = new Map();
+    private memoryActor?: PID;
 
-    /**
-     * 创建一个新的AgentSystem
-     * @param config 系统配置
-     */
     constructor(config: AgentSystemConfig = {}) {
-        this.actorSystem = new ActorSystem(config.systemId || 'agent-system', undefined, {
-            useMessagePipeline: true,
-            enableMessageLogging: true,
-            logLevel: 'debug'
-        });
+        this.actorSystem = new ActorSystem(config.systemId || 'agent-system');
 
-        // 注册系统级消息处理器
-        this.setupMessageHandlers();
+        // 初始化系统
+        this.initialize(config);
     }
 
     /**
-     * 设置消息处理机制，用于接收Actor的响应
+     * 初始化代理系统
      */
-    private setupMessageHandlers(): void {
-        // 注册一个全局消息处理器，用于接收所有Actor发送的响应
-        const messageHandler = async (message: Message): Promise<void> => {
-            // 检查消息是否含有响应ID
-            if (message && 'responseId' in message) {
-                const responseId = (message as any).responseId;
-                const handler = this.messageHandlers.get(responseId);
-                if (handler) {
-                    // 调用处理器处理响应
-                    handler(message);
-                }
-            }
-        };
+    private async initialize(config: AgentSystemConfig): Promise<void> {
+        // 创建工具Actors
+        await this.initializeToolActors();
 
-        // 注册处理器到ActorSystem
-        // 注意：这里假设ActorSystem有一个addMessageHandler方法
-        // 如果没有，需要实现其他机制来接收响应
-        if (typeof this.actorSystem['addMessageHandler'] === 'function') {
-            this.actorSystem['addMessageHandler'](messageHandler);
+        // 可选地创建内存Actor
+        if (config.enableMemory !== false) {
+            await this.initializeMemoryActor();
         }
     }
 
     /**
-     * 创建一个新的AgentActor
-     * @param config 代理配置
-     * @param name 可选的Actor名称
-     * @returns 创建的代理Actor的PID
+     * 初始化工具Actors
      */
-    async createAgent(config: AgentActorConfig, name?: string): Promise<PID> {
-        const actorName = name || `agent-${config.name.toLowerCase().replace(/\s+/g, '-')}`;
+    private async initializeToolActors(): Promise<void> {
+        // 创建HTTP工具Actor
+        const httpToolPID = await this.actorSystem.spawn({
+            actorClass: HttpToolActor
+        });
+        this.toolActors.set(TOOL_NAMES.HTTP, httpToolPID);
 
-        // 使用PropsBuilder创建Props
-        const props = new PropsBuilder()
-            .withActorClass(AgentActor)
-            .withContext({
-                name: config.name,
-                instructions: config.instructions,
-                tools: new Map()
-            })
-            .build();
-
-        // 使用spawn创建Actor - 只使用一个参数
-        const agentRef = await this.actorSystem.spawn(props);
-
-        return agentRef;
+        // 创建文件工具Actor
+        const fileToolPID = await this.actorSystem.spawn({
+            actorClass: FileToolActor
+        });
+        this.toolActors.set(TOOL_NAMES.FILE, fileToolPID);
     }
 
     /**
-     * 向特定代理发送消息
-     * @param agentId 代理Actor的PID
-     * @param message 要发送的消息
-     * @returns 代理响应的Promise
+     * 初始化内存Actor
      */
-    async sendMessage(agentId: PID, message: any): Promise<any> {
-        return new Promise((resolve, reject) => {
-            const responseId = Math.random().toString(36).substring(2, 15);
-
-            // 设置一个临时处理器来接收响应
-            const handler = (response: any) => {
-                if (response.responseId === responseId) {
-                    // 清理处理器
-                    this.messageHandlers.delete(responseId);
-
-                    if (response.type === 'error') {
-                        reject(new Error(response.error));
-                    } else {
-                        resolve(response.payload);
-                    }
-                }
-            };
-
-            this.messageHandlers.set(responseId, handler);
-
-            // 设置超时
-            const timeout = setTimeout(() => {
-                this.messageHandlers.delete(responseId);
-                reject(new Error('Request timed out after 30 seconds'));
-            }, 30000);
-
-            // 发送消息 - 这是void返回类型
-            try {
-                // 添加响应ID和发送方信息到消息中
-                this.actorSystem.send(agentId, {
-                    ...message,
-                    responseId,
-                    timestamp: Date.now()
-                });
-            } catch (error) {
-                clearTimeout(timeout);
-                this.messageHandlers.delete(responseId);
-                reject(error);
-            }
+    private async initializeMemoryActor(): Promise<void> {
+        this.memoryActor = await this.actorSystem.spawn({
+            actorClass: AgentMemoryActor
         });
     }
 
     /**
-     * 关闭代理系统及其所有Actors
+     * 创建一个代理
+     */
+    async createAgent(config: AgentActorConfig): Promise<PID> {
+        const agentId = `agent-${config.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+
+        const props = {
+            actorClass: AgentActor,
+            actorContext: {
+                name: config.name,
+                instructions: config.instructions,
+                tools: config.tools || [],
+                memoryActor: this.memoryActor
+            }
+        };
+
+        const agentPID = await this.actorSystem.spawn(props);
+
+        // 注册工具
+        await this.registerTools(agentPID, config.tools);
+
+        // 存储代理引用
+        this.agents.set(agentId, agentPID);
+
+        return agentPID;
+    }
+
+    /**
+     * 为代理注册工具
+     */
+    private async registerTools(agentPID: PID, tools?: string[]): Promise<void> {
+        if (!tools || tools.length === 0) {
+            // 默认注册所有工具
+            for (const [toolName, toolPID] of this.toolActors.entries()) {
+                await this.actorSystem.send(agentPID, {
+                    type: 'register_tool',
+                    toolName,
+                    toolActor: toolPID
+                });
+            }
+        } else {
+            // 只注册指定的工具
+            for (const toolName of tools) {
+                const toolPID = this.toolActors.get(toolName);
+                if (toolPID) {
+                    await this.actorSystem.send(agentPID, {
+                        type: 'register_tool',
+                        toolName,
+                        toolActor: toolPID
+                    });
+                }
+            }
+        }
+    }
+
+    /**
+     * 发送消息给代理
+     */
+    async sendMessage(agentId: PID, message: any): Promise<any> {
+        return new Promise((resolve, reject) => {
+            // 创建响应ID
+            const responseId = `resp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+            // 设置超时
+            const timeout = setTimeout(() => {
+                reject(new Error('Agent response timed out'));
+            }, 30000); // 30秒超时
+
+            // 发送消息
+            this.actorSystem.ask(agentId, {
+                ...message,
+                responseId
+            }).then(response => {
+                clearTimeout(timeout);
+                resolve(response);
+            }).catch(error => {
+                clearTimeout(timeout);
+                reject(error);
+            });
+        });
+    }
+
+    /**
+     * 关闭代理系统
      */
     async shutdown(): Promise<void> {
-        await this.actorSystem.shutdown();
+        return this.actorSystem.shutdown();
+    }
+
+    /**
+     * 获取ActorSystem实例
+     */
+    getActorSystem(): ActorSystem {
+        return this.actorSystem;
     }
 } 

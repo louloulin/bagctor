@@ -28,7 +28,7 @@
 
 1. **AgentActor**: ✅ 继承自 Bagctor 的 Actor，整合 Mastra 的 Agent 能力
 2. **AgentSystem**: ✅ 管理多个 AgentActor 的协调系统
-3. **AgentMemory**: 🔜 基于 Bagctor 的持久化机制实现的代理记忆存储
+3. **AgentMemory**: ✅ 基于 Bagctor 的持久化机制实现的代理记忆存储
 4. **AgentTools**: ✅ 代理可以调用的工具集合，由 Actor 实现
 5. **AgentRouter**: 🔜 处理代理之间通信和任务路由
 
@@ -140,11 +140,15 @@ export class AgentSystem {
 
 1. 工具集成已完成:
    - ✅ HTTP 请求工具
+   - ✅ 文件操作工具
    - 🔜 数据处理工具
-   - 🔜 文件操作工具
    - 🔜 计划和推理工具
 
-2. 🔜 AgentMemory 待实现
+2. ✅ AgentMemory 实现完成:
+   - 实现了基于Actor的内存系统
+   - 支持CRUD操作和按属性查询
+   - 实现了简单的语义搜索模拟
+   - 支持线程化的记忆存储
 
 ### 4. RAG 集成 (估计时间: 2天) 🔜
 
@@ -195,23 +199,24 @@ const orchestrator = agentSystem.createAgent({
 1. 项目结构和依赖配置
 2. 核心AgentActor实现
 3. AgentSystem实现
-4. HTTP工具Actor
+4. HTTP工具Actor和文件工具Actor
 5. 基本消息处理和工具注册
 6. 构建配置优化 - 参考HTTP包解决了构建和类型问题
+7. 内存系统实现 - 支持记忆存储和检索功能
 
 🔜 进行中:
 1. 测试套件完善
-2. 内存系统实现
-3. 工具集扩展
-4. RAG集成
+2. 工具集扩展
+3. RAG集成
+4. 替换模拟代理为真实Mastra实现
 
 ## 下一步行动
 
 1. ✅ **修复构建错误**: 已解决模块依赖和类型问题
 2. **完善测试**: 添加更多自动化测试用例
-3. **实现AgentMemory**: 开发基于Actor的内存系统
-4. **扩展工具集**: 添加更多实用工具
-5. **集成真实LLM**: 替换模拟实现
+3. ✅ **实现AgentMemory**: 完成基于Actor的内存系统
+4. ✅ **扩展工具集**: 添加了文件操作工具
+5. **集成真实LLM**: 替换模拟实现为真实Mastra代理
 
 ## 技术挑战和解决方案
 

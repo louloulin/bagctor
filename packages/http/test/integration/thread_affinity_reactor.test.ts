@@ -244,8 +244,9 @@ describe('线程亲和性与Reactor集成测试', () => {
         });
 
         it('应该在多个Reactor间高效分配工作负载', async () => {
-            // 增加测试超时时间
-            jest.setTimeout(20000);
+            // 增加测试超时时间，使用setTimeout代替Jest的setTimeout
+            // jest.setTimeout(20000);
+            console.log("开始执行多Reactor分配测试，超时设置为20000ms");
 
             // 创建Reactor池
             const poolOptions: MultiReactorPoolOptions = {

@@ -58,7 +58,12 @@ describe('优化中间件系统', () => {
             const context = {};
 
             // 不应抛出错误
-            await expect(composed(context)).resolves.not.toThrow();
+            try {
+                await composed(context);
+                expect(true).toBe(true); // 如果执行到这里，说明没有抛出错误
+            } catch (error) {
+                expect(error).toBeUndefined(); // 这个断言会失败并显示具体错误
+            }
         });
 
         it('应该正确调用最终的next函数', async () => {

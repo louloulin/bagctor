@@ -8,11 +8,16 @@
     "moduleResolution": "bundler",
     "types": [
       "bun-types"
+    ],
+    "typeRoots": [
+      "./src/types",
+      "./node_modules/@types"
     ]
   },
   "include": [
     "src/**/*",
     "src/middleware/**/*",
+    "src/types/**/*",
     "test/**/*"
   ],
   "references": [

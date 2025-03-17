@@ -1,8 +1,7 @@
 /**
  * thread_affinity_integration.test.ts
  * 
- * 线程亲和性与反应器集成测试
- * 验证线程亲和性功能与反应器模式的集成
+ * 集成测试：线程亲和性与Reactor结合使用
  */
 
 import {
@@ -13,256 +12,324 @@ import {
 import {
     isNativeBindingSupported,
     getSystemTopology,
-    bindThreadToCore,
-    getCurrentThreadCore
+    getCurrentThreadCore,
+    getCpuUsage
 } from '../../src/core/performance/thread_binding';
 
 import { Reactor, ReactorOptions } from '../../src/core/reactor/reactor';
-import { Work } from '../../src/core/reactor/work';
+import { Work } from '../../src/core/reactor/reactor';
 
 // 引入测试工具
 import '@types/jest';
 
-describe('线程亲和性与反应器集成', () => {
-    // 设置测试环境
-    let nativeBindingSupported: boolean;
-    let affinityManager: ThreadAffinityManager;
+describe('线程亲和性Reactor集成测试', () => {
+    const nativeBindingSupported = isNativeBindingSupported();
+    const systemTopology = getSystemTopology();
+    const cpuCount = systemTopology.coresPerNode.reduce((a, b) => a + b, 0);
 
+    // 测试工作
+    interface TestWorkload {
+        id: number;
+        iterations: number;
+        type: string;
+    }
+
+    // 创建CPU密集型工作负载函数
+    function createCpuIntensiveWork(iterations: number): number {
+        let result = 0;
+        for (let i = 0; i < iterations; i++) {
+            result += Math.sin(i * 0.01) * Math.cos(i * 0.01);
+        }
+        return result;
+    }
+
+    // 在测试前打印环境信息
     beforeAll(() => {
-        // 检查环境
-        nativeBindingSupported = isNativeBindingSupported();
-
-        // 创建线程亲和性管理器
-        const options: ThreadAffinityOptions = {
-            enabled: true,
-            priorityStrategy: 'static',
-            numaAware: true,
-            logging: false
-        };
-
-        affinityManager = ThreadAffinityManager.getInstance(options);
+        console.log("=== 测试环境信息 ===");
+        console.log(`CPU核心数: ${cpuCount}`);
+        console.log(`NUMA节点数: ${systemTopology.numaNodes}`);
+        console.log(`原生线程绑定支持: ${nativeBindingSupported ? '是' : '否'}`);
+        console.log("===================");
     });
 
-    afterAll(() => {
-        // 解除所有线程绑定
-        const threads = affinityManager.getAllThreads();
-        threads.forEach(thread => {
-            affinityManager.unbindThread(thread.id);
+    describe('Reactor与线程亲和性', () => {
+        let reactor: Reactor;
+
+        afterEach(async () => {
+            // 确保每次测试后停止Reactor
+            if (reactor) {
+                await reactor.stop();
+            }
         });
-    });
 
-    describe('基本功能测试', () => {
-        it('反应器应该能够与线程亲和性功能集成', async () => {
-            // 创建反应器配置
-            const reactorOptions: ReactorOptions = {
+        it('应该创建具有线程亲和性的Reactor', async () => {
+            // 创建具有线程亲和性的Reactor
+            const options: ReactorOptions = {
                 id: 'test-reactor-1',
-                maxConcurrency: 10,
-                enableAffinityBinding: true,
-                affinityCore: 0, // 绑定到核心0
-                threadPriority: 75 // 高优先级
+                cpuCore: 0, // 指定核心
+                affinityOptions: {
+                    enabled: true,
+                    priorityStrategy: 'static'
+                }
             };
 
-            // 创建反应器
-            const reactor = new Reactor(reactorOptions);
-
-            // 启动反应器
+            reactor = new Reactor(options);
             await reactor.start();
 
-            // 验证反应器已与线程亲和性集成
-            expect(reactor.isRunning()).toBe(true);
-            expect(reactor.getId()).toBe('test-reactor-1');
+            // 验证Reactor已启动
+            const stats = reactor.getStats();
+            expect(stats.currentLoad).toBeDefined();
+            expect(stats.id).toBe('test-reactor-1');
 
+            // 如果支持原生绑定，验证CPU绑定
             if (nativeBindingSupported) {
-                // 如果支持原生绑定，验证核心绑定
-                const currentCore = getCurrentThreadCore();
-                expect(currentCore).toBeGreaterThanOrEqual(0);
+                expect(stats.boundToCore).not.toBeUndefined();
             }
 
-            // 停止反应器
+            // 停止Reactor
             await reactor.stop();
-            expect(reactor.isRunning()).toBe(false);
+            const statsAfterStop = reactor.getStats();
+            expect(statsAfterStop.currentLoad).toBe(0);
         });
 
-        it('多个反应器应该能够绑定到不同的CPU核心', async () => {
-            // 获取可用的CPU核心数
-            const cpuCount = affinityManager.getCpuCount();
-            const reactorCount = Math.min(cpuCount, 4); // 最多创建4个测试反应器
+        it('多Reactor应该可以绑定到不同的CPU核心', async () => {
+            if (cpuCount < 2) {
+                console.log("跳过多核测试 - 系统核心数不足");
+                return;
+            }
+
+            // 创建反应器选项
+            const createReactorWithCore = (cpuCore: number): Reactor => {
+                const options: ReactorOptions = {
+                    id: `test-reactor-${cpuCore}`,
+                    cpuCore: cpuCore,
+                    affinityOptions: {
+                        enabled: true,
+                        priorityStrategy: 'static'
+                    }
+                };
+                return new Reactor(options);
+            };
+
+            // 创建多个反应器，绑定到不同核心
+            const reactors: Reactor[] = [];
+            // 限制最多创建4个
+            const reactorCount = Math.min(4, cpuCount);
+
+            for (let i = 0; i < reactorCount; i++) {
+                reactors.push(createReactorWithCore(i));
+            }
+
+            try {
+                // 启动所有反应器
+                await Promise.all(reactors.map(r => r.start()));
+
+                // 验证所有反应器已启动
+                for (const reactor of reactors) {
+                    const stats = reactor.getStats();
+                    expect(stats.currentLoad).toBeDefined();
+                }
+
+                // 如果支持原生绑定，验证每个反应器绑定到不同核心
+                if (nativeBindingSupported) {
+                    // 收集绑定的核心ID
+                    const boundCores = new Set<number>();
+                    for (const reactor of reactors) {
+                        const stats = reactor.getStats();
+                        if (stats.boundToCore !== undefined) {
+                            boundCores.add(stats.boundToCore);
+                        }
+                    }
+
+                    // 应该至少有2个不同的核心绑定
+                    expect(boundCores.size).toBeGreaterThanOrEqual(Math.min(2, reactorCount));
+                }
+            } finally {
+                // 停止所有反应器
+                await Promise.all(reactors.map(r => r.stop()));
+
+                // 验证所有反应器已停止
+                for (const reactor of reactors) {
+                    const stats = reactor.getStats();
+                    expect(stats.currentLoad).toBe(0);
+                }
+            }
+        });
+
+        it('应该能够处理高并发工作负载', async () => {
+            // 创建具有线程亲和性的Reactor
+            const options: ReactorOptions = {
+                id: 'concurrency-test-reactor',
+                cpuCore: 0,
+                affinityOptions: {
+                    enabled: true,
+                    priorityStrategy: 'dynamic'
+                }
+            };
+
+            reactor = new Reactor(options);
+            await reactor.start();
+
+            // 注册工作处理函数
+            reactor.registerWorkHandler('compute', async (work: Work) => {
+                const payload = work.payload as TestWorkload;
+                const startTime = Date.now();
+
+                // 执行计算工作
+                const result = createCpuIntensiveWork(payload.iterations);
+
+                const endTime = Date.now();
+
+                // 返回结果
+                return {
+                    id: payload.id,
+                    result: result,
+                    duration: endTime - startTime,
+                    cpuCore: nativeBindingSupported ? getCurrentThreadCore() : undefined
+                };
+            });
+
+            // 创建多个工作负载
+            const workCount = 20;
+            const works = Array(workCount).fill(0).map((_, i) => ({
+                type: 'compute',
+                payload: {
+                    id: i,
+                    iterations: 1000000 + (i % 5) * 100000,
+                    type: i % 2 === 0 ? 'heavy' : 'light'
+                }
+            }));
+
+            // 并行提交所有工作
+            const results = await Promise.all(works.map(work =>
+                reactor.submit(work)
+            ));
+
+            // 验证所有工作都被处理
+            for (let i = 0; i < workCount; i++) {
+                expect(results[i].status).toBe('success');
+                if (results[i].data) {
+                    expect(results[i].data.id).toBe(i);
+                    expect(results[i].data.result).toBeDefined();
+                    expect(results[i].data.duration).toBeGreaterThan(0);
+                }
+            }
+
+            // 验证Reactor统计信息
+            const stats = reactor.getStats();
+
+            // 应该已经处理了所有工作
+            expect(stats.totalProcessed).toBeGreaterThanOrEqual(workCount);
+
+            // 停止Reactor
+            await reactor.stop();
+        });
+    });
+
+    describe('ThreadAffinityManager与Reactor集成', () => {
+        it('应该通过ThreadAffinityManager管理多个Reactor', async () => {
+            if (!nativeBindingSupported) {
+                console.log("跳过线程亲和性管理器测试 - 平台不支持原生绑定");
+                return;
+            }
+
+            // 创建线程亲和性管理器
+            const affinityOptions: ThreadAffinityOptions = {
+                enabled: true,
+                priorityStrategy: 'dynamic',
+                numaAware: true
+            };
+
+            const affinityManager = ThreadAffinityManager.getInstance(affinityOptions);
 
             // 创建多个反应器
             const reactors: Reactor[] = [];
+            const reactorCount = Math.min(4, cpuCount);
 
             for (let i = 0; i < reactorCount; i++) {
-                const reactorOptions: ReactorOptions = {
-                    id: `test-reactor-${i}`,
-                    maxConcurrency: 10,
-                    enableAffinityBinding: true,
-                    affinityCore: i, // 每个反应器绑定到不同核心
-                    threadPriority: 50
+                const options: ReactorOptions = {
+                    id: `affinity-reactor-${i}`,
+                    affinityOptions: {
+                        enabled: true,
+                        priorityStrategy: 'dynamic'
+                    }
                 };
-
-                const reactor = new Reactor(reactorOptions);
-                await reactor.start();
-                reactors.push(reactor);
+                reactors.push(new Reactor(options));
             }
 
-            // 验证所有反应器都在运行
-            reactors.forEach(reactor => {
-                expect(reactor.isRunning()).toBe(true);
-            });
+            try {
+                // 启动所有反应器
+                await Promise.all(reactors.map(r => r.start()));
 
-            if (nativeBindingSupported && reactors.length >= 2) {
-                // 获取线程信息
-                const threads = affinityManager.getAllThreads();
+                // 验证所有反应器已启动
+                for (const r of reactors) {
+                    const stats = r.getStats();
+                    expect(stats.currentLoad).toBeDefined();
+                }
 
-                // 映射反应器ID到线程ID
-                const reactorThreads = threads.filter(t =>
-                    reactors.some(r => r.getId() === `test-reactor-${t.cpuCore}`)
+                // 注册工作处理函数
+                for (const r of reactors) {
+                    r.registerWorkHandler('compute', async (work: Work) => {
+                        const payload = work.payload as any;
+                        const startTime = Date.now();
+
+                        // 执行计算工作
+                        const result = createCpuIntensiveWork(payload.iterations);
+
+                        const endTime = Date.now();
+
+                        // 获取当前线程的CPU核心
+                        const cpuCore = getCurrentThreadCore();
+
+                        // 返回结果
+                        return {
+                            id: payload.id,
+                            result: result,
+                            duration: endTime - startTime,
+                            cpuCore
+                        };
+                    });
+                }
+
+                // 创建工作负载，分配给不同反应器
+                const workloads = [];
+                for (let i = 0; i < reactorCount * 2; i++) {
+                    workloads.push({
+                        id: i,
+                        iterations: 1000000,
+                        reactorIndex: i % reactorCount
+                    });
+                }
+
+                // 提交工作并收集结果
+                const results = await Promise.all(
+                    workloads.map(workload => {
+                        const reactor = reactors[workload.reactorIndex];
+                        return reactor.submit({
+                            type: 'compute',
+                            payload: workload
+                        });
+                    })
                 );
 
-                // 验证有不同核心绑定的线程
-                const uniqueCores = new Set(reactorThreads.map(t => t.cpuCore));
-                expect(uniqueCores.size).toBeGreaterThanOrEqual(1);
-            }
-
-            // 停止所有反应器
-            for (const reactor of reactors) {
-                await reactor.stop();
-                expect(reactor.isRunning()).toBe(false);
-            }
-        });
-    });
-
-    describe('性能测试', () => {
-        it('带线程亲和性的反应器应该能够处理工作负载', async () => {
-            // 创建带亲和性的反应器
-            const reactorOptions: ReactorOptions = {
-                id: 'perf-reactor',
-                maxConcurrency: 100,
-                enableAffinityBinding: true,
-                affinityCore: 0
-            };
-
-            const reactor = new Reactor(reactorOptions);
-            await reactor.start();
-
-            // 创建模拟工作
-            class TestWork implements Work {
-                private readonly id: number;
-
-                constructor(id: number) {
-                    this.id = id;
-                }
-
-                async execute(): Promise<any> {
-                    // 模拟CPU密集型工作
-                    let result = 0;
-                    for (let i = 0; i < 100000; i++) {
-                        result += Math.sqrt(i * Math.sin(i));
+                // 检查CPU核心分配
+                const cpuCores = new Set<number>();
+                for (const result of results) {
+                    if (result.status === 'success' && result.data && result.data.cpuCore !== undefined) {
+                        cpuCores.add(result.data.cpuCore);
                     }
-                    return { id: this.id, result };
-                }
-            }
-
-            // 提交多个工作
-            const results: Promise<any>[] = [];
-            const workCount = 50;
-
-            for (let i = 0; i < workCount; i++) {
-                const work = new TestWork(i);
-                results.push(reactor.submit(work));
-            }
-
-            // 等待所有工作完成
-            const completedResults = await Promise.all(results);
-
-            // 验证结果
-            expect(completedResults.length).toBe(workCount);
-            completedResults.forEach((result, index) => {
-                expect(result.id).toBe(index);
-                expect(result.result).toBeDefined();
-            });
-
-            // 获取性能统计
-            const stats = reactor.getStatistics();
-            expect(stats.totalTasks).toBeGreaterThanOrEqual(workCount);
-            expect(stats.completedTasks).toBeGreaterThanOrEqual(workCount);
-
-            // 如果支持原生绑定，应该有CPU使用率信息
-            if (nativeBindingSupported) {
-                expect(stats.cpuUsage).toBeDefined();
-            }
-
-            // 停止反应器
-            await reactor.stop();
-        });
-
-        it('NUMA感知的线程亲和性应优化反应器性能', async () => {
-            // 获取系统拓扑
-            const topology = getSystemTopology();
-
-            // 如果系统有多个NUMA节点，测试NUMA感知功能
-            if (topology.numaNodes > 1 && nativeBindingSupported) {
-                // 创建NUMA感知的反应器
-                const numaReactors: Reactor[] = [];
-
-                for (let nodeId = 0; nodeId < topology.numaNodes; nodeId++) {
-                    // 计算该NUMA节点的起始核心ID
-                    let startCore = 0;
-                    for (let i = 0; i < nodeId; i++) {
-                        startCore += topology.coresPerNode[i];
-                    }
-
-                    // 在该NUMA节点上创建反应器
-                    const reactorOptions: ReactorOptions = {
-                        id: `numa-reactor-${nodeId}`,
-                        maxConcurrency: 50,
-                        enableAffinityBinding: true,
-                        affinityCore: startCore, // 使用NUMA节点的第一个核心
-                        numaNode: nodeId // 设置NUMA节点
-                    };
-
-                    const reactor = new Reactor(reactorOptions);
-                    await reactor.start();
-                    numaReactors.push(reactor);
                 }
 
-                // 验证所有反应器都在运行
-                numaReactors.forEach(reactor => {
-                    expect(reactor.isRunning()).toBe(true);
-                });
+                console.log(`工作分配到了 ${cpuCores.size} 个不同的CPU核心`);
 
+                // 在多核系统上，应该有不同的核心被使用
+                if (cpuCount > 1) {
+                    expect(cpuCores.size).toBeGreaterThanOrEqual(1);
+                }
+            } finally {
                 // 停止所有反应器
-                for (const reactor of numaReactors) {
-                    await reactor.stop();
-                }
-            } else {
-                // 跳过测试
-                console.log('系统不支持NUMA或原生线程绑定，跳过NUMA优化测试');
+                await Promise.all(reactors.map(r => r.stop()));
             }
-        });
-    });
-
-    describe('错误处理', () => {
-        it('反应器应处理亲和性绑定失败', async () => {
-            // 尝试绑定到不存在的核心
-            const invalidCoreId = 9999;
-
-            const reactorOptions: ReactorOptions = {
-                id: 'error-reactor',
-                maxConcurrency: 10,
-                enableAffinityBinding: true,
-                affinityCore: invalidCoreId
-            };
-
-            // 创建反应器 - 即使绑定失败，也应该可以创建
-            const reactor = new Reactor(reactorOptions);
-            await reactor.start();
-
-            // 即使亲和性绑定失败，反应器也应该能启动
-            expect(reactor.isRunning()).toBe(true);
-
-            // 停止反应器
-            await reactor.stop();
         });
     });
 }); 

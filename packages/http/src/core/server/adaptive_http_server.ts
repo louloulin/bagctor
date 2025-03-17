@@ -5,9 +5,11 @@
  * 提供最佳性能和内存效率的HTTP服务器实现
  */
 
-import { Actor, ActorRef, ActorSystem } from 'bactor';
+import { Actor, ActorRef, ActorSystem, ActorContext } from '@bactor/core';
 import { ServerOptions, HttpRequest, HttpResponse, HandlerFunction, MiddlewareFunction } from '../../types';
-import { MultiReactorPool } from '../reactor/multi_reactor_pool';
+import { MultiReactorPool, MultiReactorPoolOptions } from '../reactor/multi_reactor_pool';
+import { AdaptivePoolOptions, AdaptivePoolStats } from '../pool/adaptive_pool';
+import { RadixTreeRouter } from '../router/radix_tree';
 import {
     acquireAdaptiveRequest,
     releaseAdaptiveRequest,
@@ -19,8 +21,6 @@ import {
     getAllPoolStats,
     reconfigureHttpPools
 } from '../pool/adaptive_http_pools';
-import { AdaptivePoolOptions } from '../pool/adaptive_pool';
-import { RadixTree } from '../router/radix_tree';
 
 /**
  * 自适应HTTP服务器配置选项
@@ -60,220 +60,76 @@ export interface AdaptiveServerOptions extends ServerOptions {
      * 设置为0将使用系统可用CPU核心数
      */
     reactorPoolSize?: number;
+
+    /**
+     * 历史数据点数量
+     */
+    historyPointsCount?: number;
 }
 
-/**
- * HTTP服务器消息类型
- */
-type HttpServerMessage =
-    | { type: 'start' }
-    | { type: 'stop' }
-    | { type: 'status' }
-    | { type: 'addRoute', method: string, path: string, handler: HandlerFunction, middleware?: MiddlewareFunction[] }
-    | { type: 'getStats' }
-    | { type: 'updatePoolConfig', options: AdaptivePoolOptions }
-    | { type: 'prepareForTrafficBurst', factor?: number };
+// Local type definition for HttpServerMessage
+interface HttpServerMessage {
+    type: string;
+    method?: string;
+    path?: string;
+    handler?: HandlerFunction;
+    middleware?: MiddlewareFunction[];
+    options?: AdaptivePoolOptions;
+    factor?: number;
+    [key: string]: any;
+}
 
-/**
- * 自适应HTTP服务器状态接口
- */
-interface ServerState {
-    running: boolean;
+// Define ServerState class
+class ServerState {
+    running: boolean = false;
     port: number;
-    router: {
-        [method: string]: RadixTree<{
-            handler: HandlerFunction;
-            middleware: MiddlewareFunction[];
-        }>;
-    };
+    hostname: string;
+    tls?: { cert: string; key: string };
+    router: RadixTreeRouter;
     options: AdaptiveServerOptions;
     reactorPool: MultiReactorPool;
     stats: {
         requestsProcessed: number;
-        requestsPerSecond: number;
+        activeConnections: number;
         averageResponseTime: number;
-        lastTrafficSample: {
-            timestamp: number;
-            requests: number;
-        }[];
+        lastTrafficSample: { timestamp: number; requests: number }[];
+        requestsPerSecond: number;
     };
-}
+    monitorInterval: NodeJS.Timeout | null = null;
 
-/**
- * 自适应HTTP服务器Actor
- * 整合自适应对象池、多反应器和优化路由的高性能HTTP服务器
- */
-export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
-    private state: ServerState;
-    private server: any; // Bun.Server
-    private monitorInterval: number | null = null;
-
-    constructor(system: ActorSystem, options: AdaptiveServerOptions) {
-        super(system);
-
-        // 初始化路由表
-        const router: ServerState['router'] = {};
-        ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'].forEach(method => {
-            router[method] = new RadixTree<{
-                handler: HandlerFunction;
-                middleware: MiddlewareFunction[];
-            }>();
-        });
-
-        // 设置默认值
-        const defaultedOptions: AdaptiveServerOptions = {
-            port: options.port || 3000,
-            hostname: options.hostname || 'localhost',
-            tls: options.tls,
-            poolOptions: options.poolOptions || {
-                adaptiveResizing: true,
-                initialSize: 100,
-                maxSize: 2000,
-                minSize: 50,
-            },
-            loadMonitorIntervalMs: options.loadMonitorIntervalMs || 5000,
-            enableAutoTrafficBurstPreparation: options.enableAutoTrafficBurstPreparation !== false,
-            trafficBurstThresholdPercent: options.trafficBurstThresholdPercent || 50,
-            trafficSamplingWindowMs: options.trafficSamplingWindowMs || 30000,
-            reactorPoolSize: options.reactorPoolSize || 0, // 0 = 使用可用CPU核心数
-        };
-
-        // 创建多反应器池
-        const reactorPool = new MultiReactorPool({
-            size: defaultedOptions.reactorPoolSize === 0
-                ? Math.max(1, (Bun as any).threadCount || 4)
-                : defaultedOptions.reactorPoolSize,
-            strategy: 'round-robin'
-        });
-
-        // 初始化状态
-        this.state = {
-            running: false,
-            port: defaultedOptions.port,
-            router,
-            options: defaultedOptions,
-            reactorPool,
-            stats: {
-                requestsProcessed: 0,
-                requestsPerSecond: 0,
-                averageResponseTime: 0,
-                lastTrafficSample: []
+    constructor(options: AdaptiveServerOptions = {}, router?: RadixTreeRouter) {
+        this.port = options.port || 3000;
+        this.hostname = options.hostname || 'localhost';
+        this.tls = options.tls;
+        this.router = router || new RadixTreeRouter();
+        this.options = options;
+        this.reactorPool = new MultiReactorPool({
+            reactorCount: options.reactorPoolSize === 0
+                ? require('os').cpus().length
+                : options.reactorPoolSize,
+            balancingStrategy: 'least-busy',
+            enableAffinityIfSupported: true,
+            logging: {
+                enabled: options.debug === true,
+                level: 'info'
             }
-        };
-
-        // 配置对象池
-        if (options.poolOptions) {
-            reconfigureHttpPools(options.poolOptions);
-        }
-    }
-
-    /**
-     * 处理Actor消息
-     */
-    receive(message: HttpServerMessage, sender: ActorRef): void {
-        switch (message.type) {
-            case 'start':
-                this.startServer();
-                break;
-            case 'stop':
-                this.stopServer();
-                break;
-            case 'status':
-                // 返回服务器状态
-                sender.tell({
-                    running: this.state.running,
-                    port: this.state.port,
-                    stats: this.state.stats
-                });
-                break;
-            case 'addRoute':
-                this.addRoute(message.method, message.path, message.handler, message.middleware);
-                break;
-            case 'getStats':
-                // 返回服务器和对象池统计信息
-                sender.tell({
-                    server: this.state.stats,
-                    pools: getAllPoolStats()
-                });
-                break;
-            case 'updatePoolConfig':
-                reconfigureHttpPools(message.options);
-                break;
-            case 'prepareForTrafficBurst':
-                preparePoolsForTrafficBurst(message.factor || 2.0);
-                break;
-            default:
-                console.warn(`未知消息类型: ${(message as any).type}`);
-        }
-    }
-
-    /**
-     * 启动HTTP服务器
-     */
-    private startServer(): void {
-        if (this.state.running) {
-            console.warn('服务器已经在运行');
-            return;
-        }
-
-        const options = this.state.options;
-
-        // 创建服务器
-        this.server = (Bun as any).serve({
-            port: options.port,
-            hostname: options.hostname,
-            tls: options.tls,
-            fetch: (req: Request) => this.handleRequest(req)
         });
-
-        this.state.running = true;
-        console.log(`自适应HTTP服务器在 ${options.hostname}:${options.port} 上启动`);
-
-        // 启动负载监控
-        this.startLoadMonitoring();
+        this.stats = {
+            requestsProcessed: 0,
+            activeConnections: 0,
+            averageResponseTime: 0,
+            lastTrafficSample: [],
+            requestsPerSecond: 0
+        };
     }
 
-    /**
-     * 停止HTTP服务器
-     */
-    private stopServer(): void {
-        if (!this.state.running) {
-            console.warn('服务器没有运行');
-            return;
-        }
-
-        if (this.server) {
-            this.server.stop();
-            this.server = null;
-        }
-
-        this.state.running = false;
-        console.log('自适应HTTP服务器已停止');
-
-        // 停止负载监控
-        this.stopLoadMonitoring();
-    }
-
-    /**
-     * 添加路由
-     */
-    private addRoute(method: string, path: string, handler: HandlerFunction, middleware: MiddlewareFunction[] = []): void {
+    addRoute(method: string, path: string, handler: HandlerFunction, middleware: MiddlewareFunction[] = []): void {
         method = method.toUpperCase();
-        if (!this.state.router[method]) {
-            this.state.router[method] = new RadixTree<{
-                handler: HandlerFunction;
-                middleware: MiddlewareFunction[];
-            }>();
-        }
-
-        this.state.router[method].insert(path, { handler, middleware });
+        this.router.insert(path, { method, handler, middleware });
         console.log(`添加路由: ${method} ${path}`);
     }
 
-    /**
-     * 处理HTTP请求
-     */
-    private async handleRequest(request: Request): Promise<Response> {
+    async handleRequest(request: HttpRequest): Promise<HttpResponse> {
         const startTime = performance.now();
 
         // 记录请求
@@ -302,13 +158,7 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
             context.query = url.searchParams;
 
             // 查找匹配的路由
-            const routeTree = this.state.router[method];
-            if (!routeTree) {
-                // 方法不支持
-                return this.createMethodNotAllowedResponse();
-            }
-
-            const match = routeTree.lookup(path);
+            const match = this.router.lookup(path);
             if (!match) {
                 // 路由未找到
                 return this.createNotFoundResponse();
@@ -373,16 +223,6 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
     }
 
     /**
-     * 创建405响应
-     */
-    private createMethodNotAllowedResponse(): Response {
-        return new Response('Method Not Allowed', {
-            status: 405,
-            headers: { 'Content-Type': 'text/plain' }
-        });
-    }
-
-    /**
      * 创建500错误响应
      */
     private createErrorResponse(error: any): Response {
@@ -396,22 +236,22 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
      * 更新流量统计信息
      */
     private updateTrafficStats(): void {
-        this.state.stats.requestsProcessed++;
+        this.stats.requestsProcessed++;
 
         const now = Date.now();
-        this.state.stats.lastTrafficSample.push({
+        this.stats.lastTrafficSample.push({
             timestamp: now,
-            requests: this.state.stats.requestsProcessed
+            requests: this.stats.requestsProcessed
         });
 
         // 移除采样窗口之外的样本
-        const windowStart = now - this.state.options.trafficSamplingWindowMs!;
-        this.state.stats.lastTrafficSample = this.state.stats.lastTrafficSample.filter(
+        const windowStart = now - this.options.trafficSamplingWindowMs!;
+        this.stats.lastTrafficSample = this.stats.lastTrafficSample.filter(
             sample => sample.timestamp >= windowStart
         );
 
         // 检查是否需要准备流量突发
-        if (this.state.options.enableAutoTrafficBurstPreparation) {
+        if (this.options.enableAutoTrafficBurstPreparation) {
             this.checkForTrafficBurst();
         }
     }
@@ -420,7 +260,7 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
      * 检查流量突发情况
      */
     private checkForTrafficBurst(): void {
-        const samples = this.state.stats.lastTrafficSample;
+        const samples = this.stats.lastTrafficSample;
         if (samples.length < 2) return;
 
         // 计算短期请求率
@@ -440,7 +280,7 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
 
         const growthPercent = ((shortTermRate - longTermRate) / longTermRate) * 100;
 
-        if (growthPercent >= this.state.options.trafficBurstThresholdPercent!) {
+        if (growthPercent >= this.options.trafficBurstThresholdPercent!) {
             console.log(`检测到流量突发: 增长 ${growthPercent.toFixed(2)}%, 准备资源`);
 
             // 计算突发系数
@@ -474,11 +314,11 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
 
         // 更新平均响应时间（使用移动平均）
         const alpha = 0.05; // 平滑系数
-        this.state.stats.averageResponseTime = (alpha * responseTime) +
-            ((1 - alpha) * this.state.stats.averageResponseTime);
+        this.stats.averageResponseTime = (alpha * responseTime) +
+            ((1 - alpha) * this.stats.averageResponseTime);
 
         // 更新每秒请求数
-        const samples = this.state.stats.lastTrafficSample;
+        const samples = this.stats.lastTrafficSample;
         if (samples.length >= 2) {
             const firstSample = samples[0];
             const lastSample = samples[samples.length - 1];
@@ -487,7 +327,7 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
             const timeDiffSeconds = (lastSample.timestamp - firstSample.timestamp) / 1000;
 
             if (timeDiffSeconds > 0) {
-                this.state.stats.requestsPerSecond = requestDiff / timeDiffSeconds;
+                this.stats.requestsPerSecond = requestDiff / timeDiffSeconds;
             }
         }
     }
@@ -501,21 +341,26 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
         this.monitorInterval = setInterval(() => {
             // 记录当前状态
             const poolStats = getAllPoolStats();
-            const serverStats = this.state.stats;
+            const serverStats = this.stats;
 
             // 输出监控信息
-            if (this.state.options.debug) {
+            if (this.options.debug) {
                 console.log('----- 自适应HTTP服务器监控 -----');
                 console.log(`请求/秒: ${serverStats.requestsPerSecond.toFixed(2)}`);
                 console.log(`平均响应时间: ${serverStats.averageResponseTime.toFixed(2)}ms`);
+
+                // Use optional chaining to handle potential undefined properties
+                if (poolStats.requestPool) {
+                    console.log(`请求池: ${poolStats.requestPool.active}/${poolStats.requestPool.size} 活跃`);
+                    console.log(`请求池等待: ${(poolStats.requestPool as any).waiting ?? 0}`);
+                }
+
                 console.log('对象池状态:');
-                console.log(`  请求池: ${poolStats.requestPool.active}/${poolStats.requestPool.size} 活跃, ${poolStats.requestPool.waiting} 等待`);
                 console.log(`  响应池: ${poolStats.responsePool.active}/${poolStats.responsePool.size} 活跃`);
                 console.log(`  上下文池: ${poolStats.contextPool.active}/${poolStats.contextPool.size} 活跃`);
                 console.log('----------------------------');
             }
-
-        }, this.state.options.loadMonitorIntervalMs);
+        }, this.options.loadMonitorIntervalMs || 5000);
     }
 
     /**
@@ -530,8 +375,181 @@ export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
 }
 
 /**
- * 创建自适应HTTP服务器Actor
+ * 自适应HTTP服务器Actor
+ * 整合自适应对象池、多反应器和优化路由的高性能HTTP服务器
  */
-export function createAdaptiveHttpServer(system: ActorSystem, options: AdaptiveServerOptions): ActorRef {
-    return system.actorOf(() => new AdaptiveHttpServerActor(system, options));
-} 
+export class AdaptiveHttpServerActor extends Actor<HttpServerMessage> {
+    private server: any; // Bun.Server
+    private monitorInterval: NodeJS.Timeout | null = null;
+    protected state: ServerState;
+
+    constructor(context: ActorContext, options: AdaptiveServerOptions) {
+        super(context);
+
+        // Initialize with default values
+        const defaultedOptions: AdaptiveServerOptions = {
+            port: options.port || 3000,
+            hostname: options.hostname || 'localhost',
+            tls: options.tls,
+            poolOptions: options.poolOptions || {
+                initialSize: 100,
+                maxSize: 10000,
+                adaptiveResizing: true,
+                minSize: 50
+            },
+            loadMonitorIntervalMs: options.loadMonitorIntervalMs || 5000,
+            enableAutoTrafficBurstPreparation:
+                options.enableAutoTrafficBurstPreparation !== undefined
+                    ? options.enableAutoTrafficBurstPreparation
+                    : true,
+            trafficBurstThresholdPercent: options.trafficBurstThresholdPercent || 30,
+            trafficSamplingWindowMs: options.trafficSamplingWindowMs || 10000,
+            reactorPoolSize: options.reactorPoolSize || 0,
+            historyPointsCount: options.historyPointsCount || 100,
+            debug: options.debug || false
+        };
+
+        // Initialize state
+        this.state = new ServerState(defaultedOptions);
+    }
+
+    protected behaviors(): void {
+        this.addBehavior('default', this.handleMessage.bind(this));
+    }
+
+    private async handleMessage(message: HttpServerMessage): Promise<any> {
+        switch (message.type) {
+            case 'start':
+                return this.startServer();
+            case 'stop':
+                return this.stopServer();
+            case 'status':
+                return {
+                    running: this.state.running,
+                    port: this.state.port,
+                    stats: this.state.stats
+                };
+            case 'addRoute':
+                return this.addRoute(message.method!, message.path!, message.handler!, message.middleware);
+            case 'getStats':
+                return {
+                    server: this.state.stats,
+                    pools: getAllPoolStats()
+                };
+            case 'updatePoolConfig':
+                reconfigureHttpPools(message.options!);
+                return { success: true };
+            case 'prepareForTrafficBurst':
+                preparePoolsForTrafficBurst(message.factor || 2.0);
+                return { success: true };
+            default:
+                console.warn(`Unknown message type: ${message.type}`);
+                return { error: `Unknown message type: ${message.type}` };
+        }
+    }
+
+    /**
+     * Start the HTTP server
+     */
+    private async startServer(): Promise<{ success: boolean; port?: number; error?: string }> {
+        if (this.server) {
+            console.warn('Server is already running');
+            return { success: true, port: this.state.port };
+        }
+
+        try {
+            // Create server
+            this.server = (Bun as any).serve({
+                port: this.state.port,
+                hostname: this.state.hostname,
+                tls: this.state.tls,
+                fetch: (req: Request) => this.handleRequest(req)
+            });
+
+            console.log(`Adaptive HTTP server started on ${this.state.hostname}:${this.state.port}`);
+
+            return { success: true, port: this.state.port };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`Failed to start server: ${errorMessage}`);
+            return { success: false, error: errorMessage };
+        }
+    }
+
+    /**
+     * Stop the HTTP server
+     */
+    private async stopServer(): Promise<{ success: boolean; error?: string }> {
+        if (!this.server) {
+            console.warn('Server is not running');
+            return { success: true };
+        }
+
+        try {
+            this.server.stop();
+            this.server = null;
+            console.log('Adaptive HTTP server stopped');
+
+            return { success: true };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`Failed to stop server: ${errorMessage}`);
+            return { success: false, error: errorMessage };
+        }
+    }
+
+    /**
+     * Add a new route
+     */
+    private addRoute(method: string, path: string, handler: HandlerFunction, middleware: MiddlewareFunction[] = []): { success: boolean } {
+        this.state.addRoute(method, path, handler, middleware);
+        return { success: true };
+    }
+
+    /**
+     * Handle HTTP request
+     */
+    private async handleRequest(request: Request): Promise<Response> {
+        try {
+            const result = await this.state.handleRequest(request as any);
+
+            // Convert HttpResponse to Response if needed
+            if (result instanceof Response) {
+                return result;
+            }
+
+            // Create a new Response if result is HttpResponse
+            return new Response(result.body, {
+                status: result.statusCode || 200,
+                headers: result.headers
+            });
+        } catch (error) {
+            console.error('Error handling request:', error);
+            return new Response('Internal Server Error', {
+                status: 500,
+                headers: { 'Content-Type': 'text/plain' }
+            });
+        }
+    }
+
+    /**
+     * Starting load monitoring is handled in the ServerState class
+     */
+    private startLoadMonitoring(): void {
+        // This is handled in the ServerState class
+    }
+
+    /**
+     * Stopping load monitoring is handled in the ServerState class
+     */
+    private stopLoadMonitoring(): void {
+        // This is handled in the ServerState class
+    }
+
+    /**
+     * Create an adaptive HTTP server actor
+     */
+    static create(system: ActorSystem, options: AdaptiveServerOptions): ActorRef {
+        return system.actorOf(() => new AdaptiveHttpServerActor(system.context, options));
+    }
+}

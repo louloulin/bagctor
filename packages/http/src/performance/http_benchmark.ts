@@ -315,7 +315,7 @@ export class HttpBenchmark {
                 const metrics = this.calculateMetrics(result);
 
                 // 保存结果
-                suiteResults.scenarios.push({
+                (suiteResults.scenarios as any[]).push({
                     name: scenario.name,
                     result,
                     metrics

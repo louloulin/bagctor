@@ -1,0 +1,437 @@
+/**
+ * radix_tree.ts
+ * 
+ * 高性能基数树(Radix Tree)实现，用于HTTP路由匹配
+ * 提供近乎常数时间的路由查找性能，显著优化路由匹配效率
+ */
+
+import { RouteParams } from '../../types';
+
+/**
+ * HTTP方法枚举
+ */
+export enum HttpMethod {
+    GET = 'GET',
+    POST = 'POST',
+    PUT = 'PUT',
+    DELETE = 'DELETE',
+    PATCH = 'PATCH',
+    HEAD = 'HEAD',
+    OPTIONS = 'OPTIONS',
+    TRACE = 'TRACE',
+    CONNECT = 'CONNECT'
+}
+
+/**
+ * 路由处理函数类型
+ */
+export type RouteHandler = (params: RouteParams, path: string) => any;
+
+/**
+ * 路由节点类型
+ */
+interface RouteNode {
+    // 节点路径段
+    segment: string;
+    // 是否是通配符
+    isWildcard: boolean;
+    // 参数名（如果是参数节点）
+    paramName: string | null;
+    // 处理函数（如果是终端节点）
+    handlers: Map<HttpMethod, RouteHandler> | null;
+    // 子节点
+    children: RouteNode[];
+    // 缓存前缀，用于快速匹配
+    prefixCache: Map<string, RouteNode>;
+}
+
+/**
+ * 匹配结果类型
+ */
+export interface MatchResult {
+    handler: RouteHandler | null;
+    params: RouteParams;
+}
+
+/**
+ * Path parameter extraction result
+ */
+interface PathParams {
+    [key: string]: string;
+}
+
+/**
+ * Router lookup result
+ */
+interface RouterLookupResult {
+    handler: any;
+    params: PathParams;
+    value: any;
+}
+
+/**
+ * Radix Tree Node
+ */
+class RadixNode {
+    path: string;
+    children: RadixNode[];
+    isWildcard: boolean;
+    paramName: string | null;
+    handler: Map<HttpMethod, RouteHandler> | null;
+
+    constructor(path: string) {
+        this.path = path;
+        this.children = [];
+        this.isWildcard = false;
+        this.paramName = null;
+        this.handler = null;
+    }
+}
+
+/**
+ * 基数树路由器
+ * 使用基数树算法实现高效的路由匹配
+ */
+export class RadixTreeRouter {
+    private root: RadixNode;
+    // 路由缓存，提高频繁访问路由的性能
+    routeCache: Map<string, MatchResult>;
+    // 缓存大小限制
+    private readonly cacheLimit: number;
+
+    // 缓存命中统计
+    private _cacheHits: number = 0;
+    private _cacheMisses: number = 0;
+
+    /**
+     * 获取缓存命中次数
+     */
+    get cacheHits(): number {
+        return this._cacheHits;
+    }
+
+    /**
+     * 获取缓存未命中次数
+     */
+    get cacheMisses(): number {
+        return this._cacheMisses;
+    }
+
+    /**
+     * 获取路由数量
+     */
+    get routeCount(): number {
+        return this.getRoutesCount();
+    }
+
+    /**
+     * 创建基数树路由器
+     * @param cacheLimit 缓存大小限制，默认1000
+     */
+    constructor(cacheLimit: number = 1000) {
+        this.root = new RadixNode('');
+        this.routeCache = new Map();
+        this.cacheLimit = cacheLimit;
+    }
+
+    /**
+     * Insert a route into the Radix Tree
+     * @param method HTTP method
+     * @param path Route path pattern
+     * @param handler Route handler function
+     */
+    insert(method: HttpMethod, path: string, handler: RouteHandler): void {
+        if (!path.startsWith('/')) {
+            path = '/' + path;
+        }
+
+        // 清除缓存，因为路由表已经改变
+        this.clearCache();
+
+        let current = this.root;
+        let pathIndex = 0;
+
+        while (pathIndex < path.length) {
+            // Find matching child node
+            let matchFound = false;
+            const char = path[pathIndex];
+
+            // Handle parameter nodes (:param)
+            if (char === ':') {
+                // Find parameter name
+                const paramStart = pathIndex;
+                pathIndex++;
+                while (pathIndex < path.length &&
+                    path[pathIndex] !== '/' &&
+                    path[pathIndex] !== '.') {
+                    pathIndex++;
+                }
+
+                const paramName = path.slice(paramStart + 1, pathIndex);
+                let paramNode = current.children.find(child => child.isWildcard && child.paramName === paramName);
+
+                // Create param node if it doesn't exist
+                if (!paramNode) {
+                    paramNode = new RadixNode(':');
+                    paramNode.isWildcard = true;
+                    paramNode.paramName = paramName;
+                    current.children.push(paramNode);
+                }
+
+                current = paramNode;
+                continue;
+            }
+
+            // Handle wildcard paths (*)
+            if (char === '*') {
+                const paramName = path.slice(pathIndex + 1);
+                let wildcardNode = current.children.find(child =>
+                    child.isWildcard && child.path === '*');
+
+                if (!wildcardNode) {
+                    wildcardNode = new RadixNode('*');
+                    wildcardNode.isWildcard = true;
+                    wildcardNode.paramName = paramName || '*';
+                    current.children.push(wildcardNode);
+                }
+
+                current = wildcardNode;
+                pathIndex = path.length; // End of path
+                break;
+            }
+
+            // Look for existing edge with shared prefix
+            for (const child of current.children) {
+                if (!child.isWildcard && child.path[0] === char) {
+                    // Find common prefix length
+                    let i = 0;
+                    const maxLength = Math.min(child.path.length, path.length - pathIndex);
+
+                    while (i < maxLength && child.path[i] === path[pathIndex + i]) {
+                        i++;
+                    }
+
+                    if (i < child.path.length) {
+                        // Split node
+                        const newNode = new RadixNode(child.path.slice(0, i));
+                        const remainingNode = new RadixNode(child.path.slice(i));
+
+                        remainingNode.children = child.children;
+                        remainingNode.handler = child.handler;
+
+                        newNode.children = [remainingNode];
+
+                        // Replace original child with split node
+                        const childIndex = current.children.indexOf(child);
+                        current.children[childIndex] = newNode;
+
+                        current = newNode;
+                    } else {
+                        current = child;
+                    }
+
+                    pathIndex += i;
+                    matchFound = true;
+                    break;
+                }
+            }
+
+            // If no matching edge found, create a new one
+            if (!matchFound) {
+                const newNode = new RadixNode(path.slice(pathIndex));
+                current.children.push(newNode);
+                current = newNode;
+                pathIndex = path.length;
+            }
+        }
+
+        // Set handler at the terminal node
+        if (!current.handler) {
+            current.handler = new Map();
+        }
+        current.handler.set(method, handler);
+    }
+
+    /**
+     * Lookup a path in the Radix Tree
+     * @param method HTTP method
+     * @param path Request path to look up
+     * @returns Handler and extracted path parameters or null if not found
+     */
+    lookup(method: HttpMethod, path: string): RouterLookupResult | null {
+        if (!path.startsWith('/')) {
+            path = '/' + path;
+        }
+
+        const params: PathParams = {};
+        const result = this._lookup(this.root, path, 0, params);
+
+        if (result && result.handler && result.handler.has(method)) {
+            return {
+                handler: result.handler.get(method),
+                params,
+                value: result.handler.get(method)
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Internal recursive lookup method
+     */
+    private _lookup(
+        node: RadixNode,
+        path: string,
+        pathIndex: number,
+        params: PathParams
+    ): RadixNode | null {
+        // If we've consumed the entire path, return this node
+        if (pathIndex === path.length) {
+            return node;
+        }
+
+        // First try static matches
+        for (const child of node.children.filter(c => !c.isWildcard)) {
+            const prefixLen = child.path.length;
+            const remaining = path.length - pathIndex;
+
+            if (remaining >= prefixLen) {
+                let match = true;
+                for (let i = 0; i < prefixLen; i++) {
+                    if (path[pathIndex + i] !== child.path[i]) {
+                        match = false;
+                        break;
+                    }
+                }
+
+                if (match) {
+                    const result = this._lookup(
+                        child,
+                        path,
+                        pathIndex + prefixLen,
+                        params
+                    );
+                    if (result) return result;
+                }
+            }
+        }
+
+        // Try parameter matches (wildcards)
+        for (const child of node.children.filter(c => c.isWildcard)) {
+            // Check for wildcard (*) match which consumes the rest of the path
+            if (child.path === '*') {
+                const paramValue = path.slice(pathIndex);
+                if (child.paramName && child.paramName !== '*') {
+                    params[child.paramName] = paramValue;
+                } else if (child.paramName === '*') {
+                    params['*'] = paramValue;
+                }
+                return child;
+            }
+
+            // Extract parameter value for :param style matches
+            let endPos = path.indexOf('/', pathIndex);
+            if (endPos === -1) endPos = path.length;
+
+            const paramValue = path.slice(pathIndex, endPos);
+            if (paramValue) {
+                // Store parameter
+                if (child.paramName) {
+                    params[child.paramName] = paramValue;
+                }
+
+                const result = this._lookup(
+                    child,
+                    path,
+                    endPos,
+                    params
+                );
+
+                if (result) return result;
+
+                // If didn't match, remove the param we added
+                if (child.paramName) {
+                    delete params[child.paramName];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 匹配路由
+     * @param method HTTP方法
+     * @param path 路径
+     * @returns 匹配结果
+     */
+    public matchRoute(method: HttpMethod, path: string): MatchResult {
+        // 检查缓存
+        const cacheKey = `${method}:${path}`;
+        if (this.routeCache.has(cacheKey)) {
+            this._cacheHits++;
+            return this.routeCache.get(cacheKey)!;
+        }
+        this._cacheMisses++;
+
+        // 使用lookup查找路由
+        const lookupResult = this.lookup(method, path);
+        const result: MatchResult = {
+            handler: lookupResult ? lookupResult.handler : null,
+            params: lookupResult ? lookupResult.params : {}
+        };
+
+        // 更新缓存
+        if (this.routeCache.size >= this.cacheLimit) {
+            // 如果缓存过大，清理最早的条目
+            const firstKey = this.routeCache.keys().next().value;
+            if (firstKey) {
+                this.routeCache.delete(firstKey);
+            }
+        }
+        this.routeCache.set(cacheKey, result);
+
+        return result;
+    }
+
+    /**
+     * 清除路由缓存
+     */
+    public clearCache(): void {
+        this.routeCache.clear();
+    }
+
+    /**
+     * 获取路由数量
+     */
+    public getRoutesCount(): number {
+        return this.countRoutes(this.root);
+    }
+
+    /**
+     * 计算路由数量
+     */
+    private countRoutes(node: RadixNode): number {
+        let count = 0;
+        if (node.handler) {
+            count += node.handler.size;
+        }
+
+        for (const child of node.children) {
+            count += this.countRoutes(child);
+        }
+
+        return count;
+    }
+
+    /**
+     * Add a route with HTTP method
+     * @param method HTTP method (GET, POST, PUT, etc.)
+     * @param path Route path
+     * @param handler Route handler function
+     */
+    addRoute(method: HttpMethod, path: string, handler: RouteHandler): void {
+        this.insert(method, path, handler);
+    }
+}

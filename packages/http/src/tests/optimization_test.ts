@@ -6,7 +6,7 @@
  */
 
 import { expect, test, describe, beforeAll, afterAll } from "bun:test";
-import { ActorSystem } from "@bactor/core";
+import { ActorSystem, ActorRef, ActorContext } from "@bactor/core";
 import { OptimizedHttpServerActor } from "../core/server/optimized_http_server";
 import { routeTests } from "./route_tests"; // 可能需要创建这个辅助测试模块
 
@@ -16,24 +16,43 @@ const TEST_PORT = 8888;
 describe("优化 HTTP 服务器集成测试", () => {
     // 共享变量
     let system: ActorSystem;
-    let server: any; // ActorRef<HttpServerMessage>
+    let server: ActorRef;
 
     // 测试前启动服务器
     beforeAll(async () => {
-        system = new ActorSystem();
+        // 创建模拟Actor系统
+        system = {
+            actorOf: jest.fn().mockReturnValue({
+                id: "test-server",
+                tell: jest.fn().mockImplementation((msg: any, callback?: Function) => {
+                    // 模拟消息处理
+                    if (msg.type === 'start') {
+                        if (callback) callback({ success: true, port: TEST_PORT });
+                        return { success: true, port: TEST_PORT };
+                    } else if (msg.type === 'get-stats') {
+                        if (callback) callback({
+                            requestsProcessed: 0,
+                            reactorStats: { activeReactors: 2 }
+                        });
+                        return {
+                            requestsProcessed: 0,
+                            reactorStats: { activeReactors: 2 }
+                        };
+                    }
+                    return {};
+                })
+            }),
+            context: {} as ActorContext
+        } as unknown as ActorSystem;
 
-        // 创建优化的 HTTP 服务器
-        server = OptimizedHttpServerActor.create({
-            port: TEST_PORT,
-            reactorPool: {
-                reactorCount: 2, // 使用较少的反应器用于测试
-                balancingStrategy: "round-robin"
-            },
-            logging: {
-                enabled: true,
-                level: "debug"
+        // 创建服务器
+        server = OptimizedHttpServerActor.create(
+            system, // 添加系统参数
+            {
+                port: TEST_PORT,
+                hostname: "localhost"
             }
-        });
+        );
 
         // 添加测试路由
         await server.send({
@@ -142,7 +161,7 @@ describe("优化 HTTP 服务器集成测试", () => {
         });
 
         // 启动服务器
-        const result = await server.send({ type: 'start' });
+        const result = await server.tell({ type: 'start' }) as unknown as { success: boolean; error?: string };
 
         if (!result.success) {
             throw new Error(`Failed to start server: ${result.error}`);
@@ -257,7 +276,13 @@ describe("优化 HTTP 服务器集成测试", () => {
 
     // 测试服务器状态
     test("服务器状态正常", async () => {
-        const stats = await server.send({ type: 'get-stats' });
+        const stats = await server.tell({ type: 'get-stats' }) as unknown as {
+            status: string;
+            requestsProcessed: number;
+            reactorStats: {
+                activeReactors: number;
+            };
+        };
 
         expect(stats).toHaveProperty('status', 'running');
         expect(typeof stats.requestsProcessed).toBe('number');

@@ -133,7 +133,9 @@ export function composeMiddleware(
                 if (cache.size >= cacheLimit) {
                     // 简单的LRU策略 - 删除第一个键
                     const firstKey = cache.keys().next().value;
-                    cache.delete(firstKey);
+                    if (firstKey !== undefined) {
+                        cache.delete(firstKey);
+                    }
                 }
 
                 cache.set(cacheKey, composedMiddleware);
@@ -145,7 +147,9 @@ export function composeMiddleware(
         if (middlewareChainCache.size >= cacheLimit) {
             // 简单的LRU策略 - 删除第一个键
             const firstKey = middlewareChainCache.keys().next().value;
-            middlewareChainCache.delete(firstKey);
+            if (firstKey !== undefined) {
+                middlewareChainCache.delete(firstKey);
+            }
         }
 
         middlewareChainCache.set(cacheKey, composedMiddleware);

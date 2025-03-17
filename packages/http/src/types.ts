@@ -18,6 +18,9 @@ export interface HttpResponse {
   status: number;
   headers: Headers;
   body: any;
+  statusCode?: number; // Added for compatibility with node http response
+  setHeader?: (name: string, value: string) => void; // Added for compatibility with node http response
+  end?: (data?: any) => void; // Added for compatibility with node http response
 }
 
 /**
@@ -42,6 +45,44 @@ export interface HttpContext {
  * HTTP handler function type
  */
 export type HttpHandler = (context: HttpContext) => Promise<HttpResponse> | HttpResponse;
+
+/**
+ * Handler function for processing HTTP requests
+ */
+export type HandlerFunction = (req: HttpRequest, params: RouteParams) => Promise<HttpResponse> | HttpResponse;
+
+/**
+ * Middleware function for HTTP request/response processing
+ */
+export type MiddlewareFunction = (req: HttpRequest, res: HttpResponse, next: () => Promise<void>) => Promise<void>;
+
+/**
+ * Server configuration options
+ */
+export interface ServerOptions {
+  /**
+   * Server port
+   */
+  port?: number;
+
+  /**
+   * Server hostname
+   */
+  hostname?: string;
+
+  /**
+   * TLS configuration for HTTPS
+   */
+  tls?: {
+    cert: string;
+    key: string;
+  };
+
+  /**
+   * Debug mode flag
+   */
+  debug?: boolean;
+}
 
 /**
  * Route definition

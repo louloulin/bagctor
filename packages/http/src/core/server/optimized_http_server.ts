@@ -5,10 +5,10 @@
  * 提供高性能、低延迟的HTTP服务能力
  */
 
-import { Actor, ActorRef, createActor } from '@bactor/core';
+import { Actor, ActorRef, ActorContext, ActorSystem, Message } from '@bactor/core';
 import { HttpRequest, HttpResponse } from '../../types';
+import { MultiReactorPoolOptions, RouteConfig } from '../../types/index.d';
 import { MultiReactorPool } from '../reactor/multi_reactor_pool';
-import { OptimizedRouter, RouteConfig } from '../router/optimized_router';
 import {
     acquireRequest,
     releaseRequest,
@@ -17,6 +17,7 @@ import {
 } from '../pool/http_pools';
 import { Work, WorkResult } from '../reactor/reactor';
 import { Server as BunServer } from 'bun';
+import { RadixTreeRouter } from '../router/radix_tree';
 
 /**
  * HTTP服务器配置
@@ -25,7 +26,7 @@ export interface HttpServerConfig {
     /**
      * 服务器端口
      */
-    port: number;
+    port?: number;
 
     /**
      * 主机地址
@@ -58,17 +59,7 @@ export interface HttpServerConfig {
     /**
      * 路由器配置
      */
-    router?: {
-        /**
-         * 启用路由缓存
-         */
-        enableCache?: boolean;
-
-        /**
-         * 缓存大小
-         */
-        cacheSize?: number;
-    };
+    routerOptions?: any;
 
     /**
      * 日志配置
@@ -77,6 +68,11 @@ export interface HttpServerConfig {
         enabled: boolean;
         level: 'debug' | 'info' | 'warn' | 'error';
     };
+
+    /**
+     * 调试模式
+     */
+    debug?: boolean;
 }
 
 /**
@@ -87,6 +83,7 @@ export type HttpServerMessage =
     | { type: 'stop' }
     | { type: 'add-route'; config: RouteConfig }
     | { type: 'add-routes'; configs: RouteConfig[] }
+    | { type: 'status' }
     | { type: 'get-stats' }
     | { type: 'health-check' };
 
@@ -138,28 +135,30 @@ interface HttpServerStats {
 }
 
 /**
- * 优化的HTTP服务器Actor实现
+ * Optimized HTTP Server State
+ */
+interface OptimizedServerState {
+    port: number;
+    hostname: string;
+    tls?: { cert: string; key: string };
+    router: RadixTreeRouter;
+    running: boolean;
+    debug: boolean;
+    options: HttpServerConfig;
+}
+
+/**
+ * Optimized HTTP Server Actor
  */
 export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
-    /**
-     * 服务器配置
-     */
-    private config: HttpServerConfig;
-
-    /**
-     * 底层Bun HTTP服务器
-     */
-    private server: BunServer | null = null;
+    private server: any; // Bun.Server
+    private monitorInterval: NodeJS.Timeout | null = null;
+    protected state: any; // ServerState
 
     /**
      * 多反应器池
      */
     private reactorPool: MultiReactorPool;
-
-    /**
-     * 优化的路由器
-     */
-    private router: OptimizedRouter;
 
     /**
      * 服务器状态
@@ -177,13 +176,32 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
         startTime: 0
     };
 
-    /**
-     * 构造函数
-     * @param config HTTP服务器配置
-     */
-    constructor(config: HttpServerConfig) {
-        super();
-        this.config = config;
+    constructor(context: ActorContext, config: HttpServerConfig = {}) {
+        super(context);
+
+        // Default configuration
+        const defaultConfig: HttpServerConfig = {
+            port: 3000,
+            hostname: 'localhost',
+            debug: false,
+            routerOptions: {
+                cacheSize: 1000
+            }
+        };
+
+        // Merge with provided config
+        const finalConfig = { ...defaultConfig, ...config };
+
+        // Initialize state
+        this.state = {
+            port: finalConfig.port || 3000,
+            hostname: finalConfig.hostname || 'localhost',
+            tls: finalConfig.tls,
+            router: new RadixTreeRouter(),
+            running: false,
+            debug: finalConfig.debug || false,
+            options: finalConfig
+        };
 
         // 初始化多反应器池
         this.reactorPool = new MultiReactorPool({
@@ -193,40 +211,51 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
             logging: config.logging
         });
 
-        // 初始化路由器
-        this.router = new OptimizedRouter();
-
         this.log('info', '初始化优化HTTP服务器');
+
+        // Set up behaviors
+        this.behaviors();
     }
 
     /**
-     * Actor初始化
+     * Define actor behaviors
      */
-    async initialize(): Promise<void> {
-        // 注册HTTP请求处理器
-        this.reactorPool.registerWorkHandler('http.request', this.handleHttpRequest.bind(this));
-
-        this.log('info', 'HTTP服务器Actor初始化完成');
+    protected behaviors(): void {
+        this.addBehavior('idle', this.handleIdle.bind(this));
+        this.addBehavior('running', this.handleRunning.bind(this));
+        this.become('idle');
     }
 
     /**
-     * Actor消息处理
+     * Handle messages in idle state
      */
-    async receive(message: HttpServerMessage): Promise<any> {
+    private async handleIdle(message: HttpServerMessage): Promise<any> {
         switch (message.type) {
             case 'start':
-                return this.startServer();
-
-            case 'stop':
-                return this.stopServer();
+                const result = await this.startServer();
+                if (result.success) {
+                    this.become('running');
+                }
+                return result;
 
             case 'add-route':
-                this.router.add(message.config);
+                if (message.config) {
+                    this.addRoute(message.config);
+                }
                 return { success: true };
 
             case 'add-routes':
-                this.router.addRoutes(message.configs);
+                if (message.configs && Array.isArray(message.configs)) {
+                    message.configs.forEach(config => this.addRoute(config));
+                }
                 return { success: true };
+
+            case 'status':
+                return {
+                    status: 'idle',
+                    port: this.state.port,
+                    routes: 0 // TODO: count routes
+                };
 
             case 'get-stats':
                 return this.getStats();
@@ -238,30 +267,67 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
                 };
 
             default:
-                this.log('warn', `收到未知消息类型: ${(message as any).type}`);
-                return { error: 'Unknown message type' };
+                return { error: `Unknown message type: ${message.type}` };
         }
     }
 
     /**
-     * Actor关闭
+     * Handle messages in running state
      */
-    async shutdown(): Promise<void> {
-        await this.stopServer();
-        this.log('info', 'HTTP服务器Actor已关闭');
+    private async handleRunning(message: HttpServerMessage): Promise<any> {
+        switch (message.type) {
+            case 'stop':
+                const result = await this.stopServer();
+                if (result.success) {
+                    this.become('idle');
+                }
+                return result;
+
+            case 'add-route':
+                if (message.config) {
+                    this.addRoute(message.config);
+                }
+                return { success: true };
+
+            case 'add-routes':
+                if (message.configs && Array.isArray(message.configs)) {
+                    message.configs.forEach(config => this.addRoute(config));
+                }
+                return { success: true };
+
+            case 'status':
+                return {
+                    status: 'running',
+                    port: this.state.port,
+                    uptime: process.uptime(),
+                    routes: 0 // TODO: count routes
+                };
+
+            case 'get-stats':
+                return this.getStats();
+
+            case 'health-check':
+                return {
+                    status: this.status,
+                    healthy: this.status === 'running'
+                };
+
+            default:
+                return { error: `Unknown message type: ${message.type}` };
+        }
     }
 
     /**
-     * 启动HTTP服务器
+     * Start the HTTP server
      */
     private async startServer(): Promise<{ success: boolean; port?: number; error?: string }> {
         if (this.status === 'running') {
-            return { success: true, port: this.config.port };
+            return { success: true, port: this.state.port };
         }
 
         try {
             this.status = 'starting';
-            this.log('info', `启动HTTP服务器，端口: ${this.config.port}`);
+            this.log('info', `启动HTTP服务器，端口: ${this.state.port}`);
 
             // 启动反应器池
             await this.reactorPool.start();
@@ -276,17 +342,17 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
             };
 
             // 创建并启动Bun HTTP服务器
-            this.server = Bun.serve({
-                port: this.config.port,
-                hostname: this.config.hostname || '0.0.0.0',
-                tls: this.config.tls,
+            this.server = (Bun as any).serve({
+                port: this.state.port,
+                hostname: this.state.hostname,
+                tls: this.state.tls,
                 fetch: this.handleRequest.bind(this)
             });
 
             this.status = 'running';
-            this.log('info', `HTTP服务器已启动，正在监听端口 ${this.config.port}`);
+            this.log('info', `HTTP服务器已启动，正在监听端口 ${this.state.port}`);
 
-            return { success: true, port: this.config.port };
+            return { success: true, port: this.state.port };
         } catch (error) {
             this.status = 'stopped';
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -296,7 +362,7 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
     }
 
     /**
-     * 停止HTTP服务器
+     * Stop the HTTP server
      */
     private async stopServer(): Promise<{ success: boolean; error?: string }> {
         if (this.status === 'stopped') {
@@ -328,8 +394,19 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
     }
 
     /**
-     * 处理HTTP请求入口
-     * 在Bun服务器的fetch事件中调用
+     * Add a route configuration
+     */
+    private addRoute(config: RouteConfig): void {
+        const { path, method, handler, middleware = [] } = config;
+        this.state.router.insert(path, { method, handler, middleware });
+
+        if (this.state.debug) {
+            this.log('info', `Added route: ${method} ${path}`);
+        }
+    }
+
+    /**
+     * Handle HTTP request
      */
     private async handleRequest(request: Request): Promise<Response> {
         const startTime = performance.now();
@@ -389,90 +466,6 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
     }
 
     /**
-     * HTTP请求处理器 - 在反应器中执行
-     */
-    private async handleHttpRequest(work: Work): Promise<Response> {
-        const { request, method, path } = work.payload;
-
-        // 从对象池获取请求和响应对象
-        const httpRequest = acquireRequest();
-        const httpResponse = acquireResponse();
-
-        try {
-            // 填充请求对象
-            httpRequest.method = method;
-            httpRequest.url = path;
-            httpRequest.headers = request.headers;
-
-            // 解析请求体 (如果需要)
-            if (['POST', 'PUT', 'PATCH'].includes(method)) {
-                const contentType = request.headers.get('content-type') || '';
-
-                if (contentType.includes('application/json')) {
-                    httpRequest.body = await request.json();
-                } else if (contentType.includes('application/x-www-form-urlencoded')) {
-                    const formData = await request.formData();
-                    const body: Record<string, any> = {};
-
-                    for (const [key, value] of formData.entries()) {
-                        body[key] = value;
-                    }
-
-                    httpRequest.body = body;
-                } else {
-                    httpRequest.body = await request.text();
-                }
-            }
-
-            // 使用路由器处理请求
-            const handled = await this.router.handle(httpRequest, httpResponse);
-
-            if (!handled) {
-                // 没有找到匹配的路由
-                httpResponse.statusCode = 404;
-                httpResponse.setHeader('Content-Type', 'application/json');
-                httpResponse.end(JSON.stringify({ error: 'Not Found' }));
-            }
-
-            // 构造响应
-            const headers = new Headers();
-            for (const [key, value] of httpResponse.headers.entries()) {
-                headers.set(key, value);
-            }
-
-            const response = new Response(
-                httpResponse.body,
-                {
-                    status: httpResponse.statusCode,
-                    headers
-                }
-            );
-
-            return response;
-        } catch (error) {
-            this.log('error', `处理请求时出错: ${error}`);
-
-            // 返回错误响应
-            return new Response(
-                JSON.stringify({
-                    error: 'Internal Server Error',
-                    message: process.env.NODE_ENV === 'development'
-                        ? (error instanceof Error ? error.message : String(error))
-                        : undefined
-                }),
-                {
-                    status: 500,
-                    headers: { 'Content-Type': 'application/json' }
-                }
-            );
-        } finally {
-            // 归还请求和响应对象到池中
-            releaseRequest(httpRequest);
-            releaseResponse(httpResponse);
-        }
-    }
-
-    /**
      * 获取服务器统计信息
      */
     private getStats(): HttpServerStats {
@@ -492,9 +485,9 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
                 totalWorkProcessed: reactorStats.totalWorkProcessed
             },
             routerStats: {
-                routeCount: 0, // 需要从router获取统计信息
-                cacheHits: 0,
-                cacheMisses: 0
+                routeCount: (this.state.router as any).routeCount || 0,
+                cacheHits: this.state.router.cacheHits,
+                cacheMisses: this.state.router.cacheMisses
             }
         };
     }
@@ -503,7 +496,7 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
      * 记录日志
      */
     private log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void {
-        if (!this.config.logging?.enabled) {
+        if (!this.state.options.logging?.enabled) {
             return;
         }
 
@@ -514,16 +507,16 @@ export class OptimizedHttpServerActor extends Actor<HttpServerMessage> {
             'error': 3
         };
 
-        if (levelPriority[level] >= levelPriority[this.config.logging.level || 'info']) {
+        const configLevel = this.state.options.logging?.level || 'info';
+        if (levelPriority[level] >= levelPriority[configLevel as keyof typeof levelPriority]) {
             console[level](`[OptimizedHttpServer] ${message}`);
         }
     }
 
     /**
-     * 创建优化的HTTP服务器Actor
-     * @param config 服务器配置
+     * Factory method to create an instance of OptimizedHttpServerActor
      */
-    static create(config: HttpServerConfig): ActorRef<HttpServerMessage> {
-        return createActor(new OptimizedHttpServerActor(config));
+    static create(system: ActorSystem, config: HttpServerConfig): ActorRef {
+        return system.actorOf(() => new OptimizedHttpServerActor(system.context, config));
     }
 } 

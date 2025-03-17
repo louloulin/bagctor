@@ -5,338 +5,342 @@
  * 包括请求吞吐量、响应时间、对象池使用情况和资源自适应行为的可视化。
  */
 
-import { Actor } from 'bactor';
+import { Actor } from '@bactor/core';
 import { AdaptiveHttpServerActor } from '../core/server/adaptive_http_server';
 import { ServerOptions } from '../types';
 import { AdaptivePoolStats } from '../core/pool/adaptive_pool';
 
 // 为Bun添加额外的类型
 declare global {
-    interface Bun {
-        file(path: string): { text(): Promise<string> };
-    }
+  interface Bun {
+    file(path: string): { text(): Promise<string> };
+  }
 }
 
 /**
  * 仪表盘配置选项接口
  */
 export interface DashboardOptions {
-    /** 仪表盘服务器端口 */
-    port?: number;
-    /** 仪表盘服务器主机名 */
-    hostname?: string;
-    /** 数据收集间隔(毫秒) */
-    collectIntervalMs?: number;
-    /** 历史数据点数量 */
-    historyPointsCount?: number;
-    /** 是否输出控制台日志 */
-    consoleOutput?: boolean;
+  /** 仪表盘服务器端口 */
+  port?: number;
+  /** 仪表盘服务器主机名 */
+  hostname?: string;
+  /** 数据收集间隔(毫秒) */
+  collectIntervalMs?: number;
+  /** 历史数据点数量 */
+  historyPointsCount?: number;
+  /** 是否输出控制台日志 */
+  consoleOutput?: boolean;
 }
 
 /**
  * 默认仪表盘配置
  */
 const DEFAULT_DASHBOARD_OPTIONS: DashboardOptions = {
-    port: 8090,
-    hostname: 'localhost',
-    collectIntervalMs: 1000,
-    historyPointsCount: 300, // 5分钟的历史数据(假设1秒收集间隔)
-    consoleOutput: true
+  port: 8090,
+  hostname: 'localhost',
+  collectIntervalMs: 1000,
+  historyPointsCount: 300, // 5分钟的历史数据(假设1秒收集间隔)
+  consoleOutput: true
 };
 
 /**
  * 监控数据点接口
  */
 interface MonitoringDataPoint {
-    /** 时间戳 */
-    timestamp: number;
-    /** 请求/秒 */
-    requestsPerSecond: number;
-    /** 平均响应时间(毫秒) */
-    avgResponseTimeMs: number;
-    /** 各种对象池的活跃对象数 */
-    activeObjects: Record<string, number>;
-    /** 各种对象池的总大小 */
-    poolSizes: Record<string, number>;
-    /** 内存使用(MB) */
-    memoryUsageMB: number;
-    /** 资源调整操作 */
-    resizeOperations: Array<{
-        poolType: string;
-        operation: 'grow' | 'shrink';
-        amount: number;
-        reason: string;
-    }>;
+  /** 时间戳 */
+  timestamp: number;
+  /** 请求/秒 */
+  requestsPerSecond: number;
+  /** 平均响应时间(毫秒) */
+  avgResponseTimeMs: number;
+  /** 各种对象池的活跃对象数 */
+  activeObjects: Record<string, number>;
+  /** 各种对象池的总大小 */
+  poolSizes: Record<string, number>;
+  /** 内存使用(MB) */
+  memoryUsageMB: number;
+  /** 资源调整操作 */
+  resizeOperations: Array<{
+    poolType: string;
+    operation: 'grow' | 'shrink';
+    amount: number;
+    reason: string;
+  }>;
 }
 
 /**
  * 监控历史数据接口
  */
 interface MonitoringHistory {
-    /** 数据点历史记录 */
-    dataPoints: MonitoringDataPoint[];
-    /** 上次请求计数 */
-    lastRequestCount: number;
-    /** 上次时间戳 */
-    lastTimestamp: number;
-    /** 服务器启动时间 */
-    serverStartTime: number;
+  /** 数据点历史记录 */
+  dataPoints: MonitoringDataPoint[];
+  /** 上次请求计数 */
+  lastRequestCount: number;
+  /** 上次时间戳 */
+  lastTimestamp: number;
+  /** 服务器启动时间 */
+  serverStartTime: number;
 }
 
 /**
  * 自适应HTTP服务器监控仪表盘类
  */
 export class AdaptiveDashboard {
-    private server: Actor;
-    private httpServer: any;
-    private options: DashboardOptions;
-    private history: MonitoringHistory;
-    private collectInterval: number;
-    private resizeOperationsBuffer: MonitoringDataPoint['resizeOperations'] = [];
+  private server: Actor;
+  private httpServer: any;
+  private options: DashboardOptions;
+  private history: MonitoringHistory;
+  private collectInterval: NodeJS.Timeout | null = null;
+  private resizeOperationsBuffer: MonitoringDataPoint['resizeOperations'] = [];
 
-    /**
-     * 创建一个新的监控仪表盘实例
-     * 
-     * @param server 要监控的自适应HTTP服务器Actor
-     * @param options 仪表盘配置选项
-     */
-    constructor(server: Actor, options: DashboardOptions = {}) {
-        this.server = server;
-        this.options = { ...DEFAULT_DASHBOARD_OPTIONS, ...options };
-        this.history = {
-            dataPoints: [],
-            lastRequestCount: 0,
-            lastTimestamp: Date.now(),
-            serverStartTime: Date.now()
-        };
+  /**
+   * 创建一个新的监控仪表盘实例
+   * 
+   * @param server 要监控的自适应HTTP服务器Actor
+   * @param options 仪表盘配置选项
+   */
+  constructor(server: Actor, options: DashboardOptions = {}) {
+    this.server = server;
+    this.options = { ...DEFAULT_DASHBOARD_OPTIONS, ...options };
+    this.history = {
+      dataPoints: [],
+      lastRequestCount: 0,
+      lastTimestamp: Date.now(),
+      serverStartTime: Date.now()
+    };
 
-        // 绑定方法以便在事件监听器中使用
-        this.collectData = this.collectData.bind(this);
-        this.handleRequest = this.handleRequest.bind(this);
+    // 绑定方法以便在事件监听器中使用
+    this.collectData = this.collectData.bind(this);
+    this.handleRequest = this.handleRequest.bind(this);
+  }
+
+  /**
+   * 启动监控仪表盘
+   */
+  async start(): Promise<void> {
+    // 请求服务器初始状态
+    await this.requestInitialServerState();
+
+    // 开始定期收集数据
+    this.collectInterval = setInterval(
+      this.collectData,
+      this.options.collectIntervalMs || DEFAULT_DASHBOARD_OPTIONS.collectIntervalMs
+    );
+
+    // 启动仪表盘HTTP服务器
+    this.httpServer = Bun.serve({
+      port: this.options.port,
+      hostname: this.options.hostname,
+      fetch: this.handleRequest
+    });
+
+    console.log(`📊 监控仪表盘已启动在 http://${this.options.hostname}:${this.options.port}`);
+  }
+
+  /**
+   * 停止监控仪表盘
+   */
+  stop(): void {
+    if (this.collectInterval) {
+      clearInterval(this.collectInterval);
+      this.collectInterval = null;
     }
 
-    /**
-     * 启动监控仪表盘
-     */
-    async start(): Promise<void> {
-        // 请求服务器初始状态
-        await this.requestInitialServerState();
-
-        // 开始定期收集数据
-        this.collectInterval = setInterval(
-            this.collectData,
-            this.options.collectIntervalMs
-        );
-
-        // 启动仪表盘HTTP服务器
-        this.httpServer = Bun.serve({
-            port: this.options.port,
-            hostname: this.options.hostname,
-            fetch: this.handleRequest
-        });
-
-        console.log(`📊 监控仪表盘已启动在 http://${this.options.hostname}:${this.options.port}`);
+    if (this.httpServer) {
+      this.httpServer.stop();
+      this.httpServer = null;
     }
 
-    /**
-     * 停止监控仪表盘
-     */
-    stop(): void {
-        if (this.collectInterval) {
-            clearInterval(this.collectInterval);
+    console.log('📊 监控仪表盘已停止');
+  }
+
+  /**
+   * 记录资源调整操作
+   * 
+   * @param poolType 池类型
+   * @param operation 操作类型
+   * @param amount 调整数量
+   * @param reason 调整原因
+   */
+  recordResizeOperation(
+    poolType: string,
+    operation: 'grow' | 'shrink',
+    amount: number,
+    reason: string
+  ): void {
+    this.resizeOperationsBuffer.push({
+      poolType,
+      operation,
+      amount,
+      reason
+    });
+  }
+
+  /**
+   * 请求服务器初始状态
+   */
+  private async requestInitialServerState(): Promise<void> {
+    return new Promise((resolve) => {
+      this.server.tell({ type: 'status' }, (status) => {
+        if (status.running) {
+          this.history.serverStartTime = status.startTime || Date.now();
         }
+        resolve();
+      });
+    });
+  }
 
-        if (this.httpServer) {
-            this.httpServer.stop();
-            console.log('📊 监控仪表盘已停止');
+  /**
+   * 收集监控数据
+   */
+  private async collectData(): Promise<void> {
+    this.server.tell({ type: 'getStats' }, (stats) => {
+      if (!stats) {
+        console.warn('无法获取服务器统计信息');
+        return;
+      }
+
+      const now = Date.now();
+      const elapsedSec = (now - this.history.lastTimestamp) / 1000;
+
+      // 计算每秒请求数
+      const currentRequests = stats.totalRequests || 0;
+      const requestDiff = currentRequests - this.history.lastRequestCount;
+      const requestsPerSecond = requestDiff / elapsedSec;
+
+      // 创建数据点
+      const dataPoint: MonitoringDataPoint = {
+        timestamp: now,
+        requestsPerSecond,
+        avgResponseTimeMs: stats.avgResponseTime || 0,
+        activeObjects: this.extractActiveObjects(stats),
+        poolSizes: this.extractPoolSizes(stats),
+        memoryUsageMB: this.getMemoryUsage(),
+        resizeOperations: [...this.resizeOperationsBuffer]
+      };
+
+      // 添加数据点到历史记录
+      this.history.dataPoints.push(dataPoint);
+
+      // 如果超过历史记录限制，移除最早的数据点
+      const maxHistoryPoints = this.options.historyPointsCount ?? DEFAULT_DASHBOARD_OPTIONS.historyPointsCount ?? 300;
+      if (this.history.dataPoints.length > maxHistoryPoints) {
+        this.history.dataPoints.shift();
+      }
+
+      // 更新上次请求计数和时间戳
+      this.history.lastRequestCount = currentRequests;
+      this.history.lastTimestamp = now;
+
+      // 清空资源调整操作缓冲区
+      this.resizeOperationsBuffer = [];
+
+      // 如果启用了控制台输出，输出统计信息
+      if (this.options.consoleOutput) {
+        this.logStats(dataPoint);
+      }
+    });
+  }
+
+  /**
+   * 提取活跃对象数量
+   */
+  private extractActiveObjects(stats: any): Record<string, number> {
+    const result: Record<string, number> = {};
+
+    if (stats.pools) {
+      for (const [poolName, poolStats] of Object.entries<any>(stats.pools)) {
+        result[poolName] = poolStats.activeObjects ?? poolStats.active ?? 0;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 提取对象池大小
+   */
+  private extractPoolSizes(stats: any): Record<string, number> {
+    const result: Record<string, number> = {};
+
+    if (stats.pools) {
+      for (const [poolName, poolStats] of Object.entries<AdaptivePoolStats>(stats.pools)) {
+        result[poolName] = poolStats.size;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * 获取内存使用量
+   */
+  private getMemoryUsage(): number {
+    // Bun环境中的内存使用获取
+    const memoryUsage = process.memoryUsage();
+    return Math.round(memoryUsage.heapUsed / 1024 / 1024); // 转换为MB
+  }
+
+  /**
+   * 输出统计信息到控制台
+   */
+  private logStats(dataPoint: MonitoringDataPoint): void {
+    console.log('\n===== 自适应HTTP服务器监控 =====');
+    console.log(`时间: ${new Date(dataPoint.timestamp).toISOString()}`);
+    console.log(`请求/秒: ${dataPoint.requestsPerSecond.toFixed(2)}`);
+    console.log(`平均响应时间: ${dataPoint.avgResponseTimeMs.toFixed(2)}ms`);
+    console.log('活跃对象:');
+    for (const [poolName, count] of Object.entries(dataPoint.activeObjects)) {
+      console.log(`  - ${poolName}: ${count}`);
+    }
+    console.log('对象池大小:');
+    for (const [poolName, size] of Object.entries(dataPoint.poolSizes)) {
+      console.log(`  - ${poolName}: ${size}`);
+    }
+    console.log(`内存使用: ${dataPoint.memoryUsageMB}MB`);
+    if (dataPoint.resizeOperations.length > 0) {
+      console.log('资源调整操作:');
+      for (const op of dataPoint.resizeOperations) {
+        console.log(`  - ${op.poolType}: ${op.operation} by ${op.amount} (${op.reason})`);
+      }
+    }
+    console.log('===============================\n');
+  }
+
+  /**
+   * 处理HTTP请求
+   */
+  private async handleRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    // 服务API端点
+    if (url.pathname === '/api/data') {
+      return new Response(JSON.stringify({
+        history: this.history.dataPoints,
+        serverUptime: Date.now() - this.history.serverStartTime
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
         }
+      });
     }
 
-    /**
-     * 记录资源调整操作
-     * 
-     * @param poolType 池类型
-     * @param operation 操作类型
-     * @param amount 调整数量
-     * @param reason 调整原因
-     */
-    recordResizeOperation(
-        poolType: string,
-        operation: 'grow' | 'shrink',
-        amount: number,
-        reason: string
-    ): void {
-        this.resizeOperationsBuffer.push({
-            poolType,
-            operation,
-            amount,
-            reason
-        });
-    }
+    // 服务主页
+    return new Response(await this.getDashboardHtml(), {
+      headers: {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-cache',
+      }
+    });
+  }
 
-    /**
-     * 请求服务器初始状态
-     */
-    private async requestInitialServerState(): Promise<void> {
-        return new Promise((resolve) => {
-            this.server.tell({ type: 'status' }, (status) => {
-                if (status.running) {
-                    this.history.serverStartTime = status.startTime || Date.now();
-                }
-                resolve();
-            });
-        });
-    }
-
-    /**
-     * 收集监控数据
-     */
-    private collectData(): void {
-        this.server.tell({ type: 'getStats' }, (stats) => {
-            if (!stats) {
-                console.warn('无法获取服务器统计信息');
-                return;
-            }
-
-            const now = Date.now();
-            const elapsedSec = (now - this.history.lastTimestamp) / 1000;
-
-            // 计算每秒请求数
-            const currentRequests = stats.totalRequests || 0;
-            const requestDiff = currentRequests - this.history.lastRequestCount;
-            const requestsPerSecond = requestDiff / elapsedSec;
-
-            // 创建数据点
-            const dataPoint: MonitoringDataPoint = {
-                timestamp: now,
-                requestsPerSecond,
-                avgResponseTimeMs: stats.avgResponseTime || 0,
-                activeObjects: this.extractActiveObjects(stats),
-                poolSizes: this.extractPoolSizes(stats),
-                memoryUsageMB: this.getMemoryUsage(),
-                resizeOperations: [...this.resizeOperationsBuffer]
-            };
-
-            // 添加数据点到历史记录
-            this.history.dataPoints.push(dataPoint);
-
-            // 如果超过历史记录限制，移除最早的数据点
-            if (this.history.dataPoints.length > this.options.historyPointsCount) {
-                this.history.dataPoints.shift();
-            }
-
-            // 更新上次请求计数和时间戳
-            this.history.lastRequestCount = currentRequests;
-            this.history.lastTimestamp = now;
-
-            // 清空资源调整操作缓冲区
-            this.resizeOperationsBuffer = [];
-
-            // 如果启用了控制台输出，输出统计信息
-            if (this.options.consoleOutput) {
-                this.logStats(dataPoint);
-            }
-        });
-    }
-
-    /**
-     * 提取活跃对象数量
-     */
-    private extractActiveObjects(stats: any): Record<string, number> {
-        const result: Record<string, number> = {};
-
-        if (stats.pools) {
-            for (const [poolName, poolStats] of Object.entries<AdaptivePoolStats>(stats.pools)) {
-                result[poolName] = poolStats.activeObjects;
-            }
-        }
-
-        return result;
-    }
-
-    /**
-     * 提取对象池大小
-     */
-    private extractPoolSizes(stats: any): Record<string, number> {
-        const result: Record<string, number> = {};
-
-        if (stats.pools) {
-            for (const [poolName, poolStats] of Object.entries<AdaptivePoolStats>(stats.pools)) {
-                result[poolName] = poolStats.size;
-            }
-        }
-
-        return result;
-    }
-
-    /**
-     * 获取内存使用量
-     */
-    private getMemoryUsage(): number {
-        // Bun环境中的内存使用获取
-        const memoryUsage = process.memoryUsage();
-        return Math.round(memoryUsage.heapUsed / 1024 / 1024); // 转换为MB
-    }
-
-    /**
-     * 输出统计信息到控制台
-     */
-    private logStats(dataPoint: MonitoringDataPoint): void {
-        console.log('\n===== 自适应HTTP服务器监控 =====');
-        console.log(`时间: ${new Date(dataPoint.timestamp).toISOString()}`);
-        console.log(`请求/秒: ${dataPoint.requestsPerSecond.toFixed(2)}`);
-        console.log(`平均响应时间: ${dataPoint.avgResponseTimeMs.toFixed(2)}ms`);
-        console.log('活跃对象:');
-        for (const [poolName, count] of Object.entries(dataPoint.activeObjects)) {
-            console.log(`  - ${poolName}: ${count}`);
-        }
-        console.log('对象池大小:');
-        for (const [poolName, size] of Object.entries(dataPoint.poolSizes)) {
-            console.log(`  - ${poolName}: ${size}`);
-        }
-        console.log(`内存使用: ${dataPoint.memoryUsageMB}MB`);
-        if (dataPoint.resizeOperations.length > 0) {
-            console.log('资源调整操作:');
-            for (const op of dataPoint.resizeOperations) {
-                console.log(`  - ${op.poolType}: ${op.operation} by ${op.amount} (${op.reason})`);
-            }
-        }
-        console.log('===============================\n');
-    }
-
-    /**
-     * 处理HTTP请求
-     */
-    private async handleRequest(request: Request): Promise<Response> {
-        const url = new URL(request.url);
-
-        // 服务API端点
-        if (url.pathname === '/api/data') {
-            return new Response(JSON.stringify({
-                history: this.history.dataPoints,
-                serverUptime: Date.now() - this.history.serverStartTime
-            }), {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Cache-Control': 'no-cache',
-                }
-            });
-        }
-
-        // 服务主页
-        return new Response(await this.getDashboardHtml(), {
-            headers: {
-                'Content-Type': 'text/html',
-                'Cache-Control': 'no-cache',
-            }
-        });
-    }
-
-    /**
-     * 获取仪表盘HTML
-     */
-    private async getDashboardHtml(): Promise<string> {
-        return `
+  /**
+   * 获取仪表盘HTML
+   */
+  private async getDashboardHtml(): Promise<string> {
+    return `
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -816,7 +820,7 @@ export class AdaptiveDashboard {
 </body>
 </html>
     `;
-    }
+  }
 }
 
 /**
@@ -827,10 +831,10 @@ export class AdaptiveDashboard {
  * @returns 创建的仪表盘实例
  */
 export function createDashboard(
-    server: Actor,
-    options: DashboardOptions = {}
+  server: Actor,
+  options: DashboardOptions = {}
 ): AdaptiveDashboard {
-    const dashboard = new AdaptiveDashboard(server, options);
-    dashboard.start();
-    return dashboard;
+  const dashboard = new AdaptiveDashboard(server, options);
+  dashboard.start();
+  return dashboard;
 } 

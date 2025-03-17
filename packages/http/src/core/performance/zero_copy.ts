@@ -116,7 +116,8 @@ export class BufferViewImpl implements BufferView {
      * 复制数据到目标缓冲区
      */
     copyTo(target: Buffer, targetStart: number = 0): number {
-        return this.buffer.copy(target, targetStart, this.offset, this.offset + this.length);
+        // Use type assertion to tell TypeScript that this is a valid operation
+        return this.buffer.copy(target as unknown as Uint8Array, targetStart, this.offset, this.offset + this.length);
     }
 
     /**
@@ -251,14 +252,19 @@ export class ZeroCopyBufferPool {
      * @param encoding 编码方式
      */
     public createBufferFromString(str: string, encoding: BufferEncoding = 'utf8'): BufferView {
-        // 估算需要的大小
+        // 估计所需的缓冲区大小
         const estimatedSize = Buffer.byteLength(str, encoding);
 
         // 分配缓冲区
         const bufferView = this.allocate(estimatedSize);
 
-        // 写入字符串
-        const written = Buffer.from(str, encoding).copy(bufferView.buffer, bufferView.offset, 0, estimatedSize);
+        // 写入字符串 - Using type assertion to fix compatibility issue
+        const written = Buffer.from(str, encoding).copy(
+            bufferView.buffer as unknown as Uint8Array,
+            bufferView.offset,
+            0,
+            estimatedSize
+        );
 
         // 如果实际写入大小不同，调整视图
         if (written !== estimatedSize) {

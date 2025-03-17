@@ -199,7 +199,7 @@ describe('优化中间件系统', () => {
             clearMiddlewareCache();
             const context2 = {};
 
-            // 手动串行执行所有中间件
+            // 手动串行执行相同的中间件 - 使用Promise链
             const startManual = Date.now();
             let i = 0;
 
@@ -215,7 +215,13 @@ describe('优化中间件系统', () => {
 
             // 优化的中间件执行应该至少不慢于手动串行执行
             // 注：在某些环境中，性能差异可能不明显，因此这个测试是宽松的
-            expect(optimizedTime).toBeLessThanOrEqual(manualTime * 1.5);
+            if (manualTime === 0) {
+                // 如果手动执行时间为0，则说明执行太快，无法准确测量
+                // 在这种情况下，我们仅检查优化的执行不要太慢
+                expect(optimizedTime).toBeLessThanOrEqual(5); // 允许最多5毫秒
+            } else {
+                expect(optimizedTime).toBeLessThanOrEqual(manualTime * 1.5);
+            }
         });
     });
 }); 

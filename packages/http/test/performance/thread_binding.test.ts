@@ -17,8 +17,8 @@ import {
     unbindThread
 } from '../../src/core/performance/thread_binding';
 
-// 引入Jest类型
-import '@types/jest';
+// 使用Bun测试API
+import { describe, it, expect } from "bun:test";
 
 describe('线程绑定', () => {
     describe('基础功能检测', () => {

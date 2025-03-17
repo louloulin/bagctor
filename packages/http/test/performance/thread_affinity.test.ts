@@ -14,8 +14,8 @@ import { Worker, isMainThread } from 'worker_threads';
 import { join } from 'path';
 import { writeFileSync, unlinkSync } from 'fs';
 
-// 引入Jest类型
-import '@types/jest';
+// 使用Bun测试API
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 
 describe('线程亲和性', () => {
     describe('ThreadAffinityManager', () => {

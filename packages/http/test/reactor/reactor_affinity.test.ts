@@ -7,8 +7,8 @@
 import { Reactor, ReactorOptions, Work } from '../../src/core/reactor/reactor';
 import { getCurrentThreadCore } from '../../src/core/performance/thread_binding';
 
-// 引入Jest类型
-import '@types/jest';
+// 使用Bun测试API
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 
 describe('Reactor线程亲和性集成', () => {
     // 创建简单工作负载

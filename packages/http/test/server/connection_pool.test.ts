@@ -16,8 +16,8 @@ import { Socket } from 'net';
 import { AddressInfo } from 'net';
 import * as http from 'http';
 
-// 引入Jest类型
-import '@types/jest';
+// 使用Bun测试API
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 
 describe('HTTP连接池', () => {
     let server: Server;

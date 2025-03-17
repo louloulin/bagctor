@@ -16,8 +16,8 @@ import {
     isNativeBindingSupported
 } from '../../src/core/performance/thread_binding';
 
-// 引入Jest类型
-import '@types/jest';
+// 使用Bun测试API
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 
 describe('NUMA感知功能', () => {
     // 在每个测试前检查是否支持原生绑定
@@ -42,7 +42,7 @@ describe('NUMA感知功能', () => {
 
             expect(topology).toBeDefined();
             expect(typeof topology.numaNodes).toBe('number');
-            expect(Array.isArray(topology.coresPerNode)).toBe('true');
+            expect(Array.isArray(topology.coresPerNode)).toBe(true);
             expect(topology.coresPerNode.length).toBe(topology.numaNodes);
             expect(typeof topology.logicalToPhysicalMap).toBe('object');
         });

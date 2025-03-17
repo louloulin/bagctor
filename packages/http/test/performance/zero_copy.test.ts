@@ -19,8 +19,8 @@ import {
 } from '../../src/core/performance/zero_copy';
 import { Buffer } from 'buffer';
 
-// 引入Jest类型
-import '@types/jest';
+// 使用Bun测试API
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 
 describe('零拷贝优化', () => {
     describe('BufferView', () => {

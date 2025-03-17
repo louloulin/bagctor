@@ -1,0 +1,16 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "types": [
+            "bun-types"
+        ],
+        "allowJs": true,
+        "checkJs": false,
+        "noEmit": true
+    },
+    "include": [
+        "src/**/*",
+        "test/**/*",
+        "scripts/test-setup.ts"
+    ]
+}

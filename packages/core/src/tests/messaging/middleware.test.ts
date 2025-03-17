@@ -14,7 +14,7 @@ describe('消息中间件', () => {
         });
 
         test('应该允许添加中间件', () => {
-            const middleware = { onSend: jest.fn().mockReturnValue(testMessage) };
+            const middleware = { onSend: Bun.fn().mockReturnValue(testMessage) };
             chain.add(middleware);
 
             const result = chain.processSend(testMessage, testTarget);
@@ -23,8 +23,8 @@ describe('消息中间件', () => {
         });
 
         test('当中间件返回null时应该终止处理链', () => {
-            const middleware1 = { onSend: jest.fn().mockReturnValue(null) };
-            const middleware2 = { onSend: jest.fn().mockReturnValue(testMessage) };
+            const middleware1 = { onSend: Bun.fn().mockReturnValue(null) };
+            const middleware2 = { onSend: Bun.fn().mockReturnValue(testMessage) };
 
             chain.add(middleware1).add(middleware2);
 
@@ -39,10 +39,10 @@ describe('消息中间件', () => {
             const modifiedMessage2 = { ...modifiedMessage1, modified: 2 };
 
             const middleware1 = {
-                onSend: jest.fn().mockReturnValue(modifiedMessage1)
+                onSend: Bun.fn().mockReturnValue(modifiedMessage1)
             };
             const middleware2 = {
-                onSend: jest.fn().mockImplementation(msg => ({ ...msg, modified: 2 }))
+                onSend: Bun.fn().mockImplementation(msg => ({ ...msg, modified: 2 }))
             };
 
             chain.add(middleware1).add(middleware2);
@@ -54,8 +54,8 @@ describe('消息中间件', () => {
         });
 
         test('应该正确处理死信', () => {
-            const middleware1 = { onDeadLetter: jest.fn() };
-            const middleware2 = { onDeadLetter: jest.fn() };
+            const middleware1 = { onDeadLetter: Bun.fn() };
+            const middleware2 = { onDeadLetter: Bun.fn() };
 
             chain.add(middleware1).add(middleware2);
 
@@ -66,8 +66,8 @@ describe('消息中间件', () => {
 
         test('应该正确处理错误', () => {
             const error = new Error('Test error');
-            const middleware1 = { onError: jest.fn() };
-            const middleware2 = { onError: jest.fn() };
+            const middleware1 = { onError: Bun.fn() };
+            const middleware2 = { onError: Bun.fn() };
 
             chain.add(middleware1).add(middleware2);
 
@@ -79,12 +79,12 @@ describe('消息中间件', () => {
 
     describe('LoggingMiddleware', () => {
         let middleware: LoggingMiddleware;
-        let logSpy: jest.SpyInstance;
+        let logSpy: Bun.SpyInstance;
 
         beforeEach(() => {
             middleware = new LoggingMiddleware('debug');
             // Mock the logger
-            logSpy = jest.spyOn(console, 'log').mockImplementation();
+            logSpy = Bun.spyOn(console, 'log').mockImplementation();
         });
 
         afterEach(() => {

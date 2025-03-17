@@ -1,6 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { Mastra } from '@mastra/core';
 import { MCPIntegrationOptions } from './mcp';
+import { z } from 'zod';
 
 export interface BagctorDistributionConfig {
     clustered?: boolean;
@@ -39,12 +40,21 @@ export interface WorkflowStep {
 
 export interface WorkflowConfig {
     name: string;
-    steps: WorkflowStep[];
-    nodeAssignment?: Record<string, string>;
-    timeout?: number;
+    triggerSchema: z.ZodType<any>;
+    steps: Array<{
+        id: string;
+        agent: string;
+        prompt: string;
+        outputSchema: z.ZodType<any>;
+        retry?: {
+            maxAttempts: number;
+            backoff: 'linear' | 'exponential';
+        };
+    }>;
+    parallel?: string[];
     retry?: {
         maxAttempts: number;
-        delay: number;
+        backoff: 'linear' | 'exponential';
     };
 }
 

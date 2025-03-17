@@ -20,7 +20,7 @@
     "dependencies": {
         "@bactor/core": "workspace:*",
         "@bactor/common": "workspace:*",
-        "@mastra/core": "latest",
+        "@mastra/core": "^0.6.0",
         "qwen-ai-provider": "^0.1.0",
         "zod": "^3.22.4"
     },

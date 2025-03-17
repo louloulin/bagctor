@@ -18,7 +18,7 @@ import { WorkflowGraph, createWorkflowGraph } from './workflow-state';
  * Bagctor是一个分布式智能体系统，通过Actor模型扩展了Mastra的能力
  */
 export class Bagctor extends EventEmitter {
-    private agentsMap: Record<string, Agent> = {};
+    private agentsMap: Map<string, Agent> = new Map();
     private distributionConfig: BagctorConfig['distribution'];
     private nodes: Map<NodeIdentifier, DistributedNode> = new Map();
     private isDistributedMode: boolean = false;
@@ -41,14 +41,16 @@ export class Bagctor extends EventEmitter {
                 // 处理agent数组
                 config.agents.forEach(agent => {
                     if (agent.name) {
-                        this.agentsMap[agent.name] = agent;
+                        this.agentsMap.set(agent.name, agent);
                     } else {
                         throw new Error('Agent必须有name属性');
                     }
                 });
             } else {
                 // 处理agent对象映射
-                this.agentsMap = { ...config.agents };
+                Object.entries(config.agents).forEach(([name, agent]) => {
+                    this.agentsMap.set(name, agent);
+                });
             }
         }
 
@@ -59,13 +61,17 @@ export class Bagctor extends EventEmitter {
                 config.mastra.forEach(mastraInstance => {
                     // 使用getter方法或安全地获取agents
                     const mastraAgents = (mastraInstance as any).getAgents?.() || {};
-                    this.agentsMap = { ...this.agentsMap, ...mastraAgents };
+                    Object.entries(mastraAgents).forEach(([name, agent]) => {
+                        this.agentsMap.set(name, agent as Agent);
+                    });
                 });
             } else {
                 // 处理单个Mastra实例
                 // 使用getter方法或安全地获取agents
                 const mastraAgents = (config.mastra as any).getAgents?.() || {};
-                this.agentsMap = { ...this.agentsMap, ...mastraAgents };
+                Object.entries(mastraAgents).forEach(([name, agent]) => {
+                    this.agentsMap.set(name, agent as Agent);
+                });
             }
         }
 
@@ -82,7 +88,7 @@ export class Bagctor extends EventEmitter {
         // 初始化记忆管理系统
         if (config.memory?.enabled) {
             this._memoryManager = createMemoryManager({
-                agents: this.agentsMap,
+                agents: Object.fromEntries(this.agentsMap),
                 cacheSize: config.memory.cacheSize,
                 storage: config.memory.customStorage
             });
@@ -164,21 +170,21 @@ export class Bagctor extends EventEmitter {
     /**
      * 获取注册的智能体
      */
-    get agents() {
-        return this.agentsMap;
+    get agents(): Record<string, Agent> {
+        return Object.fromEntries(this.agentsMap);
     }
 
     /**
      * 获取分布式节点信息
      */
-    get distributedNodes() {
+    get distributedNodes(): DistributedNode[] {
         return Array.from(this.nodes.values());
     }
 
     /**
      * 获取 MCP 管理器
      */
-    get mcpIntegration() {
+    get mcpIntegration(): MCPIntegrationManager | undefined {
         return this.mcpManager;
     }
 
@@ -200,7 +206,7 @@ export class Bagctor extends EventEmitter {
             throw new Error('MCP 集成未初始化');
         }
 
-        const agent = this.agentsMap[agentId];
+        const agent = this.agentsMap.get(agentId);
         if (!agent) {
             throw new Error(`找不到智能体: ${agentId}`);
         }
@@ -248,7 +254,7 @@ export class Bagctor extends EventEmitter {
     } = {}): MemoryManager {
         if (!this._memoryManager) {
             this._memoryManager = createMemoryManager({
-                agents: this.agentsMap,
+                agents: Object.fromEntries(this.agentsMap),
                 cacheSize: options.cacheSize,
                 storage: options.customStorage
             });
@@ -261,22 +267,23 @@ export class Bagctor extends EventEmitter {
      * 创建工作流，用于编排多个智能体
      * @param config 工作流配置
      */
-    async createWorkflow(config: WorkflowConfig) {
-        // 在分布式模式下，检查节点分配
-        if (this.isDistributedMode && config.nodeAssignment) {
-            for (const [agentId, nodeId] of Object.entries(config.nodeAssignment)) {
-                if (!this.nodes.has(nodeId)) {
-                    console.warn(`警告: 节点 ${nodeId} 不存在，将使用默认节点`);
-                }
+    async createWorkflow(config: WorkflowConfig): Promise<Workflow> {
+        // Validate agents exist
+        for (const step of config.steps) {
+            if (!this.agentsMap.has(step.agent)) {
+                throw new Error(`Agent ${step.agent} not found`);
             }
         }
 
-        // 根据配置创建工作流
-        if (this.useWorkflowGraph) {
-            return createWorkflowGraph(config, this.agentsMap);
-        } else {
-            return new Workflow(config, this.agentsMap);
+        // Create workflow instance
+        const workflow = new Workflow(config, this.agentsMap);
+
+        // If memory system is enabled, create shared memory context
+        if (this.memoryManager) {
+            await this.createSharedMemory(config.name);
         }
+
+        return workflow;
     }
 
     /**
@@ -299,15 +306,16 @@ export class Bagctor extends EventEmitter {
             };
         } else {
             // 简单实现，运行第一个智能体
+            const firstAgentName = config.agents[0];
+            const agent = this.agentsMap.get(firstAgentName);
+            if (!agent) {
+                throw new Error(`智能体 ${firstAgentName} 不存在`);
+            }
+
             return {
                 execute: async (input: string) => {
-                    const firstAgentName = config.agents[0];
-                    const agent = this.agentsMap[firstAgentName];
-                    if (!agent) {
-                        throw new Error(`智能体 ${firstAgentName} 不存在`);
-                    }
-
-                    return await agent.generate(input);
+                    const result = await agent.generate(input);
+                    return result;
                 }
             };
         }
@@ -334,17 +342,18 @@ export class Bagctor extends EventEmitter {
             // 简单的非分布式实现
             return {
                 execute: async (input: string) => {
-                    const result = await Promise.all(
+                    const results = await Promise.all(
                         config.agents.map(async agentName => {
-                            const agent = this.agentsMap[agentName];
+                            const agent = this.agentsMap.get(agentName);
                             if (!agent) {
                                 throw new Error(`智能体 ${agentName} 不存在`);
                             }
-                            return await agent.generate(input);
+                            const result = await agent.generate(input);
+                            return result.text;
                         })
                     );
 
-                    return result.map(r => r.text).join('\n\n');
+                    return results.join('\n\n');
                 }
             };
         }

@@ -32,7 +32,10 @@
         "packages/core/src/monitoring/*"
       ]
     },
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "types": [
+      "bun-types"
+    ]
   },
   "references": [
     {

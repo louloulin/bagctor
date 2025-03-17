@@ -28,6 +28,8 @@
   "devDependencies": {
     "@ai-sdk/cohere": "1.1.14",
     "@ai-sdk/openai": "1.2.3",
+    "@mastra/core": "0.6.0",
+    "@types/bun": "1.2.5",
     "@types/cors": "2.8.17",
     "@types/express": "5.0.0",
     "@types/jest": "29.5.14",

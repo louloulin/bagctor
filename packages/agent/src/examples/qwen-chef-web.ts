@@ -1,119 +1,118 @@
 import { Agent } from '@mastra/core/agent';
 import { createQwen } from 'qwen-ai-provider';
-import express from 'express';
-import { Request, Response } from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { z } from 'zod';
 
 // 工具定义
 const cookingTool = {
-    name: 'cooking-tool',
-    description: '查找食谱和烹饪建议的工具',
-    parameters: {
-        type: 'object',
-        properties: {
-            ingredients: {
-                type: 'array',
-                items: { type: 'string' },
-                description: '可用的食材列表'
-            },
-            cuisine: {
-                type: 'string',
-                description: '想要烹饪的菜系',
-                enum: ['中餐', '西餐', '日料', '意餐', '任意']
-            },
-            dietary: {
-                type: 'array',
-                items: { type: 'string' },
-                description: '饮食限制，如素食、无乳制品等'
-            }
-        },
-        required: ['ingredients']
+  name: 'cooking-tool',
+  description: '查找食谱和烹饪建议的工具',
+  parameters: {
+    type: 'object',
+    properties: {
+      ingredients: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '可用的食材列表'
+      },
+      cuisine: {
+        type: 'string',
+        description: '想要烹饪的菜系',
+        enum: ['中餐', '西餐', '日料', '意餐', '任意']
+      },
+      dietary: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '饮食限制，如素食、无乳制品等'
+      }
     },
-    handler: async ({ ingredients, cuisine, dietary }: {
-        ingredients: string[],
-        cuisine?: string,
-        dietary?: string[]
-    }) => {
-        console.log(`🔍 查找${cuisine || ''}食谱，包含: ${ingredients.join(', ')}`);
+    required: ['ingredients']
+  },
+  handler: async ({ ingredients, cuisine, dietary }: {
+    ingredients: string[],
+    cuisine?: string,
+    dietary?: string[]
+  }) => {
+    console.log(`🔍 查找${cuisine || ''}食谱，包含: ${ingredients.join(', ')}`);
 
-        // 模拟API调用延迟
-        await new Promise(resolve => setTimeout(resolve, 500));
+    // 模拟API调用延迟
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-        // 返回模拟食谱数据
-        return {
-            recipes: [
-                {
-                    name: `${cuisine || '家常'}${ingredients[0]}料理`,
-                    ingredients: ingredients,
-                    steps: [
-                        '准备所有食材并清洗干净',
-                        `将${ingredients[0]}切成适当大小`,
-                        '热锅，加入少量油',
-                        `放入${ingredients[0]}翻炒至变色`,
-                        `加入${ingredients[1] || '调味料'}继续翻炒`,
-                        '加入适量水，盖上锅盖焖煮5分钟',
-                        '调入盐和其他调味料调味',
-                        '装盘，撒上葱花点缀',
-                    ]
-                }
-            ],
-            suggestions: `您可以用${ingredients[0]}作为主料制作多种菜品，比如${cuisine || '家常'}风味的烹饪方式最为简单易做。`
-        };
-    }
+    // 返回模拟食谱数据
+    return {
+      recipes: [
+        {
+          name: `${cuisine || '家常'}${ingredients[0]}料理`,
+          ingredients: ingredients,
+          steps: [
+            '准备所有食材并清洗干净',
+            `将${ingredients[0]}切成适当大小`,
+            '热锅，加入少量油',
+            `放入${ingredients[0]}翻炒至变色`,
+            `加入${ingredients[1] || '调味料'}继续翻炒`,
+            '加入适量水，盖上锅盖焖煮5分钟',
+            '调入盐和其他调味料调味',
+            '装盘，撒上葱花点缀',
+          ]
+        }
+      ],
+      suggestions: `您可以用${ingredients[0]}作为主料制作多种菜品，比如${cuisine || '家常'}风味的烹饪方式最为简单易做。`
+    };
+  }
 };
 
 // 创建营养分析工具
 const nutritionTool = {
-    name: 'nutrition-tool',
-    description: '分析食谱的营养成分',
-    parameters: {
-        type: 'object',
-        properties: {
-            recipe: {
-                type: 'string',
-                description: '需要分析的食谱名称'
-            },
-            ingredients: {
-                type: 'array',
-                items: { type: 'string' },
-                description: '食谱中的食材'
-            }
-        },
-        required: ['ingredients']
+  name: 'nutrition-tool',
+  description: '分析食谱的营养成分',
+  parameters: {
+    type: 'object',
+    properties: {
+      recipe: {
+        type: 'string',
+        description: '需要分析的食谱名称'
+      },
+      ingredients: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '食谱中的食材'
+      }
     },
-    handler: async ({ recipe, ingredients }: {
-        recipe: string,
-        ingredients: string[]
-    }) => {
-        console.log(`📊 分析食谱 "${recipe}" 的营养成分`);
+    required: ['ingredients']
+  },
+  handler: async ({ recipe, ingredients }: {
+    recipe: string,
+    ingredients: string[]
+  }) => {
+    console.log(`📊 分析食谱 "${recipe}" 的营养成分`);
 
-        // 模拟API调用延迟
-        await new Promise(resolve => setTimeout(resolve, 700));
+    // 模拟API调用延迟
+    await new Promise(resolve => setTimeout(resolve, 700));
 
-        // 返回模拟营养数据
-        return {
-            calories: Math.floor(Math.random() * 400) + 200,
-            protein: Math.floor(Math.random() * 20) + 10,
-            carbs: Math.floor(Math.random() * 30) + 20,
-            fat: Math.floor(Math.random() * 15) + 5,
-            vitamins: ['维生素A', '维生素C', '维生素B群'],
-            healthIndex: Math.floor(Math.random() * 5) + 3,
-            suggestions: `这道菜的营养均衡性较好，特别是${ingredients[0]}富含蛋白质。建议搭配一些绿叶蔬菜以增加膳食纤维的摄入。`
-        };
-    }
+    // 返回模拟营养数据
+    return {
+      calories: Math.floor(Math.random() * 400) + 200,
+      protein: Math.floor(Math.random() * 20) + 10,
+      carbs: Math.floor(Math.random() * 30) + 20,
+      fat: Math.floor(Math.random() * 15) + 5,
+      vitamins: ['维生素A', '维生素C', '维生素B群'],
+      healthIndex: Math.floor(Math.random() * 5) + 3,
+      suggestions: `这道菜的营养均衡性较好，特别是${ingredients[0]}富含蛋白质。建议搭配一些绿叶蔬菜以增加膳食纤维的摄入。`
+    };
+  }
 };
 
 // 创建Qwen实例
 const qwen = createQwen({
-    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    apiKey: 'sk-bc977c4e31e542f1a34159cb42478198',
+  baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  apiKey: 'sk-bc977c4e31e542f1a34159cb42478198',
 });
 
 // 创建使用Qwen模型的厨师智能体
 const chefAgent = new Agent({
-    name: 'Chef Agent',
-    instructions: `
+  name: 'Chef Agent',
+  instructions: `
     你是Michel，一位经验丰富的家庭厨师。
     你擅长帮助人们利用已有的食材烹饪美味的菜肴。
     
@@ -131,11 +130,11 @@ const chefAgent = new Agent({
     - 营养价值分析
     - 相关烹饪技巧和建议
   `,
-    model: qwen('qwen-plus-2024-12-20'),
-    tools: {
-        cookingTool,
-        nutritionTool
-    },
+  model: qwen('qwen-plus-2024-12-20'),
+  tools: {
+    cookingTool,
+    nutritionTool
+  },
 });
 
 // 创建一个简单的web服务器
@@ -157,7 +156,7 @@ const path = require('path');
 
 const publicDir = path.join(__dirname, 'public');
 if (!fs.existsSync(publicDir)) {
-    fs.mkdirSync(publicDir, { recursive: true });
+  fs.mkdirSync(publicDir, { recursive: true });
 }
 
 // 创建HTML文件
@@ -343,7 +342,7 @@ const htmlContent = `
           const data = await response.json();
           
           // 显示助手回复
-          addMessage(data.text, 'assistant');
+          addMessage(data.response, 'assistant');
         } catch (error) {
           console.error('发生错误:', error);
           addMessage('抱歉，发生了错误，请重试。', 'assistant');
@@ -386,33 +385,33 @@ const htmlContent = `
 fs.writeFileSync(path.join(publicDir, 'index.html'), htmlContent);
 
 // 定义接口
-app.post('/generate', async (req, res) => {
+app.post('/generate', function (req: Request, res: Response) {
+  (async () => {
     try {
-        const { message } = req.body;
+      const { message } = req.body;
 
-        if (!message) {
-            return res.status(400).json({ error: '消息不能为空' });
-        }
+      if (!message) {
+        return res.status(400).json({ error: '消息不能为空' });
+      }
 
-        console.log(`收到用户请求: ${message}`);
+      console.log(`收到用户请求: ${message}`);
 
-        // 调用Agent生成回复
-        const response = await chefAgent.generate([{
-            role: 'user' as const,
-            content: message
-        }]);
+      // 调用Agent生成回复
+      const response = await chefAgent.generate([{
+        role: 'user',
+        content: message
+      }]);
 
-        console.log('生成回复成功');
-
-        // 返回结果
-        res.json({ text: response.text });
+      console.log(`生成的回复: ${response.text.substring(0, 100)}...`);
+      res.json({ response: response.text });
     } catch (error) {
-        console.error('生成回复时出错:', error);
-        res.status(500).json({ error: '生成回复时发生错误' });
+      console.error('生成回复时发生错误:', error);
+      res.status(500).json({ error: '生成回复时发生错误' });
     }
+  })();
 });
 
 // 启动服务器
 app.listen(PORT, () => {
-    console.log(`🍳 Chef Michel Web服务已启动，访问 http://localhost:${PORT}`);
+  console.log(`🍳 Chef Michel Web服务已启动，访问 http://localhost:${PORT}`);
 }); 

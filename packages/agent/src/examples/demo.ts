@@ -32,12 +32,41 @@ async function runBagctorDemo() {
         console.log('正在创建专业智能体...');
 
         // 1. 研究智能体 - 收集和分析信息
+        const weatherTool = {
+            name: 'weather',
+            description: '查询指定城市的天气信息',
+            parameters: {
+                type: 'object',
+                properties: {
+                    city: {
+                        type: 'string',
+                        description: '城市名称'
+                    }
+                },
+                required: ['city']
+            },
+            handler: async ({ city }: { city: string }) => {
+                console.log(`模拟查询 ${city} 的天气...`);
+                // 实际应用中应调用真实的天气API
+                return {
+                    city,
+                    temperature: 25,
+                    condition: '晴天',
+                    humidity: '60%',
+                    forecast: '未来三天天气晴好'
+                };
+            }
+        };
+
         const researchAgent = new Agent({
             name: 'ResearchAgent',
             instructions: `你是一个专业的研究助手，擅长收集和分析信息。
 你的任务是提供详尽的研究结果，包括相关背景、最新进展和各种观点。
 注重事实和数据，保持客观中立。`,
             model: qwen('qwen-plus-2024-12-20'),
+            tools: {
+                weatherTool
+            }
         });
 
         // 2. 创意智能体 - 提供创新思路
@@ -66,36 +95,6 @@ async function runBagctorDemo() {
 输出应简洁明了，重点突出，有逻辑性，适合决策者快速理解。`,
             model: qwen('qwen-plus-2024-12-20'),
         });
-
-        // 创建天气查询工具
-        const weatherTool = {
-            name: 'weather',
-            description: '查询指定城市的天气信息',
-            parameters: {
-                type: 'object',
-                properties: {
-                    city: {
-                        type: 'string',
-                        description: '城市名称'
-                    }
-                },
-                required: ['city']
-            },
-            handler: async ({ city }: { city: string }) => {
-                console.log(`模拟查询 ${city} 的天气...`);
-                // 实际应用中应调用真实的天气API
-                return {
-                    city,
-                    temperature: 25,
-                    condition: '晴天',
-                    humidity: '60%',
-                    forecast: '未来三天天气晴好'
-                };
-            }
-        };
-
-        // 将工具添加到研究智能体
-        researchAgent.registerTool('weatherTool', weatherTool);
 
         // 创建Bagctor实例并注册智能体
         console.log('创建 Bagctor 实例...');
@@ -155,9 +154,8 @@ ${context.creative_ideas}
 
 方案分析:
 ${context.critical_analysis}
-          `,
-                    output: 'final_report',
-                    schema: finalReportSchema
+    `,
+                    output: 'final_report'
                 }
             ]
         });
@@ -181,17 +179,17 @@ ${context.critical_analysis}
             console.log(`\n📝 摘要:\n${report.summary}`);
 
             console.log('\n🔑 关键要点:');
-            report.keyPoints.forEach((point, index) => {
+            report.keyPoints.forEach((point: string, index: number) => {
                 console.log(`   ${index + 1}. ${point}`);
             });
 
             console.log('\n✅ 优势:');
-            report.pros.forEach((pro, index) => {
+            report.pros.forEach((pro: string, index: number) => {
                 console.log(`   ${index + 1}. ${pro}`);
             });
 
             console.log('\n❗ 挑战:');
-            report.cons.forEach((con, index) => {
+            report.cons.forEach((con: string, index: number) => {
                 console.log(`   ${index + 1}. ${con}`);
             });
 

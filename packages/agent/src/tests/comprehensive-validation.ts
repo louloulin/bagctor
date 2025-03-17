@@ -4,6 +4,9 @@ import { createQwen } from 'qwen-ai-provider';
 import { Bagctor } from '../bagctor';
 import { z } from 'zod';
 import axios from 'axios';
+import { Step, Workflow } from '../workflow-compat';
+import { NodeIdentifier } from '../types';
+import { SharedAgentMemory } from '../distributed-interaction';
 
 // 模拟 axios 以测试 MCP 功能
 jest.mock('axios');
@@ -432,4 +435,183 @@ runComprehensiveValidation().then(summary => {
     } else {
         console.log(`\n⚠️ 有 ${summary.totalTests - summary.passedCount} 项测试未通过，请检查并修复问题。`);
     }
+});
+
+describe('Bagctor Comprehensive Validation', () => {
+    let bagctor: Bagctor;
+    let testAgent: Agent;
+
+    beforeAll(async () => {
+        // 配置Qwen模型
+        const qwen = createQwen({
+            baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+            apiKey: process.env.QWEN_API_KEY,
+        });
+
+        // 创建测试智能体
+        testAgent = new Agent({
+            name: 'TestAgent',
+            instructions: '你是一个测试助手',
+            model: qwen('qwen-plus-2024-12-20'),
+        });
+
+        // 创建Bagctor实例
+        bagctor = new Bagctor({
+            agents: { testAgent },
+            distribution: {
+                clustered: true,
+                nodeType: 'primary',
+                serverPort: 9000
+            }
+        });
+    });
+
+    describe('Distributed Workflow System', () => {
+        it('should create and execute a distributed workflow', async () => {
+            // 创建工作流步骤
+            const step1 = new Step({
+                id: 'step1',
+                execute: async ({ context }) => {
+                    return 'Step 1 result';
+                }
+            });
+
+            const step2 = new Step({
+                id: 'step2',
+                execute: async ({ context }) => {
+                    return 'Step 2 result';
+                }
+            });
+
+            // 创建工作流
+            const workflow = new Workflow({
+                name: 'Test Workflow'
+            });
+
+            workflow.step(step1).step(step2);
+
+            // 执行工作流
+            const runId = `test_run_${Date.now()}`;
+            const result = await bagctor.executeWorkflow(workflow, runId);
+
+            // 验证结果
+            expect(result).toBeDefined();
+            expect(result.runId).toBe(runId);
+            expect(result.results).toBeDefined();
+        });
+
+        it('should handle workflow failures and recovery', async () => {
+            // 创建一个会失败的步骤
+            const failingStep = new Step({
+                id: 'failingStep',
+                execute: async ({ context }) => {
+                    throw new Error('Step execution failed');
+                }
+            });
+
+            // 创建工作流
+            const workflow = new Workflow({
+                name: 'Failing Workflow'
+            });
+
+            workflow.step(failingStep);
+
+            // 执行工作流并捕获错误
+            const runId = `failing_run_${Date.now()}`;
+            await expect(bagctor.executeWorkflow(workflow, runId)).rejects.toThrow();
+
+            // 恢复工作流
+            await bagctor.recoverWorkflow(runId);
+
+            // 验证工作流状态
+            const state = await bagctor.getWorkflowState(runId);
+            expect(state).toBeDefined();
+        });
+    });
+
+    describe('Workflow Graph System', () => {
+        it('should create and manage workflow graphs', async () => {
+            // 创建带图的工作流
+            const workflow = await bagctor.createWorkflow({
+                name: 'Graph Workflow',
+                useGraph: true,
+                steps: [
+                    {
+                        id: 'step1',
+                        execute: async ({ context }) => 'Step 1'
+                    },
+                    {
+                        id: 'step2',
+                        execute: async ({ context }) => 'Step 2'
+                    }
+                ]
+            });
+
+            // 验证工作流图
+            expect(workflow).toBeDefined();
+            expect(workflow.graph).toBeDefined();
+        });
+    });
+
+    describe('Memory Management', () => {
+        it('should manage shared memory between agents', async () => {
+            const contextId = await SharedAgentMemory.createWorkflowContext('test_context');
+
+            // 存储数据
+            await SharedAgentMemory.updateWorkflowContext(contextId, 'testKey', 'testValue');
+
+            // 获取数据
+            const context = await SharedAgentMemory.get(contextId);
+            expect(context.data.testKey).toBe('testValue');
+        });
+    });
+
+    describe('Node Distribution', () => {
+        it('should handle node distribution and load balancing', async () => {
+            // 创建多个节点
+            const node1: NodeIdentifier = 'node1';
+            const node2: NodeIdentifier = 'node2';
+
+            // 创建工作流并分配节点
+            const workflow = await bagctor.createWorkflow({
+                name: 'Distributed Workflow',
+                nodeAssignment: {
+                    'step1': node1,
+                    'step2': node2
+                }
+            });
+
+            // 验证节点分配
+            expect(workflow).toBeDefined();
+            expect(workflow.nodeAssignment).toBeDefined();
+        });
+    });
+
+    describe('Error Handling and Recovery', () => {
+        it('should handle errors and implement recovery mechanisms', async () => {
+            // 创建一个会超时的步骤
+            const timeoutStep = new Step({
+                id: 'timeoutStep',
+                execute: async ({ context }) => {
+                    await new Promise(resolve => setTimeout(resolve, 70000)); // 70秒超时
+                    return 'Timeout step result';
+                }
+            });
+
+            // 创建工作流
+            const workflow = new Workflow({
+                name: 'Timeout Workflow'
+            });
+
+            workflow.step(timeoutStep);
+
+            // 执行工作流
+            const runId = `timeout_run_${Date.now()}`;
+            await bagctor.executeWorkflow(workflow, runId);
+
+            // 验证错误处理
+            const state = await bagctor.getWorkflowState(runId);
+            expect(state).toBeDefined();
+        });
+    });
 }); 

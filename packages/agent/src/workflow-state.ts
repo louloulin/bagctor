@@ -46,10 +46,17 @@ export class WorkflowGraph extends EventEmitter {
     }
 
     /**
-     * 获取工作流名称
+     * 获取工作流状态
      */
-    get name(): string {
-        return this.config.name;
+    get currentStatus(): WorkflowStatus {
+        return this.status;
+    }
+
+    /**
+     * 获取当前步骤索引
+     */
+    get currentStepIndex(): number {
+        return this.currentStep;
     }
 
     /**
@@ -60,119 +67,39 @@ export class WorkflowGraph extends EventEmitter {
     }
 
     /**
-     * 获取当前状态
+     * 获取工作流上下文
      */
-    getState(): {
-        currentStep: number;
-        status: WorkflowStatus;
-        context: WorkflowContext;
-        error?: string;
-    } {
-        return {
-            currentStep: this.currentStep,
-            status: this.status,
-            context: { ...this.context },
-            error: this.error
-        };
+    get workflowContext(): WorkflowContext {
+        return { ...this.context };
+    }
+
+    /**
+     * 获取错误信息
+     */
+    get errorMessage(): string | undefined {
+        return this.error;
     }
 
     /**
      * 执行工作流
-     * @returns 工作流结果
      */
     async execute(): Promise<WorkflowContext> {
         if (this.status === 'running') {
-            throw new Error('工作流已在运行中');
+            throw new Error('工作流已在执行中');
         }
 
-        // 重置状态
-        this.reset();
         this.status = 'running';
+        this.error = undefined;
+        this.currentStep = 0;
+        this.context = {};
         this.emit('status', this.status);
 
-        // 创建执行 Promise
-        this.executionPromise = this.executeSteps();
-        return this.executionPromise;
-    }
-
-    /**
-     * 执行工作流步骤
-     * @private
-     */
-    private async executeSteps(): Promise<WorkflowContext> {
         try {
-            // 从第一步开始执行
-            this.currentStep = 0;
-
-            // 执行每一步，直到完成
-            while (this.currentStep < this.config.steps.length) {
-                const step = this.config.steps[this.currentStep];
-                this.emit('step', this.currentStep, step);
-
-                // 获取智能体
-                const agent = this.agents[step.agent];
-
-                // 生成输入
-                let input: string;
-                if (typeof step.input === 'function') {
-                    input = step.input(this.context);
-                } else {
-                    input = step.input;
-
-                    // 替换输入字符串中的占位符
-                    if (input.includes('${')) {
-                        Object.entries(this.context).forEach(([key, value]) => {
-                            input = input.replace(`\${${key}}`, String(value));
-                        });
-                    }
-                }
-
-                // 执行智能体
-                try {
-                    // 实现重试逻辑
-                    let maxRetries = this.config.retry?.maxAttempts || 0;
-                    let retryDelay = this.config.retry?.delay || 1000;
-                    let attempt = 0;
-                    let success = false;
-                    let result;
-
-                    while (!success && attempt <= maxRetries) {
-                        attempt++;
-                        try {
-                            result = await agent.generate(input);
-                            success = true;
-                        } catch (error) {
-                            if (attempt <= maxRetries) {
-                                console.warn(`步骤 ${this.currentStep + 1} 执行失败，正在重试 (${attempt}/${maxRetries + 1})...`);
-                                // 等待重试
-                                await new Promise(resolve => setTimeout(resolve, retryDelay));
-                            } else {
-                                throw error;
-                            }
-                        }
-                    }
-
-                    // 更新上下文
-                    if (result && step.output) {
-                        this.context[step.output] = result.text;
-                        this.emit('output', step.output, result.text);
-                    }
-
-                    // 前进到下一步
-                    this.currentStep++;
-                } catch (error) {
-                    this.status = 'failed';
-                    this.error = error instanceof Error ? error.message : String(error);
-                    this.emit('error', this.error);
-                    throw new Error(`步骤 ${this.currentStep + 1} 执行失败: ${this.error}`);
-                }
-            }
-
-            // 工作流完成
+            this.executionPromise = this.executeSteps();
+            const result = await this.executionPromise;
             this.status = 'completed';
             this.emit('status', this.status);
-            this.emit('completed', this.context);
-            return { ...this.context };
+            return result;
         } catch (error) {
             this.status = 'failed';
             this.error = error instanceof Error ? error.message : String(error);
@@ -183,27 +110,53 @@ export class WorkflowGraph extends EventEmitter {
     }
 
     /**
-     * 等待工作流完成
-     * @returns 工作流结果
+     * 执行工作流步骤
      */
-    async waitForCompletion(): Promise<WorkflowContext> {
-        if (!this.executionPromise) {
-            throw new Error('工作流尚未启动');
+    private async executeSteps(): Promise<WorkflowContext> {
+        try {
+            for (let i = 0; i < this.config.steps.length; i++) {
+                this.currentStep = i;
+                const step = this.config.steps[i];
+                this.emit('step', { index: i, step });
+
+                // 获取智能体
+                const agent = this.agents[step.agent];
+                if (!agent) {
+                    throw new Error(`找不到智能体: ${step.agent}`);
+                }
+
+                // 生成输入
+                let input: string;
+                if (typeof step.input === 'function') {
+                    input = step.input(this.context);
+                } else {
+                    input = step.input;
+                }
+
+                // 执行步骤
+                const result = await agent.generate(input);
+                this.context[step.output] = result.text;
+
+                // 发出步骤完成事件
+                this.emit('stepComplete', { index: i, result: result.text });
+            }
+
+            return this.context;
+        } catch (error) {
+            throw new Error(`工作流执行失败: ${error instanceof Error ? error.message : String(error)}`);
         }
-        return this.executionPromise;
     }
 
     /**
-     * 重置工作流
+     * 重置工作流状态
      */
     reset(): void {
-        this.context = {};
-        this.currentStep = 0;
         this.status = 'idle';
         this.error = undefined;
+        this.currentStep = 0;
+        this.context = {};
         this.executionPromise = undefined;
         this.emit('status', this.status);
-        this.emit('reset');
     }
 
     /**
@@ -240,10 +193,7 @@ export class WorkflowGraph extends EventEmitter {
 }
 
 /**
- * 创建工作流图
- * @param config 工作流配置
- * @param agents 智能体映射
- * @returns 工作流图
+ * 创建工作流图服务
  */
 export function createWorkflowGraph(config: WorkflowConfig, agents: Record<string, Agent>): WorkflowGraph {
     return new WorkflowGraph(config, agents);

@@ -1,7 +1,8 @@
 import { Agent } from '@mastra/core/agent';
-import { Step, Workflow, MachineContext } from './workflow-compat';
-import { NodeIdentifier, DistributedNode } from './types';
+import { Step, Workflow as MastraWorkflow, MachineContext } from './workflow-compat';
+import { NodeIdentifier, DistributedNode, AgentContext } from './types';
 import { AgentInteractionProtocol, SharedAgentMemory, DistributedErrorHandler } from './distributed-interaction';
+import { EventEmitter } from 'events';
 
 /**
  * 分布式工作流状态枚举
@@ -10,7 +11,8 @@ enum WorkflowExecutionState {
     PENDING = 'pending',
     RUNNING = 'running',
     COMPLETED = 'completed',
-    FAILED = 'failed'
+    FAILED = 'failed',
+    RECOVERING = 'recovering'
 }
 
 /**
@@ -24,236 +26,233 @@ interface StepExecutionStatus {
     endTime?: number;
     result?: any;
     error?: any;
+    retryCount?: number;
 }
 
 /**
- * 分布式工作流调度器
- * 负责协调跨节点的工作流执行
+ * 工作流类型
  */
-export class DistributedWorkflowScheduler {
+type Workflow = MastraWorkflow;
+
+/**
+ * 分布式工作流调度器
+ * 负责在分布式环境中调度和执行工作流
+ */
+export class DistributedWorkflowScheduler extends EventEmitter {
     private agentsMap: Record<string, Agent>;
     private nodes: Map<NodeIdentifier, DistributedNode>;
-    private defaultNode: NodeIdentifier;
     private workflowStates: Map<string, {
-        workflow: Workflow;
         state: WorkflowExecutionState;
         stepStatus: Record<string, StepExecutionStatus>;
+        context: Record<string, any>;
+        lastUpdateTime: number;
     }> = new Map();
+    private interactionProtocol: AgentInteractionProtocol;
+    private readonly MAX_RETRIES = 3;
+    private readonly RETRY_DELAY = 5000; // 5 seconds
 
-    constructor(agentsMap: Record<string, Agent>, nodes: Map<NodeIdentifier, DistributedNode>, defaultNode: NodeIdentifier) {
-        this.agentsMap = agentsMap;
+    /**
+     * 创建分布式工作流调度器
+     */
+    constructor(
+        agents: Record<string, Agent>,
+        nodes: Map<NodeIdentifier, DistributedNode>,
+        interactionProtocol: AgentInteractionProtocol
+    ) {
+        super();
+        this.agentsMap = agents;
         this.nodes = nodes;
-        this.defaultNode = defaultNode;
+        this.interactionProtocol = interactionProtocol;
+        this.startMonitoring();
     }
 
     /**
-     * 注册工作流到调度器
+     * 获取工作流实例
      */
-    registerWorkflow(workflow: Workflow, runId: string): void {
-        this.workflowStates.set(runId, {
-            workflow,
-            state: WorkflowExecutionState.PENDING,
-            stepStatus: {}
-        });
+    public getWorkflow(runId: string): Workflow {
+        // TODO: 从持久化存储中获取工作流定义
+        return new MastraWorkflow({ name: 'temp' });
     }
 
     /**
-     * 分配步骤到节点
-     * 基于节点负载、步骤需求等分配最佳节点
+     * 启动工作流监控
      */
-    assignStepToNode(step: Step, availableNodes: DistributedNode[]): NodeIdentifier {
-        // 如果步骤已经指定了节点，尝试使用该节点
-        const assignedNode = step.getNodeAssignment();
-        if (assignedNode && this.nodes.has(assignedNode)) {
-            return assignedNode;
+    private startMonitoring(): void {
+        setInterval(() => {
+            this.checkWorkflowHealth();
+        }, 30000); // Check every 30 seconds
+    }
+
+    /**
+     * 检查工作流健康状态
+     */
+    private async checkWorkflowHealth(): Promise<void> {
+        for (const [runId, state] of this.workflowStates.entries()) {
+            if (state.state === WorkflowExecutionState.RUNNING) {
+                const now = Date.now();
+                if (now - state.lastUpdateTime > 60000) { // 1 minute timeout
+                    await this.handleWorkflowTimeout(runId);
+                }
+            }
         }
+    }
 
-        // 简单负载均衡策略：选择负载最小的节点
-        let bestNode = this.defaultNode;
-        let lowestLoad = Number.MAX_VALUE;
+    /**
+     * 处理工作流超时
+     */
+    private async handleWorkflowTimeout(runId: string): Promise<void> {
+        const state = this.workflowStates.get(runId);
+        if (!state) return;
 
-        for (const node of availableNodes) {
-            if (node.status === 'online' && node.resources.load < lowestLoad) {
-                lowestLoad = node.resources.load;
-                bestNode = node.id;
+        // 标记为恢复状态
+        this.updateWorkflowState(runId, WorkflowExecutionState.RECOVERING);
+        this.emit('workflowTimeout', { runId, state });
+
+        // 尝试恢复失败的步骤
+        for (const [stepId, stepStatus] of Object.entries(state.stepStatus)) {
+            if (stepStatus.state === 'failed' && (!stepStatus.retryCount || stepStatus.retryCount < this.MAX_RETRIES)) {
+                await this.retryStep(runId, stepId);
             }
         }
 
-        return bestNode;
+        // 恢复工作流状态
+        this.updateWorkflowState(runId, WorkflowExecutionState.RUNNING);
+    }
+
+    /**
+     * 重新执行失败的步骤
+     */
+    public async retryStep(runId: string, stepId: string): Promise<void> {
+        const state = this.workflowStates.get(runId);
+        if (!state || state.state !== WorkflowExecutionState.FAILED) {
+            throw new Error(`Workflow ${runId} is not in failed state`);
+        }
+
+        // 重新执行步骤
+        const workflow = this.getWorkflow(runId);
+        const step = workflow.getSteps().find((s: Step) => s.getId() === stepId);
+        if (step) {
+            await this.executeStep(workflow, step, runId);
+        }
     }
 
     /**
      * 执行步骤
-     * 支持在本地或远程节点执行
      */
-    async executeStep(step: Step, context: MachineContext, runId: string): Promise<any> {
-        const stepId = step.getId();
-        const workflowState = this.workflowStates.get(runId);
-
-        if (!workflowState) {
-            throw new Error(`未找到工作流状态: ${runId}`);
-        }
-
-        // 更新步骤状态为运行中
-        workflowState.stepStatus[stepId] = {
-            stepId,
+    public async executeStep(workflow: Workflow, step: Step, runId: string): Promise<void> {
+        // 更新步骤状态
+        this.updateStepStatus(runId, step.getId(), {
             state: 'running',
             startTime: Date.now()
-        };
+        });
 
         try {
-            // 分配步骤到节点
-            const nodeId = this.assignStepToNode(step, Array.from(this.nodes.values()));
-            workflowState.stepStatus[stepId].nodeId = nodeId;
+            // 执行步骤
+            const result = await step.execute({
+                machineContext: new MachineContext(runId),
+                agentsMap: this.agentsMap,
+                stepId: step.getId()
+            });
 
-            let result;
-            const isLocalNode = nodeId === this.defaultNode;
-
-            if (isLocalNode) {
-                // 本地执行步骤
-                result = await step.execute({
-                    machineContext: context,
-                    agentsMap: this.agentsMap,
-                    stepId
-                });
-            } else {
-                // 远程执行步骤
-                // 1. 序列化上下文
-                const serializedContext = JSON.stringify({
-                    machineContext: context.getData(),
-                    stepId
-                });
-
-                // 2. 发送到远程节点执行
-                const remoteResult = await this.executeStepOnRemoteNode(nodeId, stepId, serializedContext);
-                result = JSON.parse(remoteResult);
-            }
-
-            // 更新步骤状态为完成
-            workflowState.stepStatus[stepId] = {
-                ...workflowState.stepStatus[stepId],
+            // 更新步骤状态
+            this.updateStepStatus(runId, step.getId(), {
                 state: 'completed',
                 endTime: Date.now(),
                 result
-            };
-
-            return result;
+            });
         } catch (error) {
-            // 更新步骤状态为失败
-            workflowState.stepStatus[stepId] = {
-                ...workflowState.stepStatus[stepId],
+            // 更新步骤状态
+            this.updateStepStatus(runId, step.getId(), {
                 state: 'failed',
                 endTime: Date.now(),
                 error
+            });
+
+            // 处理错误
+            await this.handleStepError(runId, step.getId(), error);
+        }
+    }
+
+    /**
+     * 调度工作流执行
+     */
+    async scheduleWorkflow(workflow: Workflow, runId: string): Promise<void> {
+        // 创建工作流状态
+        this.workflowStates.set(runId, {
+            state: WorkflowExecutionState.PENDING,
+            stepStatus: {},
+            context: {},
+            lastUpdateTime: Date.now()
+        });
+
+        try {
+            // 更新状态为运行中
+            this.updateWorkflowState(runId, WorkflowExecutionState.RUNNING);
+
+            // 按顺序执行每个步骤
+            const stepSequence = (workflow as any).stepSequence;
+            for (const stepId of stepSequence) {
+                const step = (workflow as any).steps.find((s: Step) => s.getId() === stepId);
+                if (!step) {
+                    throw new Error(`未找到步骤: ${stepId}`);
+                }
+                await this.executeStep(workflow, step, runId);
+            }
+
+            // 更新状态为完成
+            this.updateWorkflowState(runId, WorkflowExecutionState.COMPLETED);
+        } catch (error) {
+            // 更新状态为失败
+            this.updateWorkflowState(runId, WorkflowExecutionState.FAILED);
+            const context: AgentContext = {
+                id: runId,
+                agentId: 'workflow',
+                nodeId: 'workflow',
+                state: {
+                    status: 'failed',
+                    error: error instanceof Error ? error.message : String(error)
+                },
+                history: [],
+                createdAt: Date.now(),
+                updatedAt: Date.now()
             };
-
-            // 尝试故障恢复
-            const recoverySuccessful = await this.attemptStepRecovery(step, context, runId);
-            if (!recoverySuccessful) {
-                throw error;
-            }
-
-            // 重新执行恢复后的步骤（使用不同节点）
-            return await this.executeStep(step, context, runId);
+            await DistributedErrorHandler.handleNodeFailure(runId, context);
+            throw error;
         }
     }
 
     /**
-     * 在远程节点执行步骤
+     * 更新工作流状态
      */
-    private async executeStepOnRemoteNode(nodeId: NodeIdentifier, stepId: string, serializedContext: string): Promise<string> {
-        // 使用AgentInteractionProtocol发送执行请求到远程节点
-        const response = await AgentInteractionProtocol.sendMessage(
-            'workflow_scheduler',
-            `node_${nodeId}`,
-            JSON.stringify({
-                action: 'execute_step',
-                stepId,
-                context: serializedContext
-            })
-        );
-
-        return response;
-    }
-
-    /**
-     * 尝试步骤恢复
-     * 在步骤执行失败时尝试找到备用节点并恢复执行
-     */
-    private async attemptStepRecovery(step: Step, context: MachineContext, runId: string): Promise<boolean> {
-        const stepId = step.getId();
+    private updateWorkflowState(runId: string, state: WorkflowExecutionState): void {
         const workflowState = this.workflowStates.get(runId);
-
-        if (!workflowState) {
-            return false;
+        if (workflowState) {
+            workflowState.state = state;
+            workflowState.lastUpdateTime = Date.now();
+            this.emit('workflowStateChange', { runId, state });
         }
-
-        const failedStepStatus = workflowState.stepStatus[stepId];
-        if (!failedStepStatus || !failedStepStatus.nodeId) {
-            return false;
-        }
-
-        // 尝试找到备用节点
-        const failedNodeId = failedStepStatus.nodeId;
-        const alternativeNodes = Array.from(this.nodes.values())
-            .filter(node => node.id !== failedNodeId && node.status === 'online');
-
-        if (alternativeNodes.length === 0) {
-            return false;
-        }
-
-        // 选择一个备用节点
-        const recoveryNodeId = this.assignStepToNode(step, alternativeNodes);
-
-        // 将步骤重新分配到备用节点
-        step.assignToNode(recoveryNodeId);
-
-        // 记录恢复尝试
-        console.log(`尝试在备用节点 ${recoveryNodeId} 上恢复步骤 ${stepId} 的执行`);
-
-        return true;
     }
 
     /**
-     * 监控工作流执行状态
+     * 更新步骤状态
      */
-    async monitorWorkflow(runId: string): Promise<void> {
+    private updateStepStatus(runId: string, stepId: string, status: Partial<StepExecutionStatus>): void {
         const workflowState = this.workflowStates.get(runId);
-
-        if (!workflowState) {
-            throw new Error(`未找到工作流状态: ${runId}`);
+        if (workflowState) {
+            workflowState.stepStatus[stepId] = {
+                ...workflowState.stepStatus[stepId],
+                ...status
+            };
+            workflowState.lastUpdateTime = Date.now();
+            this.emit('stepStatusChange', { runId, stepId, status: workflowState.stepStatus[stepId] });
         }
-
-        // 定期检查工作流状态
-        const intervalId = setInterval(() => {
-            // 检查所有步骤状态
-            const allStepsComplete = Object.values(workflowState.stepStatus)
-                .every(step => step.state === 'completed');
-
-            const anyStepFailed = Object.values(workflowState.stepStatus)
-                .some(step => step.state === 'failed');
-
-            if (allStepsComplete) {
-                workflowState.state = WorkflowExecutionState.COMPLETED;
-                clearInterval(intervalId);
-            } else if (anyStepFailed) {
-                workflowState.state = WorkflowExecutionState.FAILED;
-                clearInterval(intervalId);
-            }
-        }, 1000);
-
-        // 确保不会无限等待
-        setTimeout(() => {
-            clearInterval(intervalId);
-        }, 24 * 60 * 60 * 1000); // 24小时超时
     }
 
     /**
-     * 获取工作流执行状态
+     * 获取工作流状态
      */
-    getWorkflowStatus(runId: string): WorkflowExecutionState {
-        const workflowState = this.workflowStates.get(runId);
-        return workflowState ? workflowState.state : WorkflowExecutionState.PENDING;
+    getWorkflowState(runId: string): WorkflowExecutionState | undefined {
+        return this.workflowStates.get(runId)?.state;
     }
 
     /**
@@ -262,6 +261,45 @@ export class DistributedWorkflowScheduler {
     getStepStatus(runId: string, stepId: string): StepExecutionStatus | undefined {
         const workflowState = this.workflowStates.get(runId);
         return workflowState ? workflowState.stepStatus[stepId] : undefined;
+    }
+
+    /**
+     * 处理步骤错误
+     */
+    private async handleStepError(runId: string, stepId: string, error: any): Promise<void> {
+        const state = this.workflowStates.get(runId);
+        if (!state) return;
+
+        const stepStatus = state.stepStatus[stepId];
+        if (!stepStatus) return;
+
+        // 增加重试计数
+        stepStatus.retryCount = (stepStatus.retryCount || 0) + 1;
+
+        // 检查是否需要重试
+        if (stepStatus.retryCount <= this.MAX_RETRIES) {
+            // 等待重试延迟
+            await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY));
+
+            // 重置步骤状态
+            this.updateStepStatus(runId, stepId, {
+                state: 'pending',
+                startTime: undefined,
+                endTime: undefined,
+                result: undefined,
+                error: undefined
+            });
+
+            // 重新执行步骤
+            const workflow = this.getWorkflow(runId);
+            const step = workflow.getSteps().find((s: Step) => s.getId() === stepId);
+            if (step) {
+                await this.executeStep(workflow, step, runId);
+            }
+        } else {
+            // 超过最大重试次数，标记工作流为失败
+            this.updateWorkflowState(runId, WorkflowExecutionState.FAILED);
+        }
     }
 }
 
@@ -283,7 +321,7 @@ export class DistributedWorkflowExecutor {
      */
     async executeWorkflow(workflow: Workflow, runId: string, triggerData?: any): Promise<any> {
         // 注册工作流到调度器
-        this.scheduler.registerWorkflow(workflow, runId);
+        await this.scheduler.scheduleWorkflow(workflow, runId);
 
         // 创建工作流上下文
         const sharedContextId = await SharedAgentMemory.createWorkflowContext(runId);
@@ -294,11 +332,6 @@ export class DistributedWorkflowExecutor {
             await SharedAgentMemory.updateWorkflowContext(sharedContextId, 'triggerData', triggerData);
         }
 
-        // 开始监控工作流
-        this.scheduler.monitorWorkflow(runId).catch(error => {
-            console.error('工作流监控错误:', error);
-        });
-
         // 执行工作流并返回结果
         return { runId, results: {} };
     }
@@ -307,18 +340,94 @@ export class DistributedWorkflowExecutor {
      * 处理远程步骤执行请求
      * 用于接收和处理来自其他节点的步骤执行请求
      */
-    async handleRemoteStepExecution(message: { stepId: string; context: string }): Promise<string> {
-        const { stepId, context } = message;
+    async handleRemoteStepExecution(message: { stepId: string; context: string; runId: string }): Promise<string> {
+        const { stepId, context, runId } = message;
         const parsedContext = JSON.parse(context);
 
-        // 在本地执行步骤逻辑
         try {
-            // 这里需要具体实现步骤的执行逻辑
-            // 实际应用中需要加载步骤定义和所需资源
-            const result = { success: true, data: `执行步骤 ${stepId} 的结果` };
-            return JSON.stringify(result);
+            // 获取工作流实例
+            const workflow = this.scheduler.getWorkflow(runId);
+            const step = workflow.getSteps().find((s: Step) => s.getId() === stepId);
+
+            if (!step) {
+                throw new Error(`Step ${stepId} not found in workflow ${runId}`);
+            }
+
+            // 创建机器上下文
+            const machineContext = new MachineContext(runId, parsedContext);
+
+            // 执行步骤
+            const result = await step.execute({
+                machineContext,
+                agentsMap: this.agentsMap,
+                stepId
+            });
+
+            // 更新共享内存中的步骤结果
+            await SharedAgentMemory.updateWorkflowContext(runId, stepId, result);
+
+            return JSON.stringify({
+                success: true,
+                result,
+                timestamp: Date.now()
+            });
         } catch (error) {
-            return JSON.stringify({ success: false, error: String(error) });
+            // 记录错误到共享内存
+            await SharedAgentMemory.updateWorkflowContext(runId, `${stepId}_error`, {
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: Date.now()
+            });
+
+            return JSON.stringify({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: Date.now()
+            });
         }
     }
-} 
+
+    /**
+     * 恢复工作流执行
+     * 用于从失败状态恢复工作流
+     */
+    public async recoverWorkflow(runId: string): Promise<void> {
+        const state = this.scheduler.getWorkflowState(runId);
+        if (!state || state !== WorkflowExecutionState.FAILED) {
+            throw new Error(`Workflow ${runId} is not in failed state`);
+        }
+
+        // 获取工作流实例
+        const workflow = this.scheduler.getWorkflow(runId);
+
+        // 从共享内存恢复上下文
+        const contextId = `workflow_context_${runId}`;
+        const context = await SharedAgentMemory.get(contextId);
+        if (!context) {
+            throw new Error(`No context found for workflow ${runId}`);
+        }
+
+        // 重新调度工作流
+        await this.scheduler.scheduleWorkflow(workflow, runId);
+    }
+
+    /**
+     * 执行远程步骤执行请求
+     */
+    public async handleRemoteStepExecutionRequest(request: {
+        runId: string;
+        stepId: string;
+        nodeId: NodeIdentifier;
+    }): Promise<void> {
+        try {
+            // 获取工作流实例
+            const workflow = this.scheduler.getWorkflow(request.runId);
+            const step = workflow.getSteps().find((s: Step) => s.getId() === request.stepId);
+            if (step) {
+                await this.scheduler.executeStep(workflow, step, request.runId);
+            }
+        } catch (error) {
+            console.error(`Failed to execute remote step: ${request.stepId}`, error);
+            throw error;
+        }
+    }
+}

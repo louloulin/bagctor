@@ -200,6 +200,13 @@ export class Workflow {
     }
 
     /**
+     * 获取工作流步骤列表
+     */
+    getSteps(): Step[] {
+        return [...this.steps];
+    }
+
+    /**
      * 完成工作流定义
      */
     commit(): Workflow {
@@ -248,26 +255,22 @@ export class Workflow {
                 throw new Error(`未找到步骤: ${stepId}`);
             }
 
-            // 创建步骤执行上下文
-            const stepContext: StepExecutionContext = {
-                machineContext,
-                agentsMap: {}, // 这里需要从外部传入
-                stepId
-            };
+            try {
+                // 执行步骤
+                const result = await step.execute({
+                    machineContext,
+                    agentsMap: {}, // 这里需要传入实际的agentsMap
+                    stepId
+                });
 
-            // 执行步骤
-            const stepResult = await step.execute(stepContext);
-
-            // 保存步骤结果
-            machineContext.setStepResult(stepId, stepResult);
-            results[stepId] = stepResult;
-
-            // 将结果存储到共享内存
-            await SharedAgentMemory.updateWorkflowContext(this.workflowContextId, `step_${stepId}`, stepResult);
+                // 存储结果
+                results[stepId] = result;
+                machineContext.setStepResult(stepId, result);
+            } catch (error) {
+                console.error(`步骤 ${stepId} 执行失败:`, error);
+                throw error;
+            }
         }
-
-        // 更新最终工作流结果
-        await SharedAgentMemory.updateWorkflowContext(this.workflowContextId, 'results', results);
 
         return {
             runId,

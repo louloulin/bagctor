@@ -2,6 +2,8 @@
 import { AgentActor } from './core/agentActor';
 import { AgentSystem } from './core/agentSystem';
 import { AgentMemory, AgentMemoryActor } from './core/agentMemory';
+import { AgentRag, RagActor } from './core/agentRag';
+import { MastraAdapter } from './core/mastraAdapter';
 
 // 导出工具
 import { HttpToolActor, TOOL_NAMES } from './tools';
@@ -10,7 +12,6 @@ import { FileToolActor } from './tools/fileTool';
 // 导出类型
 import {
     AgentActorConfig,
-    AgentActorState,
     GenerateMessage,
     ToolCallMessage,
     ToolResultMessage,
@@ -56,6 +57,19 @@ import {
     MemoryResponseMessage
 } from './core/agentMemory';
 
+import {
+    Document,
+    RagQueryParams,
+    DocumentAddParams,
+    RagActorState,
+    RagQueryMessage,
+    DocumentAddMessage,
+    RagResultMessage,
+    RagErrorMessage,
+    RagMessage,
+    RagResponseMessage
+} from './core/agentRag';
+
 // 核心导出
 export {
     // 核心组件
@@ -63,6 +77,9 @@ export {
     AgentSystem,
     AgentMemory,
     AgentMemoryActor,
+    AgentRag,
+    RagActor,
+    MastraAdapter,
 
     // 工具
     HttpToolActor,
@@ -71,7 +88,6 @@ export {
 
     // Agent Actor 类型
     AgentActorConfig,
-    AgentActorState,
     GenerateMessage,
     ToolCallMessage,
     ToolResultMessage,
@@ -110,16 +126,28 @@ export {
     MemoryResultMessage,
     MemoryErrorMessage,
     MemoryMessage,
-    MemoryResponseMessage
+    MemoryResponseMessage,
+
+    // RAG 类型
+    Document,
+    RagQueryParams,
+    DocumentAddParams,
+    RagActorState,
+    RagQueryMessage,
+    DocumentAddMessage,
+    RagResultMessage,
+    RagErrorMessage,
+    RagMessage,
+    RagResponseMessage
 };
 
 // 类型命名空间 (兼容性)
 export namespace Types {
     export type AgentActorConfig = import('./core/agentActor').AgentActorConfig;
-    export type AgentActorState = import('./core/agentActor').AgentActorState;
     export type AgentSystemConfig = import('./core/agentSystem').AgentSystemConfig;
     export type MemoryItem = import('./core/agentMemory').MemoryItem;
     export type FileOperationParams = import('./tools/fileTool').FileOperationParams;
+    export type Document = import('./core/agentRag').Document;
 }
 
 /**

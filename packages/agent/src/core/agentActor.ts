@@ -1,6 +1,9 @@
 import { Actor, Message } from '@bactor/core';
 import { PID } from '@bactor/common';
 import type { ActorContext } from '@bactor/core';
+import { AgentMemory } from './agentMemory';
+import { AgentRag, Document } from './agentRag';
+import { MastraAdapter } from './mastraAdapter';
 // 使用模拟的Agent类型，因为目前可能没有正确安装@mastra包
 // import { Agent } from '@mastra/core/agent';
 // import { openai } from '@ai-sdk/openai';
@@ -29,6 +32,8 @@ export interface AgentActorState {
     name: string;
     instructions: string;
     tools: Map<string, PID>;
+    memoryActor?: PID;
+    ragActor?: PID;
 }
 
 export interface AgentActorConfig {
@@ -81,8 +86,10 @@ export type ResponseMessage = ErrorResponseMessage | ResultResponseMessage | Exe
  * 允许通过Actor系统进行智能代理的分布式协作
  */
 export class AgentActor extends Actor<AgentActorState, Message> {
-    private agent: Agent;
+    private agent: MastraAdapter;
     private toolMap: Map<string, (params: any) => Promise<any>>;
+    private memory?: AgentMemory;
+    private rag?: AgentRag;
 
     constructor(context: ActorContext, initialState?: AgentActorState) {
         super(context, initialState || {
@@ -93,36 +100,43 @@ export class AgentActor extends Actor<AgentActorState, Message> {
 
         this.toolMap = new Map();
 
-        // 初始化模拟的Mastra Agent (后续会替换为真实实现)
-        this.agent = this.createMockAgent(this.state.name, this.state.instructions);
+        // 初始化Mastra代理适配器
+        this.agent = new MastraAdapter(
+            this.state.name,
+            this.state.instructions,
+            'gpt-4o' // 默认模型
+        );
 
         // 设置Agent工具调用处理
         this.setupToolHandlers();
+
+        // 检查是否有内存Actor引用
+        if (initialState && 'memoryActor' in initialState) {
+            this.setupMemory(initialState.memoryActor);
+        }
+
+        // 检查是否有RAG Actor引用
+        if (initialState && 'ragActor' in initialState) {
+            this.setupRag(initialState.ragActor);
+        }
     }
 
     /**
-     * 创建一个模拟的Mastra Agent (后续会替换为真实实现)
+     * 设置内存组件
      */
-    private createMockAgent(name: string, instructions: string): Agent {
-        const tools: any[] = [];
-
-        return {
-            generate: async (content: string) => {
-                console.log(`Agent ${name} generating response for: ${content}`);
-                return `[${name}]: I am responding to "${content}" based on my instructions: "${instructions.substring(0, 20)}..."`;
-            },
-            addTool: (tool: any) => {
-                console.log(`Adding tool ${tool.name} to agent ${name}`);
-                tools.push(tool);
-            }
-        };
+    private setupMemory(memoryActorRef?: PID): void {
+        if (memoryActorRef) {
+            this.memory = new AgentMemory(memoryActorRef, this.context);
+        }
     }
 
     /**
-     * 设置Agent的工具调用处理程序
+     * 设置RAG组件
      */
-    private setupToolHandlers(): void {
-        // 当添加更多工具时，可以在此添加工具处理逻辑
+    private setupRag(ragActorRef?: PID): void {
+        if (ragActorRef) {
+            this.rag = new AgentRag(ragActorRef, this.context);
+        }
     }
 
     /**
@@ -130,112 +144,29 @@ export class AgentActor extends Actor<AgentActorState, Message> {
      */
     protected behaviors(): void {
         this.addBehavior('default', this.defaultBehavior.bind(this));
+        this.addBehavior('processing', this.processingBehavior.bind(this));
     }
 
     /**
-     * 默认行为处理函数
+     * 默认处理行为
      */
     private async defaultBehavior(message: Message): Promise<void> {
         try {
-            const responseId = (message as any).responseId;
-
             if (message.type === 'generate') {
-                // 处理文本生成请求
-                try {
-                    const generateMsg = message as GenerateMessage;
-                    const result = await this.agent.generate(generateMsg.content);
-                    if (message.sender) {
-                        await this.send(message.sender, {
-                            type: 'result',
-                            payload: result,
-                            responseId
-                        } as ResultResponseMessage);
-                    }
-                } catch (error: any) {
-                    if (message.sender) {
-                        await this.send(message.sender, {
-                            type: 'error',
-                            error: error?.message || String(error),
-                            responseId
-                        } as ErrorResponseMessage);
-                    }
-                }
+                await this.handleGenerate(message as GenerateMessage);
             } else if (message.type === 'tool_call') {
-                // 处理工具调用请求
-                const toolCallMsg = message as ToolCallMessage;
-                const { toolName, params } = toolCallMsg;
-
-                // 首先检查内部工具映射
-                if (this.toolMap.has(toolName)) {
-                    try {
-                        const toolFunction = this.toolMap.get(toolName)!;
-                        const result = await toolFunction(params);
-                        if (message.sender) {
-                            await this.send(message.sender, {
-                                type: 'result',
-                                payload: result,
-                                responseId
-                            } as ResultResponseMessage);
-                        }
-                    } catch (error: any) {
-                        if (message.sender) {
-                            await this.send(message.sender, {
-                                type: 'error',
-                                error: `Error executing tool '${toolName}': ${error?.message || String(error)}`,
-                                responseId
-                            } as ErrorResponseMessage);
-                        }
-                    }
-                    return;
-                }
-
-                // 如果内部没有找到，检查Actor工具
-                const toolActor = this.state.tools.get(toolName);
-                if (!toolActor) {
-                    if (message.sender) {
-                        await this.send(message.sender, {
-                            type: 'error',
-                            error: `Tool '${toolName}' not found`,
-                            responseId
-                        } as ErrorResponseMessage);
-                    }
-                    return;
-                }
-
-                try {
-                    // 请求工具Actor执行操作
-                    await this.send(toolActor, {
-                        type: 'execute',
-                        params,
-                        sender: this.context.self,
-                        responseId
-                    } as ExecuteToolMessage);
-                } catch (error: any) {
-                    if (message.sender) {
-                        await this.send(message.sender, {
-                            type: 'error',
-                            error: `Error calling tool '${toolName}': ${error?.message || String(error)}`,
-                            responseId
-                        } as ErrorResponseMessage);
-                    }
-                }
-            } else if (message.type === 'tool_result') {
-                // 处理来自工具Actor的结果
-                const toolResultMsg = message as ToolResultMessage;
-                if (message.sender) {
-                    await this.send(message.sender, {
-                        type: 'result',
-                        payload: toolResultMsg.result,
-                        responseId
-                    } as ResultResponseMessage);
-                }
+                await this.handleToolCall(message as ToolCallMessage);
+            } else if (message.type === 'register_tool') {
+                // 处理工具注册
+                const { toolName, toolActor } = message as any;
+                this.registerTool(toolName, toolActor);
             }
         } catch (error: any) {
-            console.error("AgentActor处理消息出错:", error);
+            console.error('Agent error:', error);
             if (message.sender) {
                 await this.send(message.sender, {
                     type: 'error',
-                    error: `Internal error: ${error?.message || String(error)}`,
+                    error: error.message || String(error),
                     responseId: (message as any).responseId
                 } as ErrorResponseMessage);
             }
@@ -243,55 +174,252 @@ export class AgentActor extends Actor<AgentActorState, Message> {
     }
 
     /**
-     * 注册工具Actor，允许代理调用这些工具
-     * @param toolName 工具名称
-     * @param toolActor 实现工具功能的Actor的PID
+     * 处理中状态的行为
      */
-    registerTool(toolName: string, toolActor: PID): void {
-        const updatedTools = new Map(this.state.tools);
-        updatedTools.set(toolName, toolActor);
-
-        this.setState({
-            tools: updatedTools
-        });
-
-        // 同时更新Mastra Agent的工具列表
-        this.agent.addTool({
-            name: toolName,
-            description: `External tool: ${toolName}`,
-            handler: async (params: any) => {
-                // 通过Actor消息调用工具
-                return new Promise((resolve, reject) => {
-                    this.send(toolActor, {
-                        type: 'execute',
-                        params,
-                        sender: this.context.self
-                    } as ExecuteToolMessage).then(() => {
-                        // 工具执行请求已发送，结果将通过消息异步返回
-                        resolve({ status: 'pending', message: `Tool ${toolName} execution requested` });
-                    }).catch((error: any) => {
-                        reject(error);
-                    });
-                });
-            }
-        });
+    private async processingBehavior(message: Message): Promise<void> {
+        if (message.type === 'tool_result') {
+            await this.handleToolResult(message as ToolResultMessage);
+        }
     }
 
     /**
-     * 注册内部工具函数，直接由代理执行而非通过Actor
-     * @param toolName 工具名称
-     * @param description 工具描述
-     * @param handler 工具处理函数
+     * 处理生成请求
      */
-    registerToolFunction(toolName: string, description: string, handler: (params: any) => Promise<any>): void {
-        // 存储到内部工具映射
-        this.toolMap.set(toolName, handler);
+    private async handleGenerate(message: GenerateMessage): Promise<void> {
+        const { content, responseId } = message as any;
 
-        // 添加到Mastra Agent
-        this.agent.addTool({
-            name: toolName,
-            description,
-            handler
+        try {
+            // 记录到内存（如果启用）
+            if (this.memory) {
+                await this.memory.add({
+                    content,
+                    metadata: { source: 'user' },
+                    type: 'message'
+                });
+            }
+
+            // 如果有RAG组件，先尝试查询相关文档
+            let enhancedContent = content;
+            if (this.rag) {
+                try {
+                    const relevantDocs = await this.rag.query(content);
+                    if (relevantDocs && relevantDocs.length > 0) {
+                        // 将相关文档添加到提示中
+                        enhancedContent = `${content}\n\nRelevant information:\n${relevantDocs.map(doc => doc.content).join('\n\n')
+                            }`;
+                    }
+                } catch (error) {
+                    console.error('RAG查询错误:', error);
+                    // 失败时继续使用原始内容
+                }
+            }
+
+            // 使用Mastra代理生成响应
+            const response = await this.agent.generate(enhancedContent);
+
+            // 记录代理响应到内存
+            if (this.memory) {
+                await this.memory.add({
+                    content: response,
+                    metadata: { source: 'agent' },
+                    type: 'message'
+                });
+            }
+
+            // 发送响应
+            if (message.sender) {
+                await this.send(message.sender, {
+                    type: 'result',
+                    payload: response,
+                    responseId
+                } as ResultResponseMessage);
+            }
+        } catch (error: any) {
+            console.error('生成错误:', error);
+            if (message.sender) {
+                await this.send(message.sender, {
+                    type: 'error',
+                    error: error.message || String(error),
+                    responseId
+                } as ErrorResponseMessage);
+            }
+        }
+    }
+
+    /**
+     * 处理工具调用
+     */
+    private async handleToolCall(message: ToolCallMessage): Promise<void> {
+        const { toolName, params, responseId } = message as any;
+
+        try {
+            // 查找工具处理函数
+            const toolHandler = this.toolMap.get(toolName);
+            if (!toolHandler) {
+                throw new Error(`Tool '${toolName}' not found`);
+            }
+
+            // 记录工具调用到内存
+            if (this.memory) {
+                await this.memory.add({
+                    content: `Tool call: ${toolName} with params: ${JSON.stringify(params)}`,
+                    metadata: { tool: toolName },
+                    type: 'action'
+                });
+            }
+
+            // 调用工具并等待结果
+            const result = await toolHandler(params);
+
+            // 记录工具结果到内存
+            if (this.memory) {
+                await this.memory.add({
+                    content: `Tool result: ${JSON.stringify(result)}`,
+                    metadata: { tool: toolName },
+                    type: 'observation'
+                });
+            }
+
+            // 发送结果
+            if (message.sender) {
+                await this.send(message.sender, {
+                    type: 'result',
+                    payload: result,
+                    responseId
+                } as ResultResponseMessage);
+            }
+        } catch (error: any) {
+            console.error(`工具 '${toolName}' 错误:`, error);
+            if (message.sender) {
+                await this.send(message.sender, {
+                    type: 'error',
+                    error: error.message || String(error),
+                    responseId
+                } as ErrorResponseMessage);
+            }
+        }
+    }
+
+    /**
+     * 处理工具执行结果
+     */
+    private async handleToolResult(message: ToolResultMessage): Promise<void> {
+        // 处理工具执行结果并使用它继续生成
+        // 此方法将在处理中状态下被调用
+        this.become('default');
+    }
+
+    /**
+     * 注册Actor工具（会被ActorSystem调用）
+     */
+    registerTool(toolName: string, toolActor: PID): void {
+        // 保存工具Actor引用
+        const tools = new Map(this.state.tools);
+        tools.set(toolName, toolActor);
+
+        this.setState({
+            ...this.state,
+            tools
         });
+
+        // 为工具注册工具处理函数
+        this.registerToolFunction(
+            toolName,
+            `使用${toolName}工具执行操作`,
+            async (params: any) => {
+                return new Promise((resolve, reject) => {
+                    this.context.send(toolActor, {
+                        type: 'execute',
+                        params,
+                        sender: this.context.self,
+                        responseId: Date.now().toString()
+                    } as ExecuteToolMessage)
+                        .then(() => {
+                            // 切换到处理中状态以等待结果
+                            this.become('processing');
+
+                            // 超时处理，防止永久等待
+                            const timeout = setTimeout(() => {
+                                this.become('default');
+                                reject(new Error(`工具 '${toolName}' 执行超时`));
+                            }, 30000);
+
+                            // 模拟工具结果 - 在实际实现中，这应该由工具Actor发送
+                            setTimeout(() => {
+                                clearTimeout(timeout);
+                                this.become('default');
+                                resolve({ success: true, message: `${toolName} 工具执行结果` });
+                            }, 1000);
+                        })
+                        .catch(reject);
+                });
+            }
+        );
+    }
+
+    /**
+     * 设置工具处理器
+     */
+    private setupToolHandlers(): void {
+        // 设置内置工具
+        this.registerToolFunction(
+            'echo',
+            '简单地回显输入值',
+            async (params: any) => {
+                return params;
+            }
+        );
+    }
+
+    /**
+     * 注册工具函数
+     */
+    registerToolFunction(
+        name: string,
+        description: string,
+        handler: (params: any) => Promise<any>
+    ): void {
+        // 注册到工具映射
+        this.toolMap.set(name, handler);
+
+        // 向Mastra代理添加工具
+        this.agent.addTool(
+            name,
+            description,
+            {
+                type: 'object',
+                properties: {
+                    // 基本参数定义，可以根据需要扩展
+                    input: {
+                        type: 'string',
+                        description: '工具的输入'
+                    }
+                }
+            },
+            handler
+        );
+    }
+
+    /**
+     * 为RAG系统添加文档
+     */
+    async addDocument(content: string, metadata: Record<string, any> = {}): Promise<boolean> {
+        if (!this.rag) {
+            return false;
+        }
+
+        try {
+            const doc: Document = {
+                id: `doc_${Date.now()}`,
+                content,
+                metadata
+            };
+
+            await this.rag.addDocument(doc);
+            return true;
+        } catch (error) {
+            console.error('添加文档错误:', error);
+            return false;
+        }
     }
 } 

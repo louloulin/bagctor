@@ -13,7 +13,24 @@ import { EventEmitter } from 'events';
 import { MCPIntegrationManager, MCPIntegrationOptions } from './mcp';
 import { MemoryManager, createMemoryManager, SharedMemoryContext } from './memory';
 import { WorkflowGraph, createWorkflowGraph } from './workflow-state';
-import { AgentNetworkManager, AgentTeamConfig } from './agent-network';
+import { AgentNetworkManager, AgentTeam, AgentTeamConfig } from './agent-network';
+import type { Tool, ToolSet } from './tools';
+import {
+    ToolChain,
+    ToolChainBuilder,
+    createAgentTool,
+    AgentToolGroup,
+    createCoordinatorAgent
+} from './agent-tools';
+import {
+    KnowledgeSharingManager,
+    KnowledgeFlowConfig,
+    KnowledgeFlowType,
+    SyncConfig,
+    SyncDirection,
+    KnowledgeEntityType,
+    setupKnowledgeFlow
+} from './knowledge-sharing';
 
 /**
  * Bagctor是一个分布式智能体系统，通过Actor模型扩展了Mastra的能力
@@ -27,6 +44,9 @@ export class Bagctor extends EventEmitter {
     private _memoryManager?: MemoryManager;
     private useWorkflowGraph: boolean = false;
     private agentNetworkManager?: AgentNetworkManager;
+    private toolSet?: ToolSet;
+    private agentToolGroup?: AgentToolGroup;
+    private knowledgeSharingManager?: KnowledgeSharingManager;
 
     /**
      * 创建一个新的Bagctor实例
@@ -474,5 +494,299 @@ export class Bagctor extends EventEmitter {
         });
 
         return network;
+    }
+
+    /**
+     * 初始化工具集合
+     */
+    initToolSet(): ToolSet {
+        if (!this.toolSet) {
+            // 动态导入ToolSet以避免循环依赖
+            const { ToolSet } = require('./tools');
+            this.toolSet = new ToolSet();
+        }
+        // 确保返回非空对象
+        return this.toolSet as ToolSet;
+    }
+
+    /**
+     * 注册工具
+     * @param tool 要注册的工具
+     */
+    registerTool(tool: Tool): void {
+        const toolSet = this.initToolSet();
+        toolSet.add(tool);
+    }
+
+    /**
+     * 注册多个工具
+     * @param tools 要注册的工具数组
+     */
+    registerTools(tools: Tool[]): void {
+        const toolSet = this.initToolSet();
+        for (const tool of tools) {
+            toolSet.add(tool);
+        }
+    }
+
+    /**
+     * 获取工具
+     * @param name 工具名称
+     */
+    getTool(name: string): Tool | undefined {
+        const toolSet = this.initToolSet();
+        return toolSet.get(name);
+    }
+
+    /**
+     * 获取所有工具
+     */
+    getAllTools(): Record<string, Tool> {
+        const toolSet = this.initToolSet();
+        return toolSet.getAll();
+    }
+
+    /**
+     * 执行工具
+     * @param name 工具名称
+     * @param params 工具参数
+     * @param context 执行上下文
+     */
+    async executeTool<TInput, TOutput>(
+        name: string,
+        params: TInput,
+        context?: any
+    ): Promise<TOutput> {
+        const toolSet = this.initToolSet();
+        if (!toolSet) {
+            throw new Error("Tool set not initialized");
+        }
+        return toolSet.execute(name, params, context);
+    }
+
+    /**
+     * 初始化智能体工具组
+     */
+    initAgentToolGroup(): AgentToolGroup {
+        if (!this.agentToolGroup) {
+            this.agentToolGroup = new AgentToolGroup();
+
+            // 自动添加所有已注册的智能体
+            for (const [agentId, agent] of this.agentsMap.entries()) {
+                this.agentToolGroup.addAgent(agentId, agent);
+            }
+        }
+        return this.agentToolGroup;
+    }
+
+    /**
+     * 创建智能体工具
+     * 将智能体包装为工具
+     */
+    createAgentTool(options: {
+        id: string;
+        description: string;
+        agent: string;
+        template?: string;
+    }): Tool {
+        const agent = this.agentsMap.get(options.agent);
+        if (!agent) {
+            throw new Error(`智能体不存在: ${options.agent}`);
+        }
+
+        return createAgentTool({
+            id: options.id,
+            description: options.description,
+            agent,
+            template: options.template
+        });
+    }
+
+    /**
+     * 创建工具链
+     * 顺序执行多个工具
+     */
+    createToolChain(name?: string): ToolChainBuilder {
+        // 确保已初始化工具组
+        this.initAgentToolGroup();
+        return this.agentToolGroup!.createChain(name);
+    }
+
+    /**
+     * 执行工具链
+     * @param chain 工具链
+     * @param input 输入参数
+     */
+    async executeToolChain(chain: ToolChain, input: any): Promise<any> {
+        const result = await chain.execute(input, {
+            context: {
+                agentRegistry: Object.fromEntries(this.agentsMap)
+            }
+        });
+
+        if (!result.success) {
+            throw result.error;
+        }
+
+        return result.results;
+    }
+
+    /**
+     * 创建协作者智能体
+     * 使用其他智能体作为工具
+     */
+    createCoordinatorAgent(options: {
+        name: string;
+        instructions: string;
+        model: any;
+        agentTools: string[];
+    }): Agent {
+        // 创建智能体工具
+        const tools: Record<string, Tool> = {};
+
+        for (const agentId of options.agentTools) {
+            const agent = this.agentsMap.get(agentId);
+            if (!agent) {
+                throw new Error(`智能体不存在: ${agentId}`);
+            }
+
+            // 创建智能体工具
+            const tool = createAgentTool({
+                id: `${agentId}-tool`,
+                description: `使用${agentId}智能体处理任务`,
+                agent
+            });
+
+            tools[tool.name] = tool;
+        }
+
+        // 创建协作者智能体
+        const coordinator = createCoordinatorAgent({
+            name: options.name,
+            instructions: options.instructions,
+            model: options.model,
+            tools
+        });
+
+        // 注册到Bagctor
+        this.agentsMap.set(options.name, coordinator);
+
+        return coordinator;
+    }
+
+    /**
+     * 初始化知识共享管理器
+     */
+    initKnowledgeSharing(): KnowledgeSharingManager {
+        if (!this.knowledgeSharingManager) {
+            this.knowledgeSharingManager = new KnowledgeSharingManager({
+                agents: Object.fromEntries(this.agentsMap),
+                memoryManager: this.memoryManager
+            });
+
+            // 监听知识同步事件
+            this.knowledgeSharingManager.on('knowledge:synced', (data) => {
+                this.emit('knowledge:synced', data);
+            });
+
+            this.knowledgeSharingManager.on('knowledge:shared', (data) => {
+                this.emit('knowledge:shared', data);
+            });
+        }
+        return this.knowledgeSharingManager;
+    }
+
+    /**
+     * 配置智能体之间的知识同步
+     */
+    setupKnowledgeSync(sourceAgentId: string, targetAgentId: string, config: Partial<SyncConfig> = {}): void {
+        // 确保已初始化知识共享管理器
+        const manager = this.initKnowledgeSharing();
+
+        // 验证智能体是否存在
+        if (!this.agentsMap.has(sourceAgentId)) {
+            throw new Error(`源智能体不存在: ${sourceAgentId}`);
+        }
+        if (!this.agentsMap.has(targetAgentId)) {
+            throw new Error(`目标智能体不存在: ${targetAgentId}`);
+        }
+
+        // 合并默认配置
+        const fullConfig: SyncConfig = {
+            direction: config.direction || SyncDirection.OneWay,
+            entityTypes: config.entityTypes,
+            minImportance: config.minImportance,
+            minConfidence: config.minConfidence || 0.7,
+            interval: config.interval || 60000,
+            autoSync: config.autoSync !== undefined ? config.autoSync : true,
+            tags: config.tags
+        };
+
+        // 添加同步对
+        manager.addSyncPair({
+            sourceAgentId,
+            targetAgentId,
+            config: fullConfig
+        });
+    }
+
+    /**
+     * 创建知识流程
+     */
+    setupKnowledgeFlow(config: KnowledgeFlowConfig): void {
+        // 确保已初始化知识共享管理器
+        const manager = this.initKnowledgeSharing();
+
+        // 验证所有参与者存在
+        for (const agentId of config.participants) {
+            if (!this.agentsMap.has(agentId)) {
+                throw new Error(`流程参与者不存在: ${agentId}`);
+            }
+        }
+
+        // 创建知识流
+        setupKnowledgeFlow(manager, config);
+    }
+
+    /**
+     * 立即同步两个智能体间的知识
+     */
+    async syncKnowledgeNow(sourceAgentId: string, targetAgentId: string, options: Partial<SyncConfig> = {}): Promise<number> {
+        // 确保已初始化知识共享管理器
+        const manager = this.initKnowledgeSharing();
+
+        // 创建临时同步配置
+        const syncConfig: SyncConfig = {
+            direction: options.direction || SyncDirection.OneWay,
+            entityTypes: options.entityTypes,
+            minImportance: options.minImportance,
+            minConfidence: options.minConfidence,
+            autoSync: false // 临时同步不需要自动
+        };
+
+        // 执行同步
+        return manager.syncKnowledge(sourceAgentId, targetAgentId, syncConfig);
+    }
+
+    /**
+     * 根据查询共享知识到共享上下文
+     */
+    async shareKnowledgeToContext(agentId: string, contextId: string, query: string, limit: number = 5): Promise<string[]> {
+        // 确保已初始化知识共享管理器
+        const manager = this.initKnowledgeSharing();
+
+        // 执行共享
+        return manager.shareKnowledgeToContext(agentId, contextId, query, limit);
+    }
+
+    /**
+     * 获取知识同步状态报告
+     */
+    async getKnowledgeSyncReport(): Promise<Record<string, any>> {
+        // 确保已初始化知识共享管理器
+        const manager = this.initKnowledgeSharing();
+
+        // 生成报告
+        return manager.generateSyncReport();
     }
 } 

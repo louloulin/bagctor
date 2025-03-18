@@ -164,4 +164,231 @@ MCP实现的核心文件包括：
 
 详细文档可在`packages/agent/docs/MCP.md`和`packages/agent/docs/MCP-Registry.md`找到。
 
-使用示例见`packages/agent/src/examples/mcp-example.ts`。 
+使用示例见`packages/agent/src/examples/mcp-example.ts`。
+
+### 2.4 内存配置
+
+系统支持配置代理的内存系统，包括短期和长期记忆。
+
+```typescript
+// 配置内存系统
+const memoryManager = bagctor.enableMemorySystem({
+  cacheSize: 1000, // 设置缓存大小
+  customStorage: myCustomStorageAdapter // 可选的自定义存储适配器
+});
+
+// 为代理分配内存上下文
+const agentMemory = memoryManager.createMemoryContext('agent-1');
+```
+
+### 2.5 工具定义 ✅
+
+系统支持为智能体定义工具，使用 Zod schema 进行参数验证。完全兼容 Mastra 的工具 API。
+
+```typescript
+import { z } from 'zod';
+import { defineQuery, defineAction } from '@bagctor/agent';
+
+// 定义查询工具
+const searchTool = defineQuery({
+  name: 'search',
+  description: '搜索知识库',
+  parameters: z.object({
+    query: z.string().describe('搜索关键词'),
+    limit: z.number().optional().describe('结果数量限制')
+  }),
+  handler: async (params) => {
+    return { results: ['result1', 'result2'] };
+  }
+});
+
+// 定义操作工具（需要确认）
+const createUserTool = defineAction({
+  name: 'createUser',
+  description: '创建新用户',
+  parameters: z.object({
+    username: z.string(),
+    email: z.string()
+  }),
+  handler: async (params) => {
+    return { id: '123', username: params.username };
+  },
+  requireConfirmation: true
+});
+
+// 注册工具到Bagctor
+bagctor.registerTool(searchTool);
+bagctor.registerTools([createUserTool]);
+
+// 执行工具
+const result = await bagctor.executeTool('search', { 
+  query: 'test', 
+  limit: 10 
+});
+``` 
+
+### 3.7 智能体调度
+
+Bagctor实现了灵活的智能体调度机制，支持多种优先级和并发模型。
+
+```typescript
+const criticalTask = await bagctor.schedule({
+  agentId: "emergencyAgent",
+  input: "处理紧急情况",
+  priority: "critical" // 最高优先级
+});
+
+const normalTask = await bagctor.schedule({
+  agentId: "regularAgent",
+  input: "处理常规请求",
+  priority: "normal"  // 正常优先级
+});
+
+// 批量调度任务
+const tasks = await bagctor.scheduleBatch([
+  { agentId: "agent1", input: "任务1", priority: "high" },
+  { agentId: "agent2", input: "任务2", priority: "medium" },
+  { agentId: "agent3", input: "任务3", priority: "low" }
+]);
+
+// 等待所有任务完成
+const results = await Promise.all(tasks.map(task => task.completed()));
+```
+
+### 3.8 基于工具的智能体协作 ✅
+
+Bagctor支持基于工具的智能体协作模式，与Mastra完全兼容，可以用工具封装智能体，创建层次化的协作系统。
+
+#### 3.8.1 智能体封装为工具
+
+```typescript
+import { createQwen } from "qwen-ai-provider";
+import { anthropic } from "@ai-sdk/anthropic";
+import { Agent, createTool } from "@bagctor/agent";
+import { z } from "zod";
+
+// 创建专业领域智能体
+const copywriterAgent = new Agent({
+  name: "Copywriter",
+  instructions: "你是一个专业文案撰写者，能够创作高质量的博客文章。",
+  model: anthropic("claude-3-5-sonnet-20241022"),
+});
+
+const editorAgent = new Agent({
+  name: "Editor",
+  instructions: "你是一个专业编辑，擅长修改和完善文章。",
+  model: qwen("qwen-plus-2024-12-20"),
+});
+
+// 将智能体封装为工具
+const copywriterTool = createTool({
+  id: "copywriter-agent",
+  description: "调用文案撰写智能体来创作博客文章。",
+  inputSchema: z.object({
+    topic: z.string().describe("博客主题"),
+    keywords: z.array(z.string()).optional().describe("关键词列表")
+  }),
+  outputSchema: z.object({
+    copy: z.string().describe("博客文章内容")
+  }),
+  execute: async ({ context }) => {
+    const prompt = context.keywords 
+      ? `创作一篇关于${context.topic}的博客文章，包含以下关键词：${context.keywords.join(', ')}`
+      : `创作一篇关于${context.topic}的博客文章`;
+      
+    const result = await copywriterAgent.generate(prompt);
+    return { copy: result.text };
+  }
+});
+
+const editorTool = createTool({
+  id: "editor-agent",
+  description: "调用编辑智能体来修改和完善文章。",
+  inputSchema: z.object({
+    copy: z.string().describe("待编辑的文章"),
+    focus: z.string().optional().describe("编辑重点")
+  }),
+  outputSchema: z.object({
+    editedCopy: z.string().describe("编辑后的文章")
+  }),
+  execute: async ({ context }) => {
+    const prompt = context.focus
+      ? `编辑以下文章，重点关注${context.focus}：\n\n${context.copy}`
+      : `编辑以下文章，提升质量：\n\n${context.copy}`;
+      
+    const result = await editorAgent.generate(prompt);
+    return { editedCopy: result.text };
+  }
+});
+```
+
+#### 3.8.2 协调智能体（发布者模式）
+
+```typescript
+// 创建协调者智能体
+const publisherAgent = new Agent({
+  name: "Publisher",
+  instructions: `你是一个内容发布协调者。
+你的任务是协调文章创作过程：
+1. 首先调用文案撰写者创建初始内容
+2. 然后调用编辑完善文章
+3. 最后返回最终的高质量文章`,
+  model: qwen("qwen-plus-2024-12-20"),
+  tools: { 
+    copywriterTool, 
+    editorTool 
+  }
+});
+
+// 创建Bagctor实例
+const bagctor = new Bagctor({
+  agents: { 
+    publisherAgent,
+    copywriterAgent,
+    editorAgent
+  },
+  distribution: {
+    clustered: true,
+    // 分配智能体到不同节点
+    nodeAssignment: {
+      "publisherAgent": "primary-node",
+      "copywriterAgent": "worker-node-1",
+      "editorAgent": "worker-node-2"
+    }
+  }
+});
+
+// 使用协调智能体
+const result = await bagctor.agents.publisherAgent.generate(
+  "创建一篇关于分布式系统架构的博客文章"
+);
+
+console.log("最终文章:", result.text);
+```
+
+#### 3.8.3 工具链模式
+
+```typescript
+// 创建工具链
+const contentCreationChain = bagctor.createToolChain()
+  .add(copywriterTool, { 
+    id: "writing", 
+    input: (input) => ({ topic: input.topic, keywords: input.keywords })
+  })
+  .add(editorTool, {
+    id: "editing",
+    input: (input, results) => ({ copy: results.writing.copy, focus: input.focus })
+  })
+  .build();
+
+// 执行工具链
+const articleResult = await contentCreationChain.execute({
+  topic: "微服务架构",
+  keywords: ["容器化", "服务发现", "API网关"],
+  focus: "实践案例"
+});
+
+console.log("最终文章:", articleResult.editing.editedCopy);
+```
+
+### 3.9 智能体团队构建 ✅ 

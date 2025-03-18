@@ -15,7 +15,9 @@
         "build:full": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
         "build": "rimraf dist && mkdir -p dist && cp -r src/* dist/ && echo '构建已完成（跳过类型检查）'",
         "build:tests": "tsc -p tsconfig-test.json --noEmit",
-        "test": "NODE_ENV=test bun test --preload ../../scripts/registerPathAlias.js --preload ./scripts/test-setup.ts test/**/*.test.ts"
+        "test": "NODE_ENV=test bun test --preload ../../scripts/registerPathAlias.js --preload ./scripts/test-setup.ts src/tests/",
+        "lint": "eslint src",
+        "docs": "typedoc --out docs src"
     },
     "dependencies": {
         "@bactor/core": "workspace:*",

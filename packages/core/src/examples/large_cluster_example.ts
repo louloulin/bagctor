@@ -5,11 +5,22 @@
  * 每个节点将运行一组actor，这些actor可以相互通信，模拟一个大型分布式系统。
  */
 
-import { Message, Props } from '../core/types';
+import { Message, Props, PID } from '../core/types';
 import { ActorContext } from '../core/context';
 import { Actor } from '../core/actor';
 import { ActorSystem } from '../core/system';
-import { ClusterManager, NodeInfo, NodeStatus, ClusterConfig, ClusterState, NodeLoad, ActorInfo, ClusterEventType } from '@bactor/cluster';
+import {
+    ClusterManager,
+    NodeInfo,
+    NodeStatus,
+    ClusterConfig,
+    ClusterState,
+    NodeLoad,
+    ActorInfo,
+    ClusterEventType,
+    LibP2pClusterSystem,
+    LibP2pClusterSystemConfig
+} from '@bactor/cluster';
 import { v4 as uuid } from 'uuid';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -101,50 +112,60 @@ class ServiceActor extends Actor {
                 await sleep(processingTime);
 
                 // 记录接收到的消息
-                if (this.stats.messagesReceived % 50 === 0) {
-                    console.log(`[${this.nodeId}] ${this.serviceType} received ${this.stats.messagesReceived} messages`);
+                if (this.stats.messagesReceived % 10 === 0) {
+                    console.log(`[${this.nodeId}] ${this.serviceType} service has received ${this.stats.messagesReceived} messages`);
                 }
 
-                // 有时返回响应
-                if (Math.random() > 0.7) {
-                    const response = {
+                // 有50%的概率回复消息
+                if (Math.random() > 0.5 && message.sender) {
+                    const response: Message = {
                         type: 'RESPONSE',
                         payload: {
                             originalType: message.type,
-                            result: `Processed ${message.type} from ${message.sender?.id}`,
-                            timestamp: Date.now()
-                        }
-                    };
-                    if (message.sender) {
-                        this.context.send(message.sender, response);
-                        this.stats.messagesSent++;
-                    }
-                }
-            }
-
-            // 获取统计信息
-            if (message.type === 'GET_STATS') {
-                if (message.sender) {
-                    this.context.send(message.sender, {
-                        type: 'STATS_RESULT',
-                        payload: {
-                            ...this.stats,
                             serviceType: this.serviceType,
                             nodeId: this.nodeId,
-                            pid: this.context.self
-                        }
-                    });
+                            timestamp: Date.now(),
+                            processingTime
+                        },
+                        sender: this.context.self
+                    };
+
+                    await this.context.send(message.sender, response);
+                    this.stats.messagesSent++;
                 }
+
+                return {
+                    receivedAt: Date.now(),
+                    nodeId: this.nodeId,
+                    serviceType: this.serviceType
+                };
+            }
+
+            // 处理响应消息
+            if (message.type === 'RESPONSE') {
+                this.stats.messagesReceived++;
+                console.log(`[${this.nodeId}] ${this.serviceType} received response from ${message.payload?.nodeId || 'unknown'}`);
+                return;
+            }
+
+            // 处理获取统计信息的消息
+            if (message.type === 'GET_STATS') {
+                return {
+                    ...this.stats,
+                    nodeId: this.nodeId,
+                    serviceType: this.serviceType,
+                    pid: this.context.self
+                };
             }
         });
     }
 }
 
-// 集群协调器actor
+// 集群协调器actor - 负责管理虚拟集群
 class ClusterCoordinatorActor extends Actor {
     private clusterManagers: Map<string, ClusterManager> = new Map();
     private nodeMap: Map<string, NodeInfo> = new Map();
-    private actorPids: Map<string, any> = new Map();
+    private actorPids: Map<string, PID> = new Map();
     private startTime: number = Date.now();
     private messageStats: {
         sent: number;
@@ -162,337 +183,255 @@ class ClusterCoordinatorActor extends Actor {
 
     protected behaviors(): void {
         this.addBehavior('default', async (message: Message) => {
-            if (message.type === 'SETUP_CLUSTER') {
+            if (message.type === 'START') {
+                console.log('Starting cluster simulation...');
                 await this.setupCluster();
-                return;
-            }
-
-            if (message.type === 'START_COMMUNICATION') {
                 await this.startCommunication();
                 return;
             }
 
-            if (message.type === 'GET_CLUSTER_STATS') {
+            if (message.type === 'SIMULATE_FAILURES') {
+                const count = message.payload?.count || 5;
+                await this.simulateNodeFailures(count);
+                return;
+            }
+
+            if (message.type === 'GET_STATS') {
                 this.getClusterStats();
                 return;
-            }
-
-            if (message.type === 'SIMULATE_NODE_FAILURES') {
-                await this.simulateNodeFailures(message.payload.count || 5);
-                return;
-            }
-
-            if (message.type === 'STATS_RESULT') {
-                // 响应统计信息收集
-                const stats = message.payload;
-                if (stats.successful) {
-                    this.messageStats.successful += stats.successful;
-                }
-                if (stats.failed) {
-                    this.messageStats.failed += stats.failed;
-                }
             }
         });
     }
 
     private async setupCluster(): Promise<void> {
         console.log(`Setting up virtual cluster with ${NODE_COUNT} nodes...`);
+        const system = new ActorSystem();
+        await system.start();
 
-        // 为每个节点创建一个集群管理器
-        for (let i = 1; i <= NODE_COUNT; i++) {
-            const nodeId = `node-${i}`;
+        // 创建虚拟节点
+        for (let i = 0; i < NODE_COUNT; i++) {
+            const nodeInfo = createVirtualNode(i);
+            this.nodeMap.set(nodeInfo.id, nodeInfo);
+
+            // 为每个节点创建一个ClusterManager
             const config: ClusterConfig = {
-                nodeId,
+                nodeId: nodeInfo.id,
                 heartbeatInterval: 1000,
                 failureDetectionTimeout: 3000,
-                partitionDetectionTimeout: 6000
+                partitionDetectionTimeout: 5000,
+                bootstrapList: [],
+                listenAddresses: [nodeInfo.address],
+                enableDHT: false,
+                enablePubSub: true,
+                enableGossip: true
             };
 
             const clusterManager = new ClusterManager(config);
-            this.clusterManagers.set(nodeId, clusterManager);
 
-            // 创建并注册节点信息
-            const nodeInfo = createVirtualNode(i);
-            this.nodeMap.set(nodeId, nodeInfo);
+            // 使用process.env.NODE_ENV = 'test'来跳过LibP2P的实际网络传输
+            process.env.NODE_ENV = 'test';
 
-            // 启动集群管理器
-            clusterManager.start();
+            // 手动注册节点
+            clusterManager.registerNode(nodeInfo);
 
-            // 注册所有其他节点
-            for (const [otherNodeId, otherNodeInfo] of this.nodeMap.entries()) {
-                if (otherNodeId !== nodeId) {
-                    clusterManager.registerNode(otherNodeInfo);
-                }
-            }
+            // 保存ClusterManager引用
+            this.clusterManagers.set(nodeInfo.id, clusterManager);
 
-            // 显示进度
-            if (i % 10 === 0) {
-                console.log(`Created ${i} cluster managers`);
-            }
-        }
+            // 在每个节点上创建services actor
+            for (let j = 0; j < ACTORS_PER_NODE; j++) {
+                const serviceType = ServiceTypes[j % ServiceTypes.length];
+                const actorName = `${serviceType}-${nodeInfo.id}-${j}`;
 
-        console.log('All cluster managers created and connected.');
-
-        // 等待所有节点注册完成
-        await sleep(500);
-
-        // 检查每个集群管理器中的节点数量
-        const firstManager = this.clusterManagers.get('node-1');
-        if (firstManager) {
-            const nodesInFirstManager = firstManager.getAllNodes().length;
-            console.log(`Node-1 sees ${nodesInFirstManager} nodes in the cluster`);
-
-            // 验证每个集群管理器看到的节点数量
-            let allConsistent = true;
-            for (const [nodeId, manager] of this.clusterManagers.entries()) {
-                const nodesCount = manager.getAllNodes().length;
-                if (nodesCount !== NODE_COUNT) {
-                    console.log(`Node ${nodeId} only sees ${nodesCount} nodes (expected ${NODE_COUNT})`);
-                    allConsistent = false;
-                }
-            }
-
-            if (allConsistent) {
-                console.log('All cluster managers have a consistent view of the cluster');
-            }
-        }
-
-        if (this.context.sender) {
-            this.context.send(this.context.sender, { type: 'CLUSTER_SETUP_COMPLETE' });
-        }
-    }
-
-    private async startCommunication(): Promise<void> {
-        const system = this.context.system;
-        console.log('Creating service actors on each node...');
-
-        // 在每个节点上创建服务actor
-        let actorCount = 0;
-        for (let nodeId of this.nodeMap.keys()) {
-            for (let i = 0; i < ACTORS_PER_NODE; i++) {
-                const serviceType = ServiceTypes[i % ServiceTypes.length];
-                const actorName = `${serviceType}-service-${uuid().substring(0, 8)}`;
-
-                // 创建actor
                 const serviceProps: Props = {
                     producer: (context: ActorContext) => new ServiceActor(context)
                 };
 
-                const actorPid = await system.spawn(serviceProps, actorName);
+                const actorPid = await system.spawn(serviceProps);
 
-                // 初始化actor
-                await system.send(actorPid, {
+                // 初始化service actor
+                const initMessage: Message = {
                     type: 'INIT',
                     payload: {
                         serviceType,
-                        nodeId
-                    }
-                });
+                        nodeId: nodeInfo.id
+                    },
+                    sender: this.context.self
+                };
 
-                // 存储actor引用
+                await system.send(actorPid, initMessage);
+
+                // 向ClusterManager注册actor
+                await clusterManager.registerActor(actorName, actorPid);
+
+                // 保存actor PID引用以便后续发送消息
                 this.actorPids.set(actorName, actorPid);
-
-                // 在集群管理器中注册actor
-                const manager = this.clusterManagers.get(nodeId);
-                if (manager) {
-                    await manager.registerActor(actorName, actorPid);
-                }
-
-                actorCount++;
             }
         }
 
-        console.log(`Created ${actorCount} service actors across ${NODE_COUNT} nodes`);
+        console.log(`Cluster setup complete. Created ${NODE_COUNT} nodes with ${NODE_COUNT * ACTORS_PER_NODE} services.`);
+    }
 
-        // 开始在actor之间发送消息
-        console.log('Starting inter-actor communication...');
+    private async startCommunication(): Promise<void> {
+        console.log('Starting inter-node communication...');
 
+        const start = Date.now();
+        const promises: Promise<any>[] = [];
+
+        // 获取所有actor的列表
         const allActors = Array.from(this.actorPids.entries());
+        const totalMessages = allActors.length * MESSAGES_PER_ACTOR;
 
-        // 每个actor向其他随机actor发送消息
-        for (const [actorName, actorPid] of allActors) {
+        for (const [actorName, senderPid] of allActors) {
+            // 为每个actor发送多条消息
             for (let i = 0; i < MESSAGES_PER_ACTOR; i++) {
-                // 随机选择目标actor
-                const targetIndex = Math.floor(Math.random() * allActors.length);
-                const [targetName, targetPid] = allActors[targetIndex];
+                // 随机选择一个目标actor
+                const randomIndex = Math.floor(Math.random() * allActors.length);
+                const [targetActorName, receiverPid] = allActors[randomIndex];
 
-                if (targetName !== actorName) {
-                    // 随机选择消息类型
-                    const eventTypeKeys = Object.keys(EventTypes);
-                    const eventType = EventTypes[eventTypeKeys[Math.floor(Math.random() * eventTypeKeys.length)]];
+                // 不要发送给自己
+                if (actorName === targetActorName) continue;
 
-                    // 发送消息
-                    const message = {
-                        type: eventType,
-                        payload: {
-                            timestamp: Date.now(),
-                            sender: actorName,
-                            data: `Message ${i} from ${actorName} to ${targetName}`,
-                            value: Math.random() * 100
-                        }
-                    };
+                // 随机选择一个消息类型
+                const eventTypes = Object.values(EventTypes);
+                const messageType = eventTypes[Math.floor(Math.random() * eventTypes.length)];
 
+                // 准备消息
+                const message: Message = {
+                    type: messageType,
+                    payload: {
+                        data: `Message ${i} from ${actorName} to ${targetActorName}`,
+                        timestamp: Date.now(),
+                        sourceNode: actorName.split('-')[1] // 提取nodeId
+                    },
+                    sender: senderPid
+                };
+
+                // 发送消息
+                promises.push((async () => {
+                    this.messageStats.sent++;
                     try {
-                        await system.send(targetPid, message);
-                        this.messageStats.sent++;
-                    } catch (err) {
-                        console.error(`Failed to send message from ${actorName} to ${targetName}:`, err);
+                        await this.context.send(receiverPid, message);
+                        this.messageStats.successful++;
+                    } catch (error) {
+                        this.messageStats.failed++;
+                        console.error(`Failed to send message from ${actorName} to ${targetActorName}:`, error);
                     }
+                })());
+
+                // 添加一些随机延迟，避免同时发送所有消息
+                if (Math.random() > 0.8) {
+                    await sleep(Math.random() * 5);
                 }
             }
         }
 
-        // 等待所有消息处理完成
-        console.log('Waiting for messages to be processed...');
-        await sleep(5000);
+        // 等待所有消息发送完成
+        await Promise.all(promises);
 
-        if (this.context.sender) {
-            this.context.send(this.context.sender, {
-                type: 'COMMUNICATION_COMPLETE',
-                payload: {
-                    actorCount,
-                    messagesSent: this.messageStats.sent
-                }
-            });
-        }
+        const duration = (Date.now() - start) / 1000;
+        console.log(`Communication complete. Sent ${this.messageStats.successful} messages (${(this.messageStats.successful / duration).toFixed(2)} msgs/sec)`);
+        console.log(`Success rate: ${((this.messageStats.successful / this.messageStats.sent) * 100).toFixed(2)}%`);
     }
 
     private async simulateNodeFailures(failureCount: number): Promise<void> {
         console.log(`Simulating ${failureCount} node failures...`);
 
-        // 随机选择节点进行模拟故障
-        const nodeIds = Array.from(this.nodeMap.keys());
-        const shuffledNodes = nodeIds.sort(() => Math.random() - 0.5);
-        const nodesToFail = shuffledNodes.slice(0, failureCount);
+        // 获取所有节点
+        const allNodes = Array.from(this.nodeMap.values());
 
-        for (let i = 0; i < nodesToFail.length; i++) {
-            const nodeId = nodesToFail[i];
-            console.log(`Simulating failure for node ${nodeId}`);
+        // 随机选择几个节点进行故障模拟
+        for (let i = 0; i < failureCount; i++) {
+            if (allNodes.length === 0) break;
 
-            // 通知所有其他节点此节点已失败
-            for (const [otherNodeId, manager] of this.clusterManagers.entries()) {
-                if (otherNodeId !== nodeId) {
-                    const nodeInfo = this.nodeMap.get(nodeId);
-                    if (nodeInfo) {
-                        nodeInfo.status = NodeStatus.SUSPECTED;
-                        await manager.handleNodeStatus(nodeId, NodeStatus.SUSPECTED);
+            const randomIndex = Math.floor(Math.random() * allNodes.length);
+            const nodeToFail = allNodes[randomIndex];
 
-                        // 等待一段时间后将节点标记为死亡
-                        await sleep(200);
-                        nodeInfo.status = NodeStatus.DEAD;
-                        await manager.handleNodeStatus(nodeId, NodeStatus.DEAD);
+            // 从活跃列表中移除
+            allNodes.splice(randomIndex, 1);
+
+            console.log(`Simulating failure for node: ${nodeToFail.id}`);
+
+            // 更新节点状态
+            nodeToFail.status = NodeStatus.DEAD;
+            this.nodeMap.set(nodeToFail.id, nodeToFail);
+
+            // 获取节点的ClusterManager
+            const clusterManager = this.clusterManagers.get(nodeToFail.id);
+            if (clusterManager) {
+                // 通知集群中的其他节点这个节点已经失效
+                for (const [otherNodeId, otherManager] of this.clusterManagers.entries()) {
+                    if (otherNodeId !== nodeToFail.id) {
+                        otherManager.handleNodeStatus(nodeToFail.id, NodeStatus.DEAD);
                     }
                 }
-            }
 
-            // 获取该节点上的actor
-            const actorsOnNode = Array.from(this.actorPids.entries())
-                .filter(([actorName, _]) => {
-                    const manager = this.clusterManagers.get(nodeId);
-                    if (!manager) return false;
+                // 停止该节点的ClusterManager
+                await clusterManager.stop();
 
-                    // 检查这个actor是否在失败的节点上
-                    const actorInfo = manager.getActorInfo({ id: actorName, address: nodeId });
-                    return actorInfo && actorInfo.nodeId === nodeId;
-                });
+                // 获取该节点上的所有actor
+                const nodeActors = Array.from(this.actorPids.entries())
+                    .filter(([name]) => name.includes(nodeToFail.id));
 
-            console.log(`Node ${nodeId} had ${actorsOnNode.length} actors`);
-
-            // 在其他节点上重新创建这些actor（模拟迁移）
-            const availableNodes = nodeIds.filter(id => !nodesToFail.includes(id));
-
-            if (availableNodes.length > 0) {
-                for (const [actorName, actorPid] of actorsOnNode) {
-                    // 为迁移选择一个随机节点
-                    const targetNodeId = availableNodes[Math.floor(Math.random() * availableNodes.length)];
-                    console.log(`Migrating actor ${actorName} from ${nodeId} to ${targetNodeId}`);
-
-                    // 更新actor在集群中的位置
-                    const targetManager = this.clusterManagers.get(targetNodeId);
-                    if (targetManager) {
-                        await targetManager.registerActor(actorName, actorPid);
-                    }
+                // 将这些actor标记为不可用
+                for (const [actorName] of nodeActors) {
+                    this.actorPids.delete(actorName);
                 }
+
+                console.log(`Node ${nodeToFail.id} failed with ${nodeActors.length} actors`);
             }
         }
 
-        // 检查集群状态
-        await sleep(1000);
-        const metrics = [];
-        for (const [nodeId, manager] of this.clusterManagers.entries()) {
-            if (!nodesToFail.includes(nodeId)) {
-                const nodeMetrics = manager.getMetrics();
-                metrics.push({
-                    nodeId,
-                    activeNodes: nodeMetrics.activeNodes,
-                    suspectedNodes: nodeMetrics.suspectedNodes,
-                    deadNodes: nodeMetrics.deadNodes
-                });
-            }
-        }
-
-        console.log('Cluster state after failures:');
-        console.log(metrics[0]);
-
-        if (this.context.sender) {
-            this.context.send(this.context.sender, {
-                type: 'FAILURE_SIMULATION_COMPLETE',
-                payload: {
-                    failedNodes: nodesToFail,
-                    metrics
-                }
-            });
-        }
+        console.log(`Simulated ${failureCount} node failures. Remaining active nodes: ${Array.from(this.nodeMap.values()).filter(n => n.status === NodeStatus.ACTIVE).length}`);
     }
 
     private getClusterStats(): void {
-        const runningTime = (Date.now() - this.startTime) / 1000;
+        const now = Date.now();
+        const uptime = (now - this.startTime) / 1000; // 秒
 
-        // 收集所有节点的负载信息
-        const nodeLoads: Record<string, NodeLoad> = {};
-        for (const [nodeId, manager] of this.clusterManagers.entries()) {
-            const load = manager.getNodeLoad(nodeId);
-            if (load) {
-                nodeLoads[nodeId] = load;
-            }
-        }
+        // 计算节点统计信息
+        const totalNodes = this.nodeMap.size;
+        const activeNodes = Array.from(this.nodeMap.values()).filter(n => n.status === NodeStatus.ACTIVE).length;
+        const deadNodes = Array.from(this.nodeMap.values()).filter(n => n.status === NodeStatus.DEAD).length;
 
-        // 计算平均负载
-        const avgCpu = Object.values(nodeLoads).reduce((sum, load) => sum + load.cpu, 0) / Object.keys(nodeLoads).length;
-        const avgMemory = Object.values(nodeLoads).reduce((sum, load) => sum + load.memory, 0) / Object.keys(nodeLoads).length;
-        const avgMessageRate = Object.values(nodeLoads).reduce((sum, load) => sum + load.messageRate, 0) / Object.keys(nodeLoads).length;
+        // 计算actor统计信息
+        const totalActors = this.actorPids.size;
+        const actorsPerNode = totalActors / activeNodes;
 
-        // 收集actor统计
-        const actorCount = this.actorPids.size;
-        const totalMessages = this.messageStats.sent;
-        const messagesPerSec = totalMessages / runningTime;
+        // 计算消息统计信息
+        const messagesPerSecond = this.messageStats.successful / uptime;
 
+        console.log('\n===== CLUSTER STATISTICS =====');
+        console.log(`Uptime: ${uptime.toFixed(2)} seconds`);
+        console.log(`Nodes: ${activeNodes} active / ${deadNodes} dead / ${totalNodes} total`);
+        console.log(`Actors: ${totalActors} total (avg ${actorsPerNode.toFixed(2)} per node)`);
+        console.log(`Messages: ${this.messageStats.successful} successful / ${this.messageStats.failed} failed / ${this.messageStats.sent} total`);
+        console.log(`Throughput: ${messagesPerSecond.toFixed(2)} messages/second`);
+        console.log('==============================\n');
+
+        // 构建统计数据对象但不返回它，因为方法类型是void
         const stats = {
-            clusterSize: this.nodeMap.size,
-            activeNodes: Array.from(this.nodeMap.values()).filter(n => n.status === NodeStatus.ACTIVE).length,
-            suspectedNodes: Array.from(this.nodeMap.values()).filter(n => n.status === NodeStatus.SUSPECTED).length,
-            deadNodes: Array.from(this.nodeMap.values()).filter(n => n.status === NodeStatus.DEAD).length,
-            avgLoad: {
-                cpu: avgCpu.toFixed(2),
-                memory: avgMemory.toFixed(2),
-                messageRate: avgMessageRate.toFixed(2)
+            uptime,
+            nodes: {
+                total: totalNodes,
+                active: activeNodes,
+                dead: deadNodes
             },
-            actorCount,
-            messageStats: this.messageStats,
-            messagesPerSec: messagesPerSec.toFixed(2),
-            runningTime: runningTime.toFixed(2)
+            actors: {
+                total: totalActors,
+                perNode: actorsPerNode
+            },
+            messages: {
+                ...this.messageStats,
+                throughput: messagesPerSecond
+            }
         };
 
-        console.log('Cluster Statistics:');
-        console.log(JSON.stringify(stats, null, 2));
-
-        if (this.context.sender) {
-            this.context.send(this.context.sender, { type: 'CLUSTER_STATS', payload: stats });
-        }
+        // 如果需要，可以将stats保存到actor实例上供后续使用
+        // this.lastStats = stats;
     }
 }
 
-// 自定义事件流处理
+// 自定义事件流 - 用于集群事件通知
 class CustomEventStream {
     private subscribers: Map<string, ((data: any) => void)[]> = new Map();
 
@@ -504,103 +443,71 @@ class CustomEventStream {
     }
 
     publish(event: string, data: any = {}) {
-        if (this.subscribers.has(event)) {
-            for (const callback of this.subscribers.get(event) || []) {
+        const callbacks = this.subscribers.get(event) || [];
+        for (const callback of callbacks) {
+            try {
                 callback(data);
+            } catch (error) {
+                console.error(`Error in event handler for ${event}:`, error);
             }
         }
     }
 }
 
-// 主函数来运行示例
+// 主函数 - 运行大型集群示例
 async function runLargeClusterExample() {
+    console.log('============================');
     console.log('Starting Large Cluster Example');
-    console.log(`Configuring a virtual cluster with ${NODE_COUNT} nodes and ${ACTORS_PER_NODE} actors per node`);
+    console.log('============================');
 
-    // 创建actor系统
+    // 初始化Actor系统
     const system = new ActorSystem();
     await system.start();
 
-    // 添加自定义事件流
-    const eventStream = new CustomEventStream();
-
-    // 创建集群协调器
+    // 创建一个集群协调器Actor
     const coordinatorProps: Props = {
         producer: (context: ActorContext) => new ClusterCoordinatorActor(context)
     };
 
-    const coordinatorPid = await system.spawn(coordinatorProps, 'cluster-coordinator');
+    const coordinatorPid = await system.spawn(coordinatorProps);
+    console.log(`Created cluster coordinator with PID: ${coordinatorPid.id}`);
 
-    console.log('Setting up the cluster...');
+    // 开始集群模拟
+    await system.send(coordinatorPid, { type: 'START' });
 
-    // 设置集群
-    await system.send(coordinatorPid, { type: 'SETUP_CLUSTER' });
+    // 等待一段时间让集群通信进行
+    console.log('Waiting for cluster communication to complete...');
+    await sleep(5000);
 
-    // 等待集群设置完成
-    await new Promise<void>(resolve => {
-        // 模拟消息接收
-        setTimeout(() => {
-            eventStream.publish('CLUSTER_SETUP_COMPLETE');
-            resolve();
-        }, 3000);
-    });
+    // 获取集群统计信息
+    await system.send(coordinatorPid, { type: 'GET_STATS' });
 
-    console.log('Cluster setup completed');
-
-    // 开始通信
-    console.log('Starting inter-node communication...');
-    await system.send(coordinatorPid, { type: 'START_COMMUNICATION' });
-
-    // 等待通信完成
-    await new Promise<void>(resolve => {
-        // 模拟消息接收
-        setTimeout(() => {
-            eventStream.publish('COMMUNICATION_COMPLETE', {
-                actorCount: NODE_COUNT * ACTORS_PER_NODE,
-                messagesSent: NODE_COUNT * ACTORS_PER_NODE * MESSAGES_PER_ACTOR
-            });
-            resolve();
-        }, 10000);
-    });
-
-    console.log(`Communication completed: ${NODE_COUNT * ACTORS_PER_NODE} actors sent approximately ${NODE_COUNT * ACTORS_PER_NODE * MESSAGES_PER_ACTOR} messages`);
-
-    // 获取统计信息
-    console.log('Collecting cluster statistics...');
-    await system.send(coordinatorPid, { type: 'GET_CLUSTER_STATS' });
-
-    // 模拟一些节点故障
+    // 模拟节点故障
     console.log('Simulating node failures...');
-    await system.send(coordinatorPid, { type: 'SIMULATE_NODE_FAILURES', payload: { count: 10 } });
-
-    // 等待故障模拟完成
-    await new Promise<void>(resolve => {
-        // 模拟消息接收
-        setTimeout(() => {
-            eventStream.publish('FAILURE_SIMULATION_COMPLETE');
-            resolve();
-        }, 5000);
+    await system.send(coordinatorPid, {
+        type: 'SIMULATE_FAILURES',
+        payload: { count: 10 }
     });
 
-    console.log('Failure simulation completed');
+    // 等待一段时间让故障检测和恢复机制运行
+    await sleep(2000);
 
-    // 再次获取统计信息，看看故障后的影响
-    console.log('Collecting post-failure statistics...');
-    await system.send(coordinatorPid, { type: 'GET_CLUSTER_STATS' });
+    // 获取最终的集群统计信息
+    await system.send(coordinatorPid, { type: 'GET_STATS' });
 
-    // 等待最终的统计数据
-    await sleep(1000);
+    // 关闭Actor系统
+    console.log('Shutting down...');
+    await system.shutdown();
 
-    console.log('Example completed. Shutting down the actor system...');
-
-    // 关闭actor系统
-    await system.stop();
+    console.log('============================');
+    console.log('Large Cluster Example Complete');
+    console.log('============================');
 }
 
-// 如果这个文件被直接运行（而不是导入），则运行示例
+// 执行示例
 if (require.main === module) {
-    runLargeClusterExample().catch(err => {
-        console.error('Error running large cluster example:', err);
+    runLargeClusterExample().catch(error => {
+        console.error('Error running large cluster example:', error);
         process.exit(1);
     });
 }

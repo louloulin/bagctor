@@ -1,3 +1,16 @@
+import fs from 'fs';
+
+// 读取原文件
+const original = fs.readFileSync('plugin_loader.ts.bak', 'utf8');
+
+// 找出我们需要保留的方法
+let retainMethods = original.match(/private async createWorkerPlugin[\s\S]+?}\n    }/);
+let createBunWorker = original.match(/private async createBunWorker[\s\S]+?}\n    }/);
+let createNodeWorker = original.match(/private async createNodeWorker[\s\S]+?}\n    }/);
+let validateMetadata = original.match(/private validateMetadata[\s\S]+?}\n    }/);
+
+// 创建新的类实现
+const newImplementation = `
 import { Actor, ActorContext, log } from '@bactor/core';
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -41,7 +54,7 @@ export class PluginLoader {
             return metadata;
         } catch (error) {
             log.error('Failed to load plugin package:', error);
-            throw new Error(`Failed to load plugin package: ${error instanceof Error ? error.message : String(error)}`);
+            throw new Error(\`Failed to load plugin package: \${error instanceof Error ? error.message : String(error)}\`);
         }
     }
 
@@ -51,7 +64,7 @@ export class PluginLoader {
     async loadFromDynamic(source: string, metadata: Partial<PluginMetadata>): Promise<PluginMetadata> {
         try {
             // Create temporary directory for dynamic plugin
-            const pluginDir = path.join(this.pluginsDir, `dynamic-${Date.now()}`);
+            const pluginDir = path.join(this.pluginsDir, \`dynamic-\${Date.now()}\`);
             await fs.ensureDir(pluginDir);
 
             // Download or copy plugin source
@@ -65,8 +78,8 @@ export class PluginLoader {
 
             // Generate and validate metadata
             const fullMetadata: PluginMetadata = {
-                id: `dynamic-${Date.now()}`,
-                name: metadata.name || `Dynamic Plugin ${Date.now()}`,
+                id: \`dynamic-\${Date.now()}\`,
+                name: metadata.name || \`Dynamic Plugin \${Date.now()}\`,
                 version: metadata.version || '1.0.0',
                 type: metadata.type || 'inline',
                 capabilities: metadata.capabilities || [],
@@ -78,7 +91,7 @@ export class PluginLoader {
             return fullMetadata;
         } catch (error) {
             log.error('Failed to load dynamic plugin:', error);
-            throw new Error(`Failed to load dynamic plugin: ${error instanceof Error ? error.message : String(error)}`);
+            throw new Error(\`Failed to load dynamic plugin: \${error instanceof Error ? error.message : String(error)}\`);
         }
     }
 
@@ -96,7 +109,7 @@ export class PluginLoader {
 
             // Check if entry file exists
             if (!await fs.pathExists(entryPath)) {
-                throw new Error(`Plugin entry file not found: ${entryPath}`);
+                throw new Error(\`Plugin entry file not found: \${entryPath}\`);
             }
 
             let actor: Actor | undefined;
@@ -135,7 +148,7 @@ export class PluginLoader {
                     break;
 
                 default:
-                    throw new Error(`Unsupported plugin type: ${metadata.type}`);
+                    throw new Error(\`Unsupported plugin type: \${metadata.type}\`);
             }
 
             return {
@@ -149,7 +162,7 @@ export class PluginLoader {
             };
         } catch (error) {
             log.error('Failed to create plugin instance:', error);
-            throw new Error(`Failed to create plugin instance: ${error instanceof Error ? error.message : String(error)}`);
+            throw new Error(\`Failed to create plugin instance: \${error instanceof Error ? error.message : String(error)}\`);
         }
     }
 
@@ -160,8 +173,8 @@ export class PluginLoader {
     ): Promise<ChildProcess> {
         if (isBun) {
             // For Bun environment, we need a different approach as Bun.spawn is incompatible with ChildProcess
-            log.info(`Starting plugin ${metadata.id} in Bun environment (limited functionality)`);
-
+            log.info(\`Starting plugin \${metadata.id} in Bun environment (limited functionality)\`);
+            
             // Create a mock ChildProcess that satisfies TypeScript
             const mockProcess: ChildProcess = {
                 pid: 0,
@@ -174,16 +187,16 @@ export class PluginLoader {
                 stderr: null,
                 stdin: null
             } as unknown as ChildProcess;
-
+            
             // Simulate a ready signal after a short delay
             setTimeout(() => {
                 // This simulates the plugin loading and becoming ready
-                log.info(`Plugin ${metadata.id} ready (simulated in Bun environment)`);
+                log.info(\`Plugin \${metadata.id} ready (simulated in Bun environment)\`);
             }, 100);
-
+            
             return Promise.resolve(mockProcess);
         }
-
+        
         return new Promise((resolve, reject) => {
             try {
                 // Fork the plugin process (Node.js implementation)
@@ -198,14 +211,14 @@ export class PluginLoader {
 
                 // Handle process events
                 childProcess.on('error', (error: Error) => {
-                    log.error(`Plugin ${metadata.id} process error:`, error);
+                    log.error(\`Plugin \${metadata.id} process error:\`, error);
                     reject(error);
                 });
 
                 childProcess.on('exit', (code: number | null) => {
                     if (code !== 0 && code !== null) {
-                        const error = new Error(`Plugin process exited with code ${code}`);
-                        log.error(`Plugin ${metadata.id} process exit:`, error);
+                        const error = new Error(\`Plugin process exited with code \${code}\`);
+                        log.error(\`Plugin \${metadata.id} process exit:\`, error);
                         reject(error);
                     }
                 });
@@ -213,7 +226,7 @@ export class PluginLoader {
                 // Wait for ready signal
                 childProcess.once('message', (message: any) => {
                     if (message?.type === 'plugin.ready') {
-                        log.info(`Plugin ${metadata.id} process ready`);
+                        log.info(\`Plugin \${metadata.id} process ready\`);
                         resolve(childProcess);
                     } else {
                         reject(new Error('Invalid plugin ready message'));
@@ -236,144 +249,15 @@ export class PluginLoader {
         });
     }
 
-    private async createWorkerPlugin(
-        metadata: PluginMetadata,
-        entryPath: string,
-        config?: any
-    ): Promise<WorkerType> {
-        if (isBun) {
-            return this.createBunWorker(metadata, entryPath, config);
-        } else {
-            return this.createNodeWorker(metadata, entryPath, config);
-        }
-    }
+    ${retainMethods} 
+    
+    ${createBunWorker}
+    
+    ${createNodeWorker}
+    
+    ${validateMetadata}
+}`;
 
-    private async createBunWorker(
-        metadata: PluginMetadata,
-        entryPath: string,
-        config?: any
-    ): Promise<Worker> {
-        return new Promise((resolve, reject) => {
-            try {
-                // Create Bun Worker
-                const worker = new Worker(entryPath, {
-                    type: 'module',
-                    workerData: {
-                        pluginId: metadata.id,
-                        config: config || metadata.config || {}
-                    }
-                });
-
-                // Handle worker events
-                worker.onerror = (error: ErrorEvent) => {
-                    log.error(`Plugin ${metadata.id} worker error:`, error);
-                    reject(error);
-                };
-
-                worker.onmessage = (event: MessageEvent) => {
-                    const message = event.data;
-                    if (message?.type === 'plugin.ready') {
-                        log.info(`Plugin ${metadata.id} worker ready`);
-                        resolve(worker);
-                    }
-                };
-
-                // Set timeout for initialization
-                const timeout = setTimeout(() => {
-                    worker.terminate();
-                    reject(new Error('Worker initialization timeout'));
-                }, 30000);
-
-                // Send initialization message
-                worker.postMessage({
-                    type: 'plugin.init',
-                    payload: {
-                        pluginId: metadata.id,
-                        config: config || metadata.config || {}
-                    }
-                });
-
-                // Clear timeout when worker is ready
-                worker.addEventListener('message', () => {
-                    clearTimeout(timeout);
-                }, { once: true });
-
-            } catch (error) {
-                reject(error);
-            }
-        });
-    }
-
-    private async createNodeWorker(
-        metadata: PluginMetadata,
-        entryPath: string,
-        config?: any
-    ): Promise<NodeWorker> {
-        return new Promise((resolve, reject) => {
-            try {
-                // Create Node.js Worker
-                const worker = new NodeWorker(entryPath, {
-                    workerData: {
-                        pluginId: metadata.id,
-                        config: config || metadata.config || {}
-                    }
-                });
-
-                // Handle worker events
-                worker.on('error', (error) => {
-                    log.error(`Plugin ${metadata.id} worker error:`, error);
-                    reject(error);
-                });
-
-                worker.on('messageerror', (error) => {
-                    log.error(`Plugin ${metadata.id} worker message error:`, error);
-                    reject(error);
-                });
-
-                // Set up message handler for initialization
-                worker.on('message', (message) => {
-                    if (message?.type === 'plugin.ready') {
-                        log.info(`Plugin ${metadata.id} worker ready`);
-                        resolve(worker);
-                    }
-                });
-
-                // Set timeout for initialization
-                const timeout = setTimeout(() => {
-                    worker.terminate();
-                    reject(new Error('Worker initialization timeout'));
-                }, 30000);
-
-                // Send initialization message
-                worker.postMessage({
-                    type: 'plugin.init',
-                    payload: {
-                        pluginId: metadata.id,
-                        config: config || metadata.config || {}
-                    }
-                });
-
-                // Clear timeout when worker is ready
-                worker.once('message', () => {
-                    clearTimeout(timeout);
-                });
-
-            } catch (error) {
-                reject(error);
-            }
-        });
-    }
-
-    private validateMetadata(metadata: PluginMetadata): void {
-        const requiredFields = ['id', 'name', 'version', 'type'];
-        for (const field of requiredFields) {
-            if (!metadata[field as keyof PluginMetadata]) {
-                throw new Error(`Missing required field in plugin metadata: ${field}`);
-            }
-        }
-
-        if (!['inline', 'process', 'worker'].includes(metadata.type)) {
-            throw new Error(`Invalid plugin type: ${metadata.type}`);
-        }
-    }
-}
+// 写入修复后的文件
+fs.writeFileSync('plugin_loader.ts', newImplementation);
+console.log('File fixed'); 

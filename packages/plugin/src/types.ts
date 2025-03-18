@@ -3,20 +3,6 @@ import { PID } from '@bactor/common';
 import { Worker as NodeWorker } from 'worker_threads';
 import { ChildProcess } from 'child_process';
 
-// Bun type definitions
-declare global {
-    var Bun: {
-        spawn(command: string[], options?: SpawnOptions): ChildProcess;
-        isMainThread: boolean;
-        workerData: any;
-        env: typeof process.env;
-    };
-
-    interface ImportMeta {
-        dir?: string;
-        main?: boolean;
-    }
-}
 
 interface SpawnOptions {
     cwd?: string;

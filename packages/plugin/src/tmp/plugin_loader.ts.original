@@ -158,43 +158,27 @@ export class PluginLoader {
         entryPath: string,
         config?: any
     ): Promise<ChildProcess> {
-        if (isBun) {
-            // For Bun environment, we need a different approach as Bun.spawn is incompatible with ChildProcess
-            log.info(`Starting plugin ${metadata.id} in Bun environment (limited functionality)`);
-
-            // Create a mock ChildProcess that satisfies TypeScript
-            const mockProcess: ChildProcess = {
-                pid: 0,
-                kill: () => true,
-                on: () => mockProcess,
-                once: () => mockProcess,
-                emit: () => false,
-                removeListener: () => mockProcess,
-                stdout: null,
-                stderr: null,
-                stdin: null
-            } as unknown as ChildProcess;
-
-            // Simulate a ready signal after a short delay
-            setTimeout(() => {
-                // This simulates the plugin loading and becoming ready
-                log.info(`Plugin ${metadata.id} ready (simulated in Bun environment)`);
-            }, 100);
-
-            return Promise.resolve(mockProcess);
-        }
-
         return new Promise((resolve, reject) => {
             try {
-                // Fork the plugin process (Node.js implementation)
-                const childProcess = fork(entryPath, [], {
-                    cwd: path.dirname(entryPath),
-                    env: {
-                        ...process.env,
-                        PLUGIN_ID: metadata.id,
-                        PLUGIN_CONFIG: JSON.stringify(config || metadata.config || {})
-                    }
-                });
+                // Fork the plugin process
+                const childProcess = isBun ?
+                    Bun.spawn(['bun', 'run', entryPath], {
+                        env: {
+                            ...process.env,
+                            PLUGIN_ID: metadata.id,
+                            PLUGIN_CONFIG: JSON.stringify(config || metadata.config || {})
+                        },
+                        cwd: path.dirname(entryPath),
+                        ipc: true
+                    }) :
+                    fork(entryPath, [], {
+                        cwd: path.dirname(entryPath),
+                        env: {
+                            ...process.env,
+                            PLUGIN_ID: metadata.id,
+                            PLUGIN_CONFIG: JSON.stringify(config || metadata.config || {})
+                        }
+                    });
 
                 // Handle process events
                 childProcess.on('error', (error: Error) => {
@@ -376,4 +360,4 @@ export class PluginLoader {
             throw new Error(`Invalid plugin type: ${metadata.type}`);
         }
     }
-}
+} 

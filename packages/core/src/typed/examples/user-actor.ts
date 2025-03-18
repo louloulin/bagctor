@@ -9,15 +9,15 @@ export interface UserActorRequestMessages {
     'user.get': { id: string; };
     'user.update': { id: string; name?: string; email?: string; };
     'user.delete': { id: string; };
-    'user.list': void;
+    'user.list': {};
 }
 
 // 响应消息类型
 export interface UserActorResponseMessages {
-    'user.create': { user: User };
-    'user.get': { user?: User; error?: string };
-    'user.update': { user?: User; error?: string };
-    'user.delete': { success: boolean; error?: string };
+    'user.create': { name: string; email: string; user: User };
+    'user.get': { id: string; user?: User; error?: string };
+    'user.update': { id: string; name?: string; email?: string; user?: User; error?: string };
+    'user.delete': { id: string; success: boolean; error?: string };
     'user.list': { users: User[] };
 }
 
@@ -73,7 +73,11 @@ export class UserActor extends TypedActor<UserActorState, UserActorMessages> {
         const state = this.getState();
         state.users.set(id, user);
 
-        const response: UserActorResponseMessages['user.create'] = { user };
+        const response: UserActorResponseMessages['user.create'] = {
+            name: payload.name,
+            email: payload.email,
+            user
+        };
         await this.context.send(ctx.sender!, 'user.create', response);
     }
 
@@ -84,9 +88,10 @@ export class UserActor extends TypedActor<UserActorState, UserActorMessages> {
         const state = this.getState();
         const user = state.users.get(payload.id);
 
-        const response: UserActorResponseMessages['user.get'] = user
-            ? { user }
-            : { error: 'User not found' };
+        const response: UserActorResponseMessages['user.get'] = {
+            id: payload.id,
+            ...(user ? { user } : { error: 'User not found' })
+        };
         await this.context.send(ctx.sender!, 'user.get', response);
     }
 
@@ -106,9 +111,19 @@ export class UserActor extends TypedActor<UserActorState, UserActorMessages> {
                 updatedAt: new Date()
             };
             state.users.set(payload.id, updatedUser);
-            response = { user: updatedUser };
+            response = {
+                id: payload.id,
+                name: payload.name,
+                email: payload.email,
+                user: updatedUser
+            };
         } else {
-            response = { error: 'User not found' };
+            response = {
+                id: payload.id,
+                name: payload.name,
+                email: payload.email,
+                error: 'User not found'
+            };
         }
         await this.context.send(ctx.sender!, 'user.update', response);
     }
@@ -120,9 +135,11 @@ export class UserActor extends TypedActor<UserActorState, UserActorMessages> {
         const state = this.getState();
         const user = state.users.get(payload.id);
 
-        const response: UserActorResponseMessages['user.delete'] = user
-            ? { success: true }
-            : { success: false, error: 'User not found' };
+        const response: UserActorResponseMessages['user.delete'] = {
+            id: payload.id,
+            success: !!user,
+            ...(user ? {} : { error: 'User not found' })
+        };
 
         if (user) {
             state.users.delete(payload.id);

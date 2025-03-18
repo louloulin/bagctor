@@ -50,7 +50,7 @@ export class Libp2pTransportProvider implements TransportProvider {
                 identify: identify(),
                 pubsub: gossipsub({
                     emitSelf: true,
-                    allowPublishToZeroTopicPeers: true,
+                    allowPublishToZeroPeers: true,
                     fallbackToFloodsub: true,
                     floodPublish: true,
                     directPeers: []
@@ -61,7 +61,6 @@ export class Libp2pTransportProvider implements TransportProvider {
                 log.debug('Initializing DHT with randomWalk:', this.dhtRandomWalk);
                 services.dht = kadDHT({
                     clientMode: false,
-                    protocol: '/bactor/kad/1.0.0',
                     validators: {},
                     selectors: {}
                 });
@@ -78,8 +77,8 @@ export class Libp2pTransportProvider implements TransportProvider {
                     listen: [this.localAddress]
                 },
                 transports: [tcp()],
-                streamMuxers: [mplex()],
-                connectionEncrypters: [plaintext()],
+                streamMuxers: [mplex() as any],
+                connectionEncryption: [plaintext() as any],
                 services,
                 connectionManager: {
                     maxConnections: 50

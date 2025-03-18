@@ -22,9 +22,7 @@
         "monitoring/*"
       ]
     },
-    "types": [
-      "bun-types"
-    ]
+    "skipLibCheck": true
   },
   "include": [
     "src/**/*"

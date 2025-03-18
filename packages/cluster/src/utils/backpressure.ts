@@ -9,6 +9,9 @@ import {
 import { log } from '@bactor/core';
 import { SystemMetricsCollector } from './system_metrics';
 
+// 重新导出 MessagePriority 枚举以供外部使用
+export { MessagePriority };
+
 /**
  * 背压策略管理器 - 实现各种背压策略
  */

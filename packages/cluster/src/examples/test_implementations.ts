@@ -29,11 +29,26 @@ process.env.NO_COLOR = '1';
 function testConsensus() {
     console.log('\n--- 测试分布式共识 ---');
 
+    // 创建一个模拟的 ClusterManager 实例
+    const mockClusterManager = {
+        getAllNodes: () => Array.from({ length: 5 }, (_, i) => ({
+            id: `node-${i}`,
+            status: NodeStatus.ACTIVE,
+            address: `127.0.0.1:${8000 + i}`,
+            lastHeartbeat: Date.now(),
+            metadata: {},
+            capabilities: []
+        })),
+        handleNodeStatus: async () => { }
+    } as unknown as ClusterManager;
+
     // 创建共识实例
     const consensus = new FailureDetectionConsensus(
-        5000,   // 5秒超时
-        0.5,    // 50%票数标记为可疑
-        0.7     // 70%票数标记为死亡
+        mockClusterManager,
+        {
+            suspicionTimeout: 5000,
+            quorumSize: 3
+        }
     );
 
     // 模拟5个节点
@@ -44,8 +59,8 @@ function testConsensus() {
     console.log('模拟节点投票过程:');
 
     // 节点0被2个节点怀疑
-    consensus.voteSuspect('node-0', 'node-1');
-    consensus.voteSuspect('node-0', 'node-2');
+    consensus.voteSuspect('node-1', 'node-0');
+    consensus.voteSuspect('node-2', 'node-0');
     console.log(`节点node-0被2个节点怀疑，状态: ${consensus.determineNodeStatus('node-0', totalNodes)}`);
 
     // 节点0又被一个节点怀疑，达到阈值
@@ -95,34 +110,38 @@ function testSystemMetrics() {
  * 测试背压策略
  */
 function testBackpressure() {
-    console.log('\n--- 测试背压策略 ---');
+    console.log('\n--- 测试背压管理 ---');
 
-    // 创建指标收集器
+    // 创建系统指标收集器
     const metrics = new SystemMetricsCollector();
-
-    // 设置较高的负载模拟系统压力
-    metrics.setActorCount(500);
-    for (let i = 0; i < 10000; i++) {
-        metrics.recordMessage();
-    }
 
     // 创建背压管理器
     const backpressure = new BackpressureManager({
         enabled: true,
         strategy: BackpressureStrategy.ADAPTIVE,
         thresholds: {
+            messageRate: 1000,
             queueSize: 100,
-            memoryUsage: 60,
-            cpuUsage: 50,
-            messageRate: 1000
+            memoryUsage: 90,
+            cpuUsage: 80,
+            processingTime: 100,
+            errorRate: 0.05
         },
-        samplingInterval: 1000,
-        recoveryPolicy: RecoveryPolicy.GRADUAL
+        recoveryPolicy: RecoveryPolicy.GRADUAL,
+        samplingInterval: 1000
     }, metrics);
 
-    // 检查并应用背压
-    const isActive = backpressure.checkAndApplyBackpressure();
-    console.log(`背压状态: ${isActive ? '已激活' : '未激活'}`);
+    console.log('初始背压管理器状态:');
+
+    // 模拟系统负载变化
+    console.log('模拟高负载情况:');
+    metrics.recordMessage();
+    metrics.recordMessage();
+    metrics.updateActorCount(1);
+
+    // 检查背压状态
+    const isBackpressureNeeded = backpressure.shouldApplyBackpressure();
+    console.log(`- 是否需要应用背压: ${isBackpressureNeeded}`);
 
     // 获取背压状态
     const state = backpressure.getBackpressureState();
@@ -165,7 +184,7 @@ function testConsistentHashing() {
                 { id: 'node-5', status: NodeStatus.ACTIVE }
             ];
         },
-        on: (event, callback) => {
+        on: (event: string, callback: (data: any) => void) => {
             // 简单的事件监听模拟
             console.log(`已注册事件监听: ${event}`);
         }
@@ -233,4 +252,23 @@ export {
     testBackpressure,
     testConsistentHashing,
     runAllTests
-}; 
+};
+
+/**
+ * 创建一个简单的模拟传输层
+ */
+function createMockTransport() {
+    return {
+        start: async () => { console.log('Mock transport started'); },
+        stop: async () => { console.log('Mock transport stopped'); },
+        on: (eventName: string, callback: (data: any) => void) => {
+            console.log(`Registered listener for event: ${eventName}`);
+        },
+        broadcast: async (msg: any) => {
+            console.log(`Broadcasting message: ${JSON.stringify(msg)}`);
+        },
+        sendToNode: async (nodeId: string, msg: any) => {
+            console.log(`Sending message to node ${nodeId}`);
+        }
+    };
+} 

@@ -1,5 +1,5 @@
 import { ClusterManager } from './cluster_manager';
-import { LibP2pClusterTransport, LibP2pClusterOptions } from './transport/libp2p_cluster_transport';
+import { LibP2pClusterTransport } from './transport/libp2p_cluster_transport';
 import {
     ClusterConfig,
     LoadBalancingConfig,
@@ -10,7 +10,8 @@ import {
     ClusterState,
     ClusterMetrics,
     ClusterEventType,
-    ClusterEvent
+    ClusterEvent,
+    LibP2pClusterOptions
 } from './types';
 import { log } from '@bactor/core';
 import { EventEmitter } from 'events';

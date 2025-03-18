@@ -31,6 +31,7 @@ export interface ClusterState {
     partitions: string[][];
     version: number;
     leader: string | null;
+    term: number;
 }
 
 export interface Message {
@@ -94,7 +95,8 @@ export enum ClusterEventType {
     PARTITION_DETECTED = 'PARTITION_DETECTED',
     PARTITION_HEALED = 'PARTITION_HEALED',
     STATE_CHANGED = 'STATE_CHANGED',
-    LOAD_CHANGED = 'LOAD_CHANGED'
+    LOAD_CHANGED = 'LOAD_CHANGED',
+    LEADER_ELECTED = 'LEADER_ELECTED'
 }
 
 export interface ClusterMetrics {
@@ -247,7 +249,8 @@ export enum NodeState {
 export enum RecoveryPolicy {
     IMMEDIATE = 'IMMEDIATE',
     GRADUAL = 'GRADUAL',
-    EXPONENTIAL = 'EXPONENTIAL'
+    EXPONENTIAL = 'EXPONENTIAL',
+    ADAPTIVE = 'ADAPTIVE'
 }
 
 export interface LibP2pClusterOptions {
@@ -258,4 +261,8 @@ export interface LibP2pClusterOptions {
     enableDHT?: boolean;
     enablePubSub?: boolean;
     enableGossip?: boolean;
+    localAddress?: string;
+    seedNodes?: string[];
+    dhtEnabled?: boolean;
+    dhtRandomWalk?: boolean;
 } 

@@ -146,4 +146,67 @@ export class FailureDetectionConsensus {
             }
         }
     }
+
+    /**
+     * 节点投票怀疑另一个节点
+     */
+    public voteSuspect(voterNodeId: string, suspectedNodeId: string): void {
+        // 初始化怀疑集合
+        if (!this.suspectedNodes.has(suspectedNodeId)) {
+            this.suspectedNodes.set(suspectedNodeId, new Set());
+        }
+
+        const reporters = this.suspectedNodes.get(suspectedNodeId)!;
+        reporters.add(voterNodeId);
+
+        log.debug(`Node ${voterNodeId} voted to suspect node ${suspectedNodeId}`, {
+            totalVotes: reporters.size
+        });
+
+        // 检查是否达到法定人数，如果达到则异步处理
+        if (this.hasQuorum(reporters.size)) {
+            this.markNodeAsDead(suspectedNodeId).catch(err => {
+                log.error(`Error marking node as dead after suspicion`, { suspectedNodeId, error: err });
+            });
+        }
+    }
+
+    /**
+     * 节点投票标记另一个节点为死亡
+     */
+    public voteDead(voterNodeId: string, deadNodeId: string): void {
+        // 直接使用投票怀疑的逻辑，因为我们的实现中怀疑和死亡是一个过程
+        this.voteSuspect(voterNodeId, deadNodeId);
+    }
+
+    /**
+     * 确定节点当前状态
+     */
+    public determineNodeStatus(nodeId: string, totalNodes: number): NodeStatus {
+        // 获取当前节点的投票情况
+        const reporters = this.suspectedNodes.get(nodeId);
+
+        if (!reporters || reporters.size === 0) {
+            return NodeStatus.ACTIVE; // 没有投票，认为节点活跃
+        }
+
+        // 计算法定人数
+        const quorum = Math.floor(totalNodes / 2) + 1;
+
+        if (reporters.size >= quorum) {
+            return NodeStatus.DEAD; // 达到法定人数，认为节点死亡
+        } else {
+            return NodeStatus.SUSPECTED; // 未达到法定人数，认为节点可疑
+        }
+    }
+
+    /**
+     * 清理节点的所有投票
+     */
+    public clearVotes(nodeId: string): void {
+        if (this.suspectedNodes.has(nodeId)) {
+            this.suspectedNodes.delete(nodeId);
+            log.info(`Cleared all votes for node ${nodeId}`);
+        }
+    }
 } 

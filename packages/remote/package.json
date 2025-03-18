@@ -22,7 +22,15 @@
         "@bactor/core": "workspace:*",
         "@grpc/grpc-js": "^1.9.13",
         "@grpc/proto-loader": "^0.7.10",
-        "pino": "^8.17.0"
+        "pino": "^8.17.0",
+        "@chainsafe/libp2p-gossipsub": "^8.0.0",
+        "@chainsafe/libp2p-noise": "^11.0.0",
+        "@libp2p/bootstrap": "^10.0.0",
+        "@libp2p/kad-dht": "^11.0.0",
+        "@libp2p/mplex": "^8.0.0",
+        "@libp2p/pubsub-peer-discovery": "^8.0.0",
+        "@libp2p/tcp": "^8.0.0",
+        "libp2p": "^0.46.0"
     },
     "devDependencies": {
         "@types/node": "^20.10.5",

@@ -13,9 +13,6 @@ import {
 } from '../types';
 import { log } from '@bactor/core';
 
-// 配置日志
-log.level = 'debug';
-
 /**
  * 启动一个集群节点
  * @param localAddress 本地地址
@@ -29,14 +26,12 @@ async function startClusterNode(
 ): Promise<LibP2pClusterSystem> {
     // 基本集群配置
     const clusterConfig: ClusterConfig = {
-        heartbeatInterval: 5000,                         // 心跳间隔
-        failureDetectionThreshold: 15000,                // 故障检测阈值
-        reconnectionStrategy: ReconnectionStrategy.EXPONENTIAL_BACKOFF, // 重连策略
-        membershipProtocol: MembershipProtocol.GOSSIP,   // 成员关系协议
-        gossipInterval: 2000,                            // Gossip间隔
-        suspicionTimeout: 10000,                         // 可疑状态超时
-        syncInterval: 30000,                             // 同步间隔
-        loadReportInterval: 10000                        // 负载报告间隔
+        nodeId: `node-${Date.now().toString(36)}`,         // 生成唯一节点ID
+        heartbeatInterval: 5000,                           // 心跳间隔
+        failureDetectionTimeout: 15000,                    // 故障检测超时
+        partitionDetectionTimeout: 30000,                  // 分区检测超时
+        bootstrapList: isFirstNode ? [] : seedNodes,       // 启动节点列表
+        listenAddresses: [localAddress]                    // 监听地址
     };
 
     // 负载均衡配置
@@ -54,7 +49,7 @@ async function startClusterNode(
     // 分区配置
     const partitionConfig = {
         strategy: PartitionStrategy.CONSISTENT_HASH,
-        replicationFactor: 3,
+        replicationFactor: 2,
         consistencyLevel: ConsistencyLevel.QUORUM
     };
 
@@ -66,9 +61,11 @@ async function startClusterNode(
             queueSize: 1000,
             memoryUsage: 80,
             cpuUsage: 70,
-            messageRate: 5000
+            messageRate: 5000,
+            processingTime: 100,  // 添加缺失字段
+            errorRate: 0.05       // 添加缺失字段
         },
-        samplingInterval: 5000,
+        samplingInterval: 1000,
         recoveryPolicy: RecoveryPolicy.GRADUAL
     };
 

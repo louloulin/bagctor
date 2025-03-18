@@ -1,213 +1,296 @@
-import { NodeInfo, NodeState, ConsensusMessage, ConsensusState } from '../types';
-import { log } from '@bactor/core';
 import { EventEmitter } from 'events';
+import { log } from '@bactor/core';
+import { NodeInfo, NodeStatus, NodeState, ConsensusMessage, ConsensusState } from '../types';
 
 export class FailureDetectionConsensus extends EventEmitter {
     private nodeId: string;
     private state: ConsensusState;
-    private quorumSize: number;
-    private roundTimeout: number;
-    private currentRound: number;
+    private roundInterval: number;
+    private currentRound: number = 0;
+    private heartbeatTimeouts: Map<string, number> = new Map();
 
-    constructor(nodeId: string) {
+    constructor(nodeId: string, roundInterval: number = 5000) {
         super();
         this.nodeId = nodeId;
+        this.roundInterval = roundInterval;
         this.state = {
             round: 0,
             votes: new Map<string, ConsensusMessage>(),
             confirmedFailures: new Set<string>(),
             partitions: []
         };
-        this.quorumSize = 3; // TODO: Make configurable
-        this.roundTimeout = 5000; // TODO: Make configurable
-        this.currentRound = 0;
+        log.info('FailureDetectionConsensus initialized', { nodeId });
     }
 
     /**
-     * 开始新一轮共识
+     * 开始新一轮的故障检测共识
      */
     public startConsensusRound(nodes: NodeInfo[]): void {
         this.currentRound++;
-        this.state.round = this.currentRound;
+
+        // 清理上一轮的投票
         this.state.votes.clear();
 
-        // Generate and broadcast our vote
-        const vote = this.generateVote(nodes);
-        this.emit('vote', vote);
-
-        // Set timeout for this round
-        setTimeout(() => {
-            this.checkQuorum();
-        }, this.roundTimeout);
-    }
-
-    /**
-     * 收集节点投票
-     */
-    private collectVotes(nodes: NodeInfo[]): void {
-        // 模拟节点投票过程
-        nodes.forEach(node => {
-            if (node.id !== this.nodeId) {
-                const vote = this.generateVote(nodes);
-                this.processVote(node.id, vote);
-            }
-        });
-
-        // 检查是否达到法定人数
-        this.checkQuorum();
-    }
-
-    /**
-     * 生成投票
-     */
-    private generateVote(nodes: NodeInfo[]): ConsensusMessage {
+        // 检查每个节点的心跳是否超时
         const now = Date.now();
-        const suspectedNodes = nodes
-            .filter(node => {
-                const timeSinceLastHeartbeat = now - node.lastHeartbeat;
-                return timeSinceLastHeartbeat > 5000; // TODO: Make configurable
-            })
-            .map(node => node.id);
+        const suspectedNodes: NodeInfo[] = [];
 
-        return {
-            type: 'VOTE',
-            voterId: this.nodeId,
-            vote: {
-                nodeId: this.nodeId,
-                state: suspectedNodes.length > 0 ? NodeState.SUSPECTED : NodeState.ALIVE,
-                timestamp: now
+        for (const node of nodes) {
+            if (node.id === this.nodeId) continue; // 跳过自己
+
+            // 检查心跳超时
+            if (node.status === NodeStatus.ACTIVE &&
+                now - node.lastHeartbeat > this.roundInterval) {
+                suspectedNodes.push(node);
             }
-        };
+        }
+
+        // 为每个疑似故障的节点发起投票
+        for (const node of suspectedNodes) {
+            this.castVote(node.id, NodeState.SUSPECTED);
+        }
+
+        log.debug('Started consensus round', {
+            round: this.currentRound,
+            suspectedNodesCount: suspectedNodes.length
+        });
     }
 
     /**
-     * 处理投票
+     * 处理收到的投票
      */
     public processVote(voterId: string, vote: any): void {
-        // Check if it's a valid consensus message
+        // 验证投票消息结构
         const consensusMsg = vote as ConsensusMessage;
+        if (!consensusMsg || consensusMsg.type !== 'VOTE' || !consensusMsg.vote) {
+            log.warn('Received invalid vote', { voterId, vote });
+            return;
+        }
 
-        // Store the vote directly - we'll only work with valid votes
+        // 存储投票
         this.state.votes.set(voterId, consensusMsg);
 
         // 检查是否达到法定人数
-        this.checkQuorum();
+        this.checkQuorum(consensusMsg.vote.nodeId);
+
+        log.debug('Processed vote', {
+            voterId,
+            nodeId: consensusMsg.vote.nodeId,
+            state: consensusMsg.vote.state
+        });
     }
 
     /**
-     * 检查是否达到法定人数
+     * 投票
      */
-    private checkQuorum(): void {
-        const votes = Array.from(this.state.votes.values());
-        const suspectedVotes = votes.filter(vote => vote.vote.state === NodeState.SUSPECTED);
+    private castVote(nodeId: string, state: NodeState): void {
+        const consensusMsg: ConsensusMessage = {
+            type: 'VOTE',
+            voterId: this.nodeId,
+            vote: {
+                nodeId,
+                state,
+                timestamp: Date.now()
+            }
+        };
 
-        if (suspectedVotes.length >= this.quorumSize) {
-            const suspectedNodes = new Set(
-                suspectedVotes.map(vote => vote.vote.nodeId)
-            );
+        // 存储自己的投票
+        this.state.votes.set(this.nodeId, consensusMsg);
 
-            suspectedNodes.forEach(nodeId => {
-                if (!this.state.confirmedFailures.has(nodeId)) {
-                    this.state.confirmedFailures.add(nodeId);
-                    this.emit('nodeFailure', nodeId, this.currentRound, Date.now());
-                }
-            });
+        // 发出投票事件，让传输层广播
+        this.emit('voteCast', {
+            nodeId: this.nodeId,
+            round: this.currentRound,
+            vote: consensusMsg
+        });
+
+        log.debug('Cast vote', { nodeId, state });
+    }
+
+    /**
+     * 检查是否达到法定人数来确认节点状态
+     */
+    private checkQuorum(nodeId: string): void {
+        // 收集针对该节点的所有投票
+        const votes: ConsensusMessage[] = [];
+
+        for (const [voterId, vote] of this.state.votes.entries()) {
+            if (vote.vote.nodeId === nodeId) {
+                votes.push(vote);
+            }
         }
+
+        // 计算各种状态的投票数
+        const suspectedVotes = votes.filter(v => v.vote.state === NodeState.SUSPECTED).length;
+        const deadVotes = votes.filter(v => v.vote.state === NodeState.DEAD).length;
+
+        // 假设法定人数为收到的投票数的多数
+        const totalVotes = votes.length;
+        const quorum = Math.ceil(totalVotes / 2);
+
+        // 如果多数节点认为该节点已死亡
+        if (deadVotes >= quorum) {
+            this.confirmNodeFailure(nodeId);
+        }
+        // 如果多数节点怀疑该节点出故障
+        else if (suspectedVotes >= quorum) {
+            this.suspectNode(nodeId);
+        }
+    }
+
+    /**
+     * 确认节点故障
+     */
+    private confirmNodeFailure(nodeId: string): void {
+        if (this.state.confirmedFailures.has(nodeId)) {
+            return; // 已经确认过故障了
+        }
+
+        this.state.confirmedFailures.add(nodeId);
+
+        this.emit('nodeFailure', {
+            nodeId,
+            round: this.currentRound,
+            timestamp: Date.now()
+        });
+
+        log.info('Node failure confirmed', { nodeId, round: this.currentRound });
+    }
+
+    /**
+     * 怀疑节点可能出故障
+     */
+    private suspectNode(nodeId: string): void {
+        this.emit('nodeSuspected', {
+            nodeId,
+            round: this.currentRound,
+            timestamp: Date.now()
+        });
+
+        log.warn('Node suspected', { nodeId, round: this.currentRound });
     }
 
     /**
      * 检测网络分区
      */
     public detectPartitions(nodes: NodeInfo[]): void {
-        const partitions = this.findPartitions(nodes);
+        const partitions = this.getPartitionGroups(nodes);
+
         if (partitions.length > 1) {
-            this.emit('partitionDetected', partitions, Date.now());
+            this.state.partitions = partitions;
+
+            this.emit('partitionDetected', {
+                groups: partitions,
+                timestamp: Date.now()
+            });
+
+            log.warn('Network partition detected', {
+                partitionCount: partitions.length,
+                groups: partitions.map(group => Array.from(group).join(','))
+            });
         }
     }
 
-    private findPartitions(nodes: NodeInfo[]): Set<string>[] {
-        const visited = new Set<string>();
-        const partitions: Set<string>[] = [];
+    /**
+     * 根据节点的通信状态分组，识别可能的网络分区
+     */
+    private getPartitionGroups(nodes: NodeInfo[]): Set<string>[] {
+        const activeNodes = nodes.filter(n => n.status === NodeStatus.ACTIVE);
+        const nodeIds = activeNodes.map(n => n.id);
 
-        for (const node of nodes) {
-            if (!visited.has(node.id)) {
-                const partition = new Set<string>();
-                this.dfs(node.id, nodes, visited, partition);
-                if (partition.size > 0) {
-                    partitions.push(partition);
+        // 创建初始分区，每个节点自成一组
+        const partitions: Map<string, Set<string>> = new Map();
+
+        for (const nodeId of nodeIds) {
+            partitions.set(nodeId, new Set([nodeId]));
+        }
+
+        // 合并可以通信的节点组
+        for (const [voterNodeId, vote] of this.state.votes.entries()) {
+            if (!nodeIds.includes(voterNodeId)) continue;
+
+            const targetNodeId = vote.vote.nodeId;
+            if (!nodeIds.includes(targetNodeId)) continue;
+
+            // 如果投票者认为目标节点是活跃的，则它们可以通信
+            if (vote.vote.state === NodeState.ALIVE) {
+                this.mergePartitions(partitions, voterNodeId, targetNodeId);
+            }
+        }
+
+        // 转换为数组形式返回
+        const result: Set<string>[] = [];
+        const added = new Set<string>();
+
+        for (const [nodeId, group] of partitions.entries()) {
+            if (!added.has(nodeId)) {
+                result.push(group);
+                for (const id of group) {
+                    added.add(id);
                 }
             }
         }
 
-        return partitions;
+        return result;
     }
 
     /**
-     * 深度优先搜索检测连通分量
+     * 合并两个节点所在的分区
      */
-    private dfs(
-        nodeId: string,
-        nodes: NodeInfo[],
-        visited: Set<string>,
-        partition: Set<string>
-    ): void {
-        visited.add(nodeId);
-        partition.add(nodeId);
+    private mergePartitions(partitions: Map<string, Set<string>>, nodeId1: string, nodeId2: string): void {
+        const partition1 = partitions.get(nodeId1);
+        const partition2 = partitions.get(nodeId2);
 
-        const node = nodes.find(n => n.id === nodeId);
-        if (!node) return;
+        if (!partition1 || !partition2) return;
 
-        // Check connections with other nodes
-        for (const otherNode of nodes) {
-            if (
-                otherNode.id !== nodeId &&
-                !visited.has(otherNode.id) &&
-                this.areNodesConnected(node, otherNode)
-            ) {
-                this.dfs(otherNode.id, nodes, visited, partition);
-            }
+        // 如果已经在同一分区，无需操作
+        if (partition1 === partition2) return;
+
+        // 合并两个分区
+        const mergedPartition = new Set([...partition1, ...partition2]);
+
+        // 更新所有相关节点的分区引用
+        for (const nodeId of mergedPartition) {
+            partitions.set(nodeId, mergedPartition);
         }
     }
 
     /**
-     * 检查两个节点是否连接
+     * 获取当前确认的故障节点列表
      */
-    private areNodesConnected(node1: NodeInfo, node2: NodeInfo): boolean {
-        // TODO: Implement actual connection check
-        // For now, assume all nodes are connected
-        return true;
+    public getConfirmedFailures(): string[] {
+        return Array.from(this.state.confirmedFailures);
     }
 
     /**
-     * 获取当前共识状态
+     * 清除确认的故障节点
+     */
+    public clearConfirmedFailure(nodeId: string): void {
+        this.state.confirmedFailures.delete(nodeId);
+        log.info('Cleared confirmed failure', { nodeId });
+    }
+
+    /**
+     * 获取当前的共识状态
      */
     public getConsensusState(): ConsensusState {
-        return { ...this.state };
+        return {
+            round: this.currentRound,
+            votes: new Map(this.state.votes),
+            confirmedFailures: new Set(this.state.confirmedFailures),
+            partitions: [...this.state.partitions]
+        };
     }
 
     /**
-     * 获取被怀疑的节点
+     * 重置共识状态
      */
-    public getSuspectedNodes(): Set<string> {
-        return new Set(this.state.confirmedFailures);
-    }
-
-    /**
-     * 获取已确认死亡的节点
-     */
-    public getConfirmedDeadNodes(): Set<string> {
-        return new Set(this.state.confirmedFailures);
-    }
-
-    /**
-     * 获取分区组
-     */
-    public getPartitionGroups(): Map<string, Set<string>> {
-        return new Map(this.state.partitions.map(partition => {
-            const firstValue = partition.values().next().value;
-            // Ensure we always return a string key
-            const key = firstValue !== undefined ? firstValue : '';
-            return [key, new Set(partition)];
-        }));
+    public resetConsensusState(): void {
+        this.state.round = 0;
+        this.state.votes.clear();
+        this.state.confirmedFailures.clear();
+        this.state.partitions = [];
+        this.currentRound = 0;
+        log.info('Consensus state reset');
     }
 } 

@@ -18,7 +18,14 @@ import {
     Message,
     BackpressureConfig,
     LibP2pClusterOptions,
-    BackpressureStrategy
+    BackpressureStrategy,
+    LoadBalancingConfig,
+    PartitionConfig,
+    BackpressureState,
+    ClusterMetrics,
+    ClusterEvent,
+    RecoveryPolicy,
+    BackpressureMetrics
 } from './types';
 
 export class ClusterManager extends EventEmitter {
@@ -66,37 +73,43 @@ export class ClusterManager extends EventEmitter {
                 queueSize: 1000,
                 memoryUsage: 80,
                 cpuUsage: 80,
-                messageRate: 1000
+                messageRate: 1000,
+                processingTime: 100,
+                errorRate: 0.1
             },
             recoveryPolicy: RecoveryPolicy.GRADUAL,
             samplingInterval: 1000
         };
-        this.nodeId = uuidv4();
+        this.nodeId = config.nodeId || uuidv4();
         this.state = this.initializeState();
         this.metrics = this.initializeMetrics();
         this.backpressureState = this.initializeBackpressureState();
         this.localNodeId = this.nodeId;
         this.actorPlacement = this.initializeActorPlacement();
 
-        // 初始化系统指标收集器
+        // Initialize system metrics collector
         this.metricsCollector = new SystemMetricsCollector();
 
-        // 初始化背压管理器
+        // Initialize backpressure manager
         this.backpressureManager = new BackpressureManager(this.backpressureConfig, this.metricsCollector);
 
-        // 初始化故障检测
+        // Initialize failure detection
         this.failureDetection = new FailureDetectionConsensus(this.nodeId);
         this.setupFailureDetectionEvents();
 
-        // 初始化传输层
+        // Initialize transport layer
         this.transport = new LibP2pClusterTransport({
             clusterManager: this,
             nodeId: this.nodeId,
-            ...config
+            bootstrapList: config.bootstrapList,
+            listenAddresses: config.listenAddresses,
+            enableDHT: config.enableDHT,
+            enablePubSub: config.enablePubSub,
+            enableGossip: config.enableGossip
         });
         this.setupTransportEvents();
 
-        // 启动定期任务
+        // Start periodic tasks
         this.startPeriodicTasks();
     }
 
@@ -232,13 +245,30 @@ export class ClusterManager extends EventEmitter {
     }
 
     public start(): void {
-        this.startPeriodicTasks();
-        this.transport.start();
+        if (this.heartbeatInterval) {
+            log.warn('Cluster already started');
+            return;
+        }
+
+        log.info('Starting cluster node', { nodeId: this.nodeId });
+
+        // Start transport layer
+        if (this.transport) {
+            this.transport.start();
+        }
+
+        // ... rest of method ...
     }
 
-    public stop(): void {
-        this.stopPeriodicTasks();
-        this.transport.stop();
+    async stop(): Promise<void> {
+        log.info('Stopping cluster node', { nodeId: this.nodeId });
+
+        // Stop transport layer
+        if (this.transport) {
+            this.transport.stop();
+        }
+
+        // ... rest of method ...
     }
 
     private startPeriodicTasks(): void {
@@ -274,13 +304,21 @@ export class ClusterManager extends EventEmitter {
     }
 
     private sendHeartbeat(): void {
-        const heartbeat = {
+        const heartbeat: Message = {
             type: 'HEARTBEAT',
             nodeId: this.nodeId,
             timestamp: Date.now(),
-            payload: this.metricsCollector.collectMetrics()
+            payload: {
+                term: this.state.term,
+                load: this.getNodeLoad(this.nodeId),
+                actorCount: this.state.actors.size
+            }
         };
-        this.transport.broadcast(heartbeat);
+
+        // Broadcast heartbeat to all nodes
+        if (this.transport) {
+            this.transport.broadcast(heartbeat);
+        }
     }
 
     private detectFailures(): void {
@@ -717,6 +755,11 @@ export class ClusterManager extends EventEmitter {
      * 设置传输层事件处理
      */
     private setupTransportEvents(): void {
+        if (!this.transport) {
+            log.warn('Transport layer not available, skipping event setup');
+            return;
+        }
+
         this.transport.on('message', (message) => {
             this.handleMessage(message);
         });
@@ -776,6 +819,151 @@ export class ClusterManager extends EventEmitter {
                 nodeId,
                 timestamp
             });
+        }
+    }
+
+    private checkPartitions(): void {
+        const nodes = Array.from(this.state.nodes.values());
+        this.failureDetection.detectPartitions(nodes);
+    }
+
+    private rebalanceIfNeeded(): void {
+        if (!this.loadBalancingConfig) return;
+
+        const nodes = this.getActiveNodes();
+        const avgLoad = this.calculateAverageLoad(nodes);
+        const threshold = this.loadBalancingConfig.thresholds;
+
+        // Check if rebalancing is needed based on load thresholds
+        const needsRebalancing = nodes.some(node => {
+            const load = node.load;
+            if (!load) return false;
+
+            return (
+                load.cpu > threshold.cpu ||
+                load.memory > threshold.memory ||
+                load.messageRate > threshold.messageRate ||
+                load.actorCount > threshold.actorCount
+            );
+        });
+
+        if (needsRebalancing) {
+            this.rebalanceActors();
+        }
+    }
+
+    private calculateAverageLoad(nodes: NodeInfo[]): NodeLoad {
+        const activeNodes = nodes.filter(n => n.status === NodeStatus.ACTIVE && n.load);
+        if (activeNodes.length === 0) {
+            return {
+                cpu: 0,
+                memory: 0,
+                messageRate: 0,
+                actorCount: 0
+            };
+        }
+
+        const totalLoad = activeNodes.reduce(
+            (acc, node) => {
+                if (!node.load) return acc;
+                return {
+                    cpu: acc.cpu + node.load.cpu,
+                    memory: acc.memory + node.load.memory,
+                    messageRate: acc.messageRate + node.load.messageRate,
+                    actorCount: acc.actorCount + node.load.actorCount
+                };
+            },
+            { cpu: 0, memory: 0, messageRate: 0, actorCount: 0 }
+        );
+
+        return {
+            cpu: totalLoad.cpu / activeNodes.length,
+            memory: totalLoad.memory / activeNodes.length,
+            messageRate: totalLoad.messageRate / activeNodes.length,
+            actorCount: totalLoad.actorCount / activeNodes.length
+        };
+    }
+
+    private rebalanceActors(): void {
+        // Implement actor rebalancing logic
+        log.info('Rebalancing actors across cluster nodes');
+        // TODO: Implement actual rebalancing logic
+    }
+
+    // Fix RecoveryPolicy usage if it doesn't have ADAPTIVE
+    private getBackpressureConfig(): BackpressureConfig {
+        if (this.backpressureConfig) {
+            return this.backpressureConfig;
+        }
+
+        return {
+            enabled: true,
+            strategy: BackpressureStrategy.ADAPTIVE,
+            thresholds: {
+                messageRate: 1000,
+                queueSize: 1000,
+                processingTime: 100,
+                errorRate: 0.1,
+                cpuUsage: 80,
+                memoryUsage: 80
+            },
+            recoveryPolicy: RecoveryPolicy.GRADUAL,
+            samplingInterval: 1000
+        };
+    }
+
+    /**
+     * 处理节点状态变更
+     * @param nodeId 节点ID
+     * @param status 新的节点状态
+     */
+    public async handleNodeStatus(nodeId: string, status: NodeStatus): Promise<void> {
+        const node = this.getNode(nodeId);
+        if (!node) {
+            log.warn(`无法处理未知节点的状态变更`, { nodeId, status });
+            return;
+        }
+
+        log.info(`处理节点状态变更`, { nodeId, oldStatus: node.status, newStatus: status });
+
+        // 更新节点状态
+        node.status = status;
+
+        // 根据状态发出不同的事件
+        switch (status) {
+            case NodeStatus.ACTIVE:
+                this.emitClusterEvent({
+                    type: ClusterEventType.NODE_RECOVERED,
+                    nodeId,
+                    timestamp: Date.now()
+                });
+                break;
+            case NodeStatus.SUSPECTED:
+                this.emitClusterEvent({
+                    type: ClusterEventType.NODE_SUSPECTED,
+                    nodeId,
+                    timestamp: Date.now()
+                });
+                break;
+            case NodeStatus.DEAD:
+                this.handleNodeFailure(nodeId, 0, Date.now());
+                break;
+            case NodeStatus.LEAVING:
+                this.handleNodeLeave(nodeId);
+                break;
+        }
+
+        // 更新集群状态版本
+        this.state.version++;
+
+        // 可能需要重新平衡Actor分配
+        if ([NodeStatus.ACTIVE, NodeStatus.DEAD].includes(status)) {
+            this.rebalanceIfNeeded();
+        }
+
+        // 同步状态到其它节点
+        if (this.transport) {
+            await this.transport.broadcastStateUpdate(this.state);
         }
     }
 } 

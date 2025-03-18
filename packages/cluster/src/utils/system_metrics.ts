@@ -1,6 +1,6 @@
 import { NodeLoad } from '../types';
 import { log } from '@bactor/core';
-import * as os from 'os';
+import os from 'os';
 
 export interface SystemMetrics {
     cpu: number;
@@ -16,168 +16,209 @@ export interface SystemMetrics {
  */
 export class SystemMetricsCollector {
     private lastCpuUsage: { user: number; system: number; idle: number } | null = null;
-    private lastCpuTime: number = Date.now();
-    private messageCounter: number = 0;
-    private messageRateInterval: number = 5000; // 5秒计算一次消息率
+    private lastCpuTime: number = 0;
+    private messageCount: number = 0;
     private lastMessageCount: number = 0;
     private lastMessageCountTime: number = Date.now();
-    private currentMessageRate: number = 0;
     private actorCount: number = 0;
+    private collectionInterval: number = 1000; // 1 second
 
-    constructor() {
-        log.info('SystemMetricsCollector initialized');
+    constructor(collectionInterval: number = 1000) {
+        this.collectionInterval = collectionInterval;
+        this.lastCpuTime = Date.now();
+        this.initCpuUsage();
+
+        log.info('SystemMetricsCollector initialized', { collectionInterval });
     }
 
     /**
-     * 收集系统指标
-     * @returns 系统指标
+     * 初始化CPU使用情况基线
      */
-    public collectMetrics(): SystemMetrics {
-        return {
-            cpu: this.getCpuUsage(),
-            memory: this.getMemoryUsage(),
-            messageRate: this.getMessageRate(),
-            actorCount: this.getActorCount(),
-            timestamp: Date.now()
+    private initCpuUsage(): void {
+        const cpus = os.cpus();
+        const usage = cpus.reduce(
+            (acc, cpu) => {
+                acc.user += cpu.times.user;
+                acc.system += cpu.times.sys;
+                acc.idle += cpu.times.idle;
+                return acc;
+            },
+            { user: 0, system: 0, idle: 0 }
+        );
+
+        this.lastCpuUsage = usage;
+        this.lastCpuTime = Date.now();
+    }
+
+    /**
+     * 收集当前的系统指标
+     */
+    public collectMetrics(): NodeLoad {
+        const memoryMetrics = this.collectMemoryMetrics();
+        const cpuMetrics = this.collectCpuMetrics();
+        const messageRate = this.calculateMessageRate();
+
+        const metrics: NodeLoad = {
+            cpu: cpuMetrics,
+            memory: memoryMetrics,
+            messageRate,
+            actorCount: this.actorCount
         };
+
+        log.debug('Collected system metrics', { metrics });
+
+        return metrics;
     }
 
     /**
-     * 获取系统CPU使用率
-     * @returns CPU使用率百分比
+     * 收集内存使用指标
      */
-    private getCpuUsage(): number {
-        try {
-            const cpus = os.cpus();
-            const now = Date.now();
+    private collectMemoryMetrics(): number {
+        const totalMem = os.totalmem();
+        const freeMem = os.freemem();
+        const usedMem = totalMem - freeMem;
+        const memoryUsagePercent = (usedMem / totalMem) * 100;
 
-            // 计算CPU使用时间
-            let user = 0;
-            let system = 0;
-            let idle = 0;
+        return Math.round(memoryUsagePercent * 100) / 100; // Round to 2 decimal places
+    }
 
-            for (const cpu of cpus) {
-                user += cpu.times.user;
-                system += cpu.times.sys;
-                idle += cpu.times.idle;
-            }
+    /**
+     * 收集CPU使用指标
+     */
+    private collectCpuMetrics(): number {
+        const cpus = os.cpus();
+        const currentTime = Date.now();
+        const elapsedTime = currentTime - this.lastCpuTime;
 
-            // 如果是第一次运行，只记录值，不计算使用率
-            if (this.lastCpuUsage === null) {
-                this.lastCpuUsage = { user, system, idle };
-                this.lastCpuTime = now;
-                return 0;
-            }
+        // 如果时间间隔太短，返回上次的测量结果
+        if (elapsedTime < 100) {
+            return this.lastCpuUsage ? this.calculateCpuPercent(this.lastCpuUsage) : 0;
+        }
 
-            // 计算时间差
-            const userDiff = user - this.lastCpuUsage.user;
-            const systemDiff = system - this.lastCpuUsage.system;
-            const idleDiff = idle - this.lastCpuUsage.idle;
-            const totalDiff = userDiff + systemDiff + idleDiff;
+        const usage = cpus.reduce(
+            (acc, cpu) => {
+                acc.user += cpu.times.user;
+                acc.system += cpu.times.sys;
+                acc.idle += cpu.times.idle;
+                return acc;
+            },
+            { user: 0, system: 0, idle: 0 }
+        );
 
-            // 计算使用率
-            const cpuUsage = totalDiff === 0 ? 0 : 100 * (1 - idleDiff / totalDiff);
-
-            // 更新上次值
-            this.lastCpuUsage = { user, system, idle };
-            this.lastCpuTime = now;
-
-            return Math.min(100, Math.max(0, cpuUsage));
-        } catch (error) {
-            log.error('Error getting CPU usage', { error });
+        // 如果是第一次收集，无法计算变化
+        if (!this.lastCpuUsage) {
+            this.lastCpuUsage = usage;
+            this.lastCpuTime = currentTime;
             return 0;
         }
+
+        const cpuPercent = this.calculateCpuPercent(usage);
+
+        // 更新基线以供下次使用
+        this.lastCpuUsage = usage;
+        this.lastCpuTime = currentTime;
+
+        return cpuPercent;
     }
 
     /**
-     * 获取内存使用率
-     * @returns 内存使用率百分比
+     * 计算CPU使用百分比
      */
-    private getMemoryUsage(): number {
-        try {
-            const totalMem = os.totalmem();
-            const freeMem = os.freemem();
-            const memoryUsage = 100 * (1 - freeMem / totalMem);
+    private calculateCpuPercent(usage: { user: number; system: number; idle: number }): number {
+        if (!this.lastCpuUsage) return 0;
 
-            return Math.min(100, Math.max(0, memoryUsage));
-        } catch (error) {
-            log.error('Error getting memory usage', { error });
-            return 0;
-        }
+        const userDiff = usage.user - this.lastCpuUsage.user;
+        const systemDiff = usage.system - this.lastCpuUsage.system;
+        const idleDiff = usage.idle - this.lastCpuUsage.idle;
+        const totalDiff = userDiff + systemDiff + idleDiff;
+
+        if (totalDiff === 0) return 0;
+
+        const cpuPercent = ((userDiff + systemDiff) / totalDiff) * 100;
+        return Math.round(cpuPercent * 100) / 100; // Round to 2 decimal places
     }
 
     /**
-     * 获取消息处理速率
-     * @returns 每秒消息数
+     * 计算消息处理速率
      */
-    private getMessageRate(): number {
-        const now = Date.now();
+    private calculateMessageRate(): number {
+        const currentTime = Date.now();
+        const elapsedTime = (currentTime - this.lastMessageCountTime) / 1000; // Convert to seconds
 
-        // 定期更新消息率
-        if (now - this.lastMessageCountTime >= this.messageRateInterval) {
-            const timeDiffInSeconds = (now - this.lastMessageCountTime) / 1000;
-            this.currentMessageRate = (this.messageCounter - this.lastMessageCount) / timeDiffInSeconds;
+        if (elapsedTime < 0.1) return 0; // Avoid division by very small numbers
 
-            // 更新上次值
-            this.lastMessageCount = this.messageCounter;
-            this.lastMessageCountTime = now;
-        }
+        const messageCountDiff = this.messageCount - this.lastMessageCount;
+        const rate = messageCountDiff / elapsedTime;
 
-        return this.currentMessageRate;
+        // 更新基线以供下次使用
+        this.lastMessageCount = this.messageCount;
+        this.lastMessageCountTime = currentTime;
+
+        return Math.round(rate);
     }
 
     /**
-     * 获取Actor数量
-     * @returns Actor数量
+     * 记录一条新消息
      */
-    private getActorCount(): number {
-        return this.actorCount;
-    }
-
-    /**
-     * 通知消息接收
-     * 用于计算消息率
-     * @param count 消息数量
-     */
-    public notifyMessageReceived(count: number = 1): void {
-        this.messageCounter += count;
+    public recordMessage(): void {
+        this.messageCount++;
     }
 
     /**
      * 更新Actor数量
-     * @param count Actor数量
      */
     public updateActorCount(count: number): void {
         this.actorCount = count;
     }
 
     /**
-     * 将系统指标转换为NodeLoad格式
-     * @returns NodeLoad格式的系统指标
+     * 设置Actor数量（别名方法，兼容现有代码）
      */
-    public getNodeLoad(): NodeLoad {
-        const metrics = this.collectMetrics();
-
-        return {
-            cpu: metrics.cpu,
-            memory: metrics.memory,
-            messageRate: metrics.messageRate,
-            actorCount: metrics.actorCount
-        };
+    public setActorCount(count: number): void {
+        this.updateActorCount(count);
     }
 
     /**
-     * 重置指标收集器
+     * 获取当前节点负载
      */
-    public reset(): void {
-        this.lastCpuUsage = null;
-        this.lastCpuTime = Date.now();
-        this.messageCounter = 0;
+    public getNodeLoad(): NodeLoad {
+        return this.collectMetrics();
+    }
+
+    /**
+     * 估计当前消息队列大小
+     */
+    public estimateQueueSize(): number {
+        // 这里我们使用一个简单的估计方法，
+        // 实际应用中应该获取真实的队列大小
+        return this.messageCount - this.lastMessageCount;
+    }
+
+    /**
+     * 重置指标计数器
+     */
+    public resetCounters(): void {
+        this.messageCount = 0;
         this.lastMessageCount = 0;
         this.lastMessageCountTime = Date.now();
-        this.currentMessageRate = 0;
-        this.actorCount = 0;
+        this.initCpuUsage();
 
-        log.info('SystemMetricsCollector reset');
+        log.debug('System metrics counters reset');
+    }
+
+    /**
+     * 开始定期收集系统指标
+     * @param callback 每次收集完成后的回调函数
+     * @returns 计时器标识
+     */
+    public startCollection(callback: (metrics: NodeLoad) => void): NodeJS.Timer {
+        log.info('Starting system metrics collection', { interval: this.collectionInterval });
+
+        const interval = setInterval(() => {
+            const metrics = this.collectMetrics();
+            callback(metrics);
+        }, this.collectionInterval);
+
+        return interval;
     }
 } 

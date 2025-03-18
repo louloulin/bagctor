@@ -48,18 +48,14 @@ export abstract class TypedActor<TState = any, TM extends MessageMap = any> impl
     protected currentBehavior: string = 'default';
 
     constructor(context: ActorContext<TM> | BaseActorContext, initialState: TState) {
-        // 如果传入的是BaseActorContext，转换为TypedActorContext
-        this.context = context instanceof BaseActorContext ?
-            createTypedContext<TM>(context) :
-            context;
-
-        // 初始化状态
+        // 如果传入的是基础 ActorContext，则包装为 TypedActorContext
+        this.context = context instanceof TypedActorContext
+            ? context
+            : new TypedActorContext(context as BaseActorContext);
         this.state = {
             behavior: 'default',
-            data: initialState ?? ({} as TState)
+            data: initialState
         };
-
-        // 初始化
         this.initialize();
     }
 
@@ -254,8 +250,8 @@ export function typedActorOf<TState, TM extends MessageMap>(
 
         protected behaviors(): void {
             // 委托给原始Actor类的behaviors方法
-            const typedContext = this.context as TypedActorContext<TM>;
-            const baseActor = new BaseActorClass(typedContext.getBaseContext());
+            const baseContext = (this.context as TypedActorContext<TM>).getBaseContext();
+            const baseActor = new BaseActorClass(baseContext);
 
             // 设置一个默认行为委托到基础Actor
             this.addBehavior('default', async (message: Message<any, TM>) => {

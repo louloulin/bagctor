@@ -22,55 +22,33 @@ interface UserMessages extends MessageMap {
     'delete': {
         id: string;
     };
-    'batch': {
-        operations: Array<{ type: string, data: any }>;
-    };
 }
 
-// 简化版上下文接口，用于测试
 class MockContext {
-    public pid: PID;
-    public sentMessages: { target: PID; message: Message }[] = [];
-    public requestCalls: { target: PID; message: Message; timeout?: number }[] = [];
-    public requestResults: Record<string, any> = {};
+    sentMessages: Array<{ target: PID; message: Message }> = [];
+    requestCalls: Array<{ target: PID; message: Message; timeout?: number }> = [];
+    requestResults: { [key: string]: any } = {};
 
-    constructor(pid: PID) {
-        this.pid = pid;
-    }
+    constructor(private pid: PID) { }
 
-    get self(): PID {
-        return this.pid;
-    }
-
-    async send(
-        target: PID,
-        message: Message
-    ): Promise<void> {
+    send(target: PID, message: Message) {
         this.sentMessages.push({ target, message });
     }
 
-    async request<Res>(
-        target: PID,
-        message: Message,
-        timeoutMs?: number
-    ): Promise<Res> {
-        // 记录request方法调用
-        this.requestCalls.push({ target, message, timeout: timeoutMs });
-
-        const messageType = message.type || 'unknown';
-        const result = this.requestResults[`${messageType}-${JSON.stringify(message.payload)}`];
-
+    request<T>(target: PID, message: Message, timeout?: number): Promise<T> {
+        this.requestCalls.push({ target, message, timeout });
+        const key = `${message.type}-${JSON.stringify(message.payload)}`;
+        const result = this.requestResults[key];
         if (result instanceof Error) {
-            throw result;
+            return Promise.reject(result);
         }
-
-        return result;
+        return Promise.resolve(result);
     }
 }
 
 test("EnhancedActorProxy should support batch operations", async () => {
-    // 创建一个mock系统
     const mockPid = { id: "test-actor" };
+    const mockContext = new MockContext(mockPid);
     const mockSystem = {
         send: async (target: PID, message: Message) => {
             mockContext.send(target, message);
@@ -79,7 +57,6 @@ test("EnhancedActorProxy should support batch operations", async () => {
             return mockContext.request<T>(target, message, timeout);
         }
     };
-    const mockContext = new MockContext(mockPid);
 
     // 设置mock请求结果
     const user1 = { id: "user1", name: "John", email: "john@example.com" };
@@ -95,7 +72,7 @@ test("EnhancedActorProxy should support batch operations", async () => {
     );
 
     // 测试批量发送
-    await userProxy.sendBatch([
+    const sendResults = await userProxy.sendBatch([
         {
             type: 'create',
             payload: { name: "John", email: "john@example.com" }
@@ -106,6 +83,9 @@ test("EnhancedActorProxy should support batch operations", async () => {
         }
     ]);
 
+    expect(sendResults.length).toBe(2);
+    expect(sendResults[0].status).toBe("fulfilled");
+    expect(sendResults[1].status).toBe("fulfilled");
     expect(mockContext.sentMessages.length).toBe(2);
     expect(mockContext.sentMessages[0].message.type).toBe("create");
     expect(mockContext.sentMessages[0].message.payload).toEqual({ name: "John", email: "john@example.com" });
@@ -113,7 +93,7 @@ test("EnhancedActorProxy should support batch operations", async () => {
     expect(mockContext.sentMessages[1].message.payload).toEqual({ name: "Alice", email: "alice@example.com" });
 
     // 测试批量请求
-    const results = await userProxy.requestBatch([
+    const requestResults = await userProxy.requestBatch([
         {
             type: 'get',
             payload: { id: "user1" }
@@ -124,15 +104,15 @@ test("EnhancedActorProxy should support batch operations", async () => {
         }
     ]);
 
-    expect(results.length).toBe(2);
-    expect(results[0]).toEqual(user1);
-    expect(results[1]).toEqual(user2);
+    expect(requestResults.length).toBe(2);
+    expect(requestResults[0]).toEqual(user1);
+    expect(requestResults[1]).toEqual(user2);
     expect(mockContext.requestCalls.length).toBe(2);
 });
 
 test("EnhancedActorProxy should support allSettled in batch operations", async () => {
-    // 创建一个mock系统
     const mockPid = { id: "test-actor" };
+    const mockContext = new MockContext(mockPid);
     const mockSystem = {
         send: async (target: PID, message: Message) => {
             mockContext.send(target, message);
@@ -141,7 +121,6 @@ test("EnhancedActorProxy should support allSettled in batch operations", async (
             return mockContext.request<T>(target, message, timeout);
         }
     };
-    const mockContext = new MockContext(mockPid);
 
     // 设置mock请求结果，包括一个错误
     const user1 = { id: "user1", name: "John", email: "john@example.com" };
@@ -155,7 +134,7 @@ test("EnhancedActorProxy should support allSettled in batch operations", async (
         { timeout: 1000 }
     );
 
-    // 测试allSettled选项，允许部分失败
+    // 测试allSettled选项
     const results = await userProxy.requestBatch([
         {
             type: 'get',
@@ -168,14 +147,15 @@ test("EnhancedActorProxy should support allSettled in batch operations", async (
     ], { allSettled: true });
 
     expect(results.length).toBe(2);
-    expect(results[0]).toEqual(user1);
-    expect(results[1]).toBeUndefined();
-    expect(mockContext.requestCalls.length).toBe(2);
+    expect(results[0].status).toBe("fulfilled");
+    expect(results[0].value).toEqual(user1);
+    expect(results[1].status).toBe("rejected");
+    expect(results[1].reason.message).toBe("User not found");
 });
 
 test("EnhancedActorProxy should support interceptors", async () => {
-    // 创建一个mock系统
     const mockPid = { id: "test-actor" };
+    const mockContext = new MockContext(mockPid);
     const mockSystem = {
         send: async (target: PID, message: Message) => {
             mockContext.send(target, message);
@@ -184,15 +164,14 @@ test("EnhancedActorProxy should support interceptors", async () => {
             return mockContext.request<T>(target, message, timeout);
         }
     };
-    const mockContext = new MockContext(mockPid);
 
     // 设置mock请求结果
     const user1 = { id: "user1", name: "John", email: "john@example.com" };
     mockContext.requestResults[`get-${JSON.stringify({ id: "user1" })}`] = user1;
 
-    // 创建一个拦截器，只允许get操作
-    const interceptor = mock((messageType: string, payload: any, isRequest: boolean) => {
-        return messageType === 'get';
+    // 创建一个拦截器
+    const interceptor = mock((type: string, payload: any, isRequest: boolean) => {
+        return type === 'get';
     });
 
     // 创建增强的Actor代理
@@ -219,8 +198,8 @@ test("EnhancedActorProxy should support interceptors", async () => {
 });
 
 test("EnhancedActorProxy should support dynamic configuration", async () => {
-    // 创建一个mock系统
     const mockPid = { id: "test-actor" };
+    const mockContext = new MockContext(mockPid);
     const mockSystem = {
         send: async (target: PID, message: Message) => {
             mockContext.send(target, message);
@@ -229,7 +208,6 @@ test("EnhancedActorProxy should support dynamic configuration", async () => {
             return mockContext.request<T>(target, message, timeout);
         }
     };
-    const mockContext = new MockContext(mockPid);
 
     // 设置mock请求结果
     const user1 = { id: "user1", name: "John", email: "john@example.com" };

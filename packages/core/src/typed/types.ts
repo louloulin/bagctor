@@ -10,7 +10,7 @@ import { createMessage } from '../core/helpers';
  * 这是类型系统的核心接口，用于定义Actor能够处理的所有消息类型及其负载类型
  */
 export interface MessageMap {
-    [messageType: string]: any;
+    [key: string]: any;
 }
 
 /**
@@ -125,11 +125,13 @@ export interface Actor<TM extends MessageMap = any> {
 
 // 类型转换工具
 export function toBaseMessage(message: CoreMessage): BaseMessage {
-    const { type, payload, ...rest } = message;
+    const { type, payload, sender, metadata, messageId } = message;
     return {
         type: type.toString(), // 确保type是字符串
         payload,
-        ...rest
+        sender,
+        metadata,
+        messageId
     } as BaseMessage;
 }
 
@@ -139,11 +141,27 @@ export function toTypedMessage<K extends keyof TM, TM extends MessageMap = any>(
     payload: TM[K],
     options?: Partial<Omit<TypedMessage<K, TM>, 'type' | 'payload'>>
 ): TypedMessage<K, TM> {
-    return {
+    const message: TypedMessage<K, TM> = {
         type,
         payload,
         ...options
     };
+
+    // 确保消息ID存在
+    if (!message.messageId) {
+        message.messageId = crypto.randomUUID();
+    }
+
+    // 确保元数据存在
+    if (!message.metadata) {
+        message.metadata = {
+            timestamp: Date.now()
+        };
+    } else if (!message.metadata.timestamp) {
+        message.metadata.timestamp = Date.now();
+    }
+
+    return message;
 }
 
 // 类型转换工具
@@ -288,49 +306,64 @@ export function createMessageSchema<TM extends MessageMap>() {
 
 // Actor代理选项
 export interface ActorProxyOptions {
-    timeout?: number; // 请求超时时间
-    retries?: number; // 重试次数
-    retryDelay?: number; // 重试延迟
-    onError?: (error: Error) => void; // 错误处理回调
-    onTimeout?: () => void; // 超时处理回调
-    interceptors?: {
-        beforeSend?: (message: any) => boolean | Promise<boolean>; // 发送前拦截器
-        afterSend?: (result: any) => any | Promise<any>; // 发送后拦截器
-    };
+    timeout?: number;
+    errorHandler?: (error: Error, messageType: string, payload: any) => void;
 }
 
-// Actor代理接口
+// 基础Actor代理接口
 export interface ActorProxy<M extends MessageMap = any> {
-    // 发送消息方法，会为每个消息类型生成
-    [key: string]: any;
+    [key: string]: (payload: any, timeout?: number) => Promise<any>;
 }
+
+// 消息拦截器类型
+export type MessageInterceptor = (type: string, payload: any, isRequest: boolean) => boolean | Promise<boolean>;
+
+// 错误处理器类型
+export type ErrorHandler = (error: Error, messageType: string, payload: any) => void;
+
+// 批量操作结果类型
+export type SettledResult<T = any> = {
+    status: 'fulfilled' | 'rejected';
+    value?: T;
+    reason?: Error;
+};
 
 // Enhanced Actor代理接口
-export interface EnhancedActorProxy<M extends MessageMap = any> extends ActorProxy<M> {
-    // 批量处理
-    batch(
-        operations: Array<{
-            type: keyof M;
-            payload: any;
-        }>
-    ): Promise<void>;
+export interface EnhancedActorProxy<M extends MessageMap = any> {
+    [key: string]: ((payload: any, timeout?: number) => Promise<any>) | any;
+
+    // 批量发送
+    sendBatch(operations: Array<{ type: keyof M; payload: any }>): Promise<Array<SettledResult>>;
+
+    // 批量请求
+    requestBatch(operations: Array<{ type: keyof M; payload: any }>, options?: { allSettled?: boolean }): Promise<Array<SettledResult>>;
 
     // 设置选项
-    withOptions(options: ActorProxyOptions): EnhancedActorProxy<M>;
+    withOptions(options: EnhancedActorProxyOptions): EnhancedActorProxy<M>;
 
     // 添加拦截器
     withInterceptor(
         interceptor: {
-            beforeSend?: (message: any) => boolean | Promise<boolean>;
-            afterSend?: (result: any) => any | Promise<any>;
+            beforeSend?: MessageInterceptor;
         }
     ): EnhancedActorProxy<M>;
 
     // 获取原始PID
     getPID(): CorePID;
+
+    // 设置超时
+    setTimeout(timeout: number): EnhancedActorProxy<M>;
+
+    // 设置错误处理器
+    setErrorHandler(handler: ErrorHandler): EnhancedActorProxy<M>;
 }
 
-// 创建Actor代理
+// 增强型Actor代理选项
+export interface EnhancedActorProxyOptions extends ActorProxyOptions {
+    interceptor?: MessageInterceptor;
+}
+
+// 创建基础Actor代理
 export function createActorProxy<M extends MessageMap = any>(
     system: ActorSystem,
     target: CorePID,
@@ -338,51 +371,32 @@ export function createActorProxy<M extends MessageMap = any>(
 ): ActorProxy<M> {
     // 创建基本代理对象
     const proxy = new Proxy(
-        Object.create(null) as unknown as ActorProxy<M>, // 使用Object.create(null)创建一个干净的对象并进行类型断言
+        Object.create(null) as unknown as ActorProxy<M>,
         {
-            get(_, prop) { // 不使用target参数，避免类型问题
+            get(_, prop) {
                 // 处理特殊属性
                 if (prop === 'then' || prop === 'catch' || prop === 'finally') {
                     return undefined;
                 }
 
                 // 创建发送方法
-                return async (payload: any) => {
+                return async (payload: any, timeout?: number) => {
                     const normalizedType = prop.toString();
-
-                    // 应用拦截器
-                    if (options.interceptors?.beforeSend) {
-                        const shouldContinue = await options.interceptors.beforeSend({
-                            type: normalizedType,
-                            payload
-                        });
-
-                        if (!shouldContinue) {
-                            throw new Error(`Request canceled by interceptor: ${String(normalizedType)}`);
-                        }
-                    }
 
                     // 发送请求
                     try {
-                        const result = await system.request(
+                        return await system.request(
                             target,
                             {
                                 type: normalizedType,
                                 payload
                             },
-                            options.timeout
+                            timeout
                         );
-
-                        // 应用响应拦截器
-                        if (options.interceptors?.afterSend) {
-                            return await options.interceptors.afterSend(result);
-                        }
-
-                        return result;
                     } catch (error) {
                         // 处理错误
-                        if (options.onError) {
-                            options.onError(error instanceof Error ? error : new Error(String(error)));
+                        if (options.errorHandler) {
+                            options.errorHandler(error instanceof Error ? error : new Error(String(error)), normalizedType, payload);
                         }
                         throw error;
                     }
@@ -396,19 +410,157 @@ export function createActorProxy<M extends MessageMap = any>(
 
 // 创建增强型Actor代理
 export function createEnhancedActorProxy<TMessages extends MessageMap = MessageMap>(
-    target: CorePID
+    system: ActorSystem,
+    target: CorePID,
+    options: EnhancedActorProxyOptions = {}
 ): EnhancedActorProxy<TMessages> {
+    // 默认配置
+    let currentTimeout = options.timeout || 5000;
+    let currentErrorHandler = options.errorHandler;
+    let currentInterceptor = options.interceptor;
+
+    // 创建基本代理
+    const baseProxy = createActorProxy<TMessages>(system, target, options);
+
     // 实现增强型代理
-    // 这里需要返回代理的实现
-    const proxy = {
-        // 实现增强型代理的方法和属性
+    const enhancedProxy: EnhancedActorProxy<TMessages> = {
+        ...baseProxy,
+
+        // 批量处理
+        async sendBatch(operations: Array<{ type: keyof TMessages; payload: any }>) {
+            const results: SettledResult[] = [];
+            for (const op of operations) {
+                if (currentInterceptor) {
+                    const allowed = await currentInterceptor(op.type as string, op.payload, false);
+                    if (!allowed) {
+                        continue;
+                    }
+                }
+                try {
+                    await system.send(target, {
+                        type: op.type as string,
+                        payload: op.payload
+                    });
+                    results.push({ status: 'fulfilled' as const, value: undefined });
+                } catch (error) {
+                    if (currentErrorHandler) {
+                        currentErrorHandler(error as Error, op.type as string, op.payload);
+                    }
+                    results.push({ status: 'rejected' as const, reason: error as Error });
+                }
+            }
+            return results;
+        },
+
+        async requestBatch(operations: Array<{ type: keyof TMessages; payload: any }>, options?: { allSettled?: boolean }) {
+            const results: SettledResult[] = [];
+            for (const op of operations) {
+                if (currentInterceptor) {
+                    const allowed = await currentInterceptor(op.type as string, op.payload, true);
+                    if (!allowed) {
+                        if (options?.allSettled) {
+                            results.push({ status: 'rejected' as const, reason: new Error('Operation intercepted') });
+                            continue;
+                        }
+                        throw new Error('Operation intercepted');
+                    }
+                }
+                try {
+                    const result = await system.request(target, {
+                        type: op.type as string,
+                        payload: op.payload
+                    }, currentTimeout);
+                    results.push({ status: 'fulfilled' as const, value: result });
+                } catch (error) {
+                    if (currentErrorHandler) {
+                        currentErrorHandler(error as Error, op.type as string, op.payload);
+                    }
+                    if (options?.allSettled) {
+                        results.push({ status: 'rejected' as const, reason: error as Error });
+                    } else {
+                        throw error;
+                    }
+                }
+            }
+            return options?.allSettled ? results : results.map(r => r.status === 'fulfilled' ? r.value : undefined);
+        },
+
+        // 设置选项
+        withOptions(newOptions: EnhancedActorProxyOptions) {
+            currentTimeout = newOptions.timeout || currentTimeout;
+            currentErrorHandler = newOptions.errorHandler || currentErrorHandler;
+            currentInterceptor = newOptions.interceptor || currentInterceptor;
+            return this;
+        },
+
+        // 添加拦截器
+        withInterceptor(interceptor: { beforeSend?: MessageInterceptor }) {
+            currentInterceptor = async (type: string, payload: any, isRequest: boolean) => {
+                if (interceptor.beforeSend && !await interceptor.beforeSend(type, payload, isRequest)) {
+                    return false;
+                }
+                return true;
+            };
+            return this;
+        },
+
+        // 获取原始PID
         getPID() {
             return target;
+        },
+
+        // 设置超时
+        setTimeout(timeout: number) {
+            currentTimeout = timeout;
+            return this;
+        },
+
+        // 设置错误处理器
+        setErrorHandler(handler: ErrorHandler) {
+            currentErrorHandler = handler;
+            return this;
         }
-        // 其他方法的实现...
     };
 
-    return proxy as EnhancedActorProxy<TMessages>;
+    // 创建方法风格的代理
+    return new Proxy(enhancedProxy, {
+        get(target: any, prop: string | symbol) {
+            if (prop in target) {
+                return target[prop];
+            }
+
+            // 处理方法风格的调用
+            const methodMatch = prop.toString().match(/^(send|request)(.+)$/);
+            if (methodMatch) {
+                const [, operation, messageType] = methodMatch;
+                const type = messageType.charAt(0).toLowerCase() + messageType.slice(1);
+
+                return async (payload: any, timeout?: number) => {
+                    if (currentInterceptor) {
+                        const allowed = await currentInterceptor(type, payload, operation === 'request');
+                        if (!allowed) {
+                            throw new Error('Operation intercepted');
+                        }
+                    }
+
+                    try {
+                        if (operation === 'send') {
+                            return await system.send(target, { type, payload });
+                        } else {
+                            return await system.request(target, { type, payload }, timeout || currentTimeout);
+                        }
+                    } catch (error) {
+                        if (currentErrorHandler) {
+                            currentErrorHandler(error as Error, type, payload);
+                        }
+                        throw error;
+                    }
+                };
+            }
+
+            return undefined;
+        }
+    }) as EnhancedActorProxy<TMessages>;
 }
 
 // 创建拦截器

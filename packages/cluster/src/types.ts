@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { ClusterManager } from './cluster_manager';
+import type { ClusterManager } from './cluster_manager';
 import { PID } from '@bactor/core';
 
 export interface NodeInfo {

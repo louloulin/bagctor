@@ -5,9 +5,9 @@ export interface NodeInfo {
     address: string;
     status: NodeStatus;
     lastHeartbeat: number;
-    metadata: Record<string, any>;
+    load: NodeLoad;
+    metadata?: Record<string, any>;
     capabilities?: string[];
-    load?: NodeLoad;
 }
 
 export interface NodeLoad {
@@ -15,6 +15,31 @@ export interface NodeLoad {
     memory: number;
     messageRate: number;
     actorCount: number;
+}
+
+export interface ActorInfo {
+    pid: PID;
+    nodeId: string;
+}
+
+export interface ClusterState {
+    nodes: Map<string, NodeInfo>;
+    actors: Map<string, ActorInfo>;
+    load: Map<string, NodeLoad>;
+    leader: string | null;
+    term: number;
+    version: number;
+    partitions: string[][];
+}
+
+export interface Message {
+    type: string;
+    nodeId: string;
+    timestamp: number;
+    state?: ClusterState;
+    targetPid?: PID;
+    senderPid?: string;
+    payload?: any;
 }
 
 export enum NodeStatus {
@@ -27,15 +52,13 @@ export enum NodeStatus {
 }
 
 export interface ClusterConfig {
-    heartbeatInterval: number;
-    failureDetectionThreshold: number;
-    reconnectionStrategy: ReconnectionStrategy;
-    membershipProtocol: MembershipProtocol;
-    gossipInterval?: number;
-    suspicionTimeout?: number;
-    syncInterval?: number;
+    localAddress: string;
+    seedNodes: string[];
+    heartbeatInterval?: number;
+    failureDetectionTimeout?: number;
+    partitionDetectionTimeout?: number;
     loadReportInterval?: number;
-    stateBackend?: StateBackend;
+    failureDetectionThreshold?: number;
 }
 
 export enum ReconnectionStrategy {
@@ -85,14 +108,6 @@ export interface ClusterMetrics {
     partitionCount: number;
     leadershipChanges: number;
     avgLoadPerNode: NodeLoad;
-}
-
-export interface ClusterState {
-    nodes: Map<string, NodeInfo>;
-    partitions: Set<string>[];
-    leader?: string;
-    term: number;
-    version: number;
 }
 
 export interface PartitionConfig {

@@ -13,10 +13,18 @@ import {
     BackpressureConfig,
     BackpressureState,
     BackpressureStrategy,
-    RecoveryPolicy
+    RecoveryPolicy,
+    Message,
+    PID
 } from './types';
 import { log } from '@bactor/core';
 import { v4 as uuidv4 } from 'uuid';
+import { PID as CorePID } from '@bactor/core';
+import { ConsistentHashActorPlacement } from './actor/consistent_hash_placement';
+import { FailureDetectionConsensus } from './utils/consensus';
+import { SystemMetricsCollector } from './utils/system_metrics';
+import { BackpressureManager } from './utils/backpressure';
+import { LibP2pClusterTransport } from './transport/libp2p_cluster_transport';
 
 export class ClusterManager extends EventEmitter {
     private state: ClusterState;
@@ -30,6 +38,18 @@ export class ClusterManager extends EventEmitter {
     private backpressureInterval: NodeJS.Timer | null = null;
     private metrics: ClusterMetrics;
     private nodeId: string;
+    private transport: LibP2pClusterTransport | null = null;
+    private localNodeId: string;
+    private actorPlacement: ConsistentHashActorPlacement;
+    private timers: {
+        heartbeat: NodeJS.Timeout | null;
+        failureDetection: NodeJS.Timeout | null;
+        stateSync: NodeJS.Timeout | null;
+    } = {
+            heartbeat: null,
+            failureDetection: null,
+            stateSync: null
+        };
 
     constructor(
         config: ClusterConfig,
@@ -46,6 +66,13 @@ export class ClusterManager extends EventEmitter {
         this.state = this.initializeState();
         this.metrics = this.initializeMetrics();
         this.backpressureState = this.initializeBackpressureState();
+        this.localNodeId = this.nodeId;
+        this.actorPlacement = this.initializeActorPlacement();
+    }
+
+    // 新增方法: 设置传输层
+    public setTransport(transport: LibP2pClusterTransport): void {
+        this.transport = transport;
     }
 
     private initializeState(): ClusterState {
@@ -53,7 +80,9 @@ export class ClusterManager extends EventEmitter {
             nodes: new Map(),
             partitions: [],
             term: 0,
-            version: 0
+            version: 0,
+            actors: new Map(),
+            load: new Map()
         };
     }
 
@@ -89,6 +118,88 @@ export class ClusterManager extends EventEmitter {
                 throttledActors: 0
             }
         };
+    }
+
+    private initializeActorPlacement(): ConsistentHashActorPlacement {
+        // Implementation of initializeActorPlacement method
+        // This is a placeholder and should be implemented based on your specific requirements
+        return new ConsistentHashActorPlacement();
+    }
+
+    // 新增方法: 合并远程状态
+    public mergeRemoteState(remoteState: ClusterState): void {
+        log.debug('Merging remote cluster state');
+
+        try {
+            // 合并节点信息
+            for (const [nodeId, nodeInfo] of remoteState.nodes.entries()) {
+                const existingNode = this.state.nodes.get(nodeId);
+
+                // 如果是新节点或远程版本更新，则更新本地状态
+                if (!existingNode || nodeInfo.lastHeartbeat > existingNode.lastHeartbeat) {
+                    this.state.nodes.set(nodeId, nodeInfo);
+                }
+            }
+
+            // 如果远程版本更新，更新分区信息
+            if (remoteState.version > this.state.version) {
+                this.state.partitions = remoteState.partitions;
+                this.state.version = remoteState.version;
+            }
+
+            // 如果远程任期更高，更新领导者信息
+            if (remoteState.term > this.state.term) {
+                this.state.leader = remoteState.leader;
+                this.state.term = remoteState.term;
+
+                if (remoteState.leader) {
+                    this.emitClusterEvent({
+                        type: ClusterEventType.LEADER_ELECTED,
+                        nodeId: remoteState.leader,
+                        timestamp: Date.now()
+                    });
+                }
+            }
+
+            // 更新指标
+            this.updateMetrics();
+
+            // 发出状态更改事件
+            this.emitClusterEvent({
+                type: ClusterEventType.STATE_CHANGED,
+                nodeId: this.nodeId,
+                timestamp: Date.now()
+            });
+        } catch (error) {
+            log.error('Error merging remote state', { error });
+        }
+    }
+
+    // 新增方法: 处理节点离开
+    public handleNodeLeave(nodeId: string): void {
+        const node = this.state.nodes.get(nodeId);
+        if (node) {
+            node.status = NodeStatus.LEAVING;
+            this.emitClusterEvent({
+                type: ClusterEventType.NODE_LEFT,
+                nodeId,
+                timestamp: Date.now()
+            });
+
+            // 从集群状态中移除节点
+            this.state.nodes.delete(nodeId);
+
+            // 更新集群指标
+            this.updateMetrics();
+
+            // 检查分区状态
+            this.checkPartitions();
+
+            // 如果启用了负载均衡，可能需要重新平衡
+            this.rebalanceIfNeeded();
+
+            log.info('Node has left the cluster', { nodeId });
+        }
     }
 
     public start(): void {
@@ -178,6 +289,13 @@ export class ClusterManager extends EventEmitter {
             timestamp: Date.now(),
             data: newNode
         });
+
+        // 如果配置了传输层，使用传输层通知集群
+        if (this.transport && typeof this.transport.joinCluster === 'function') {
+            this.transport.joinCluster().catch((error: any) => {
+                log.error('Failed to join cluster via transport', { error });
+            });
+        }
     }
 
     private leaveCluster(): void {
@@ -191,6 +309,13 @@ export class ClusterManager extends EventEmitter {
             });
             this.state.nodes.delete(this.nodeId);
             this.updateMetrics();
+
+            // 如果配置了传输层，使用传输层通知集群
+            if (this.transport && typeof this.transport.leaveCluster === 'function') {
+                this.transport.leaveCluster().catch((error: any) => {
+                    log.error('Failed to leave cluster via transport', { error });
+                });
+            }
         }
     }
 
@@ -245,6 +370,31 @@ export class ClusterManager extends EventEmitter {
             });
             this.updateMetrics();
             this.rebalanceIfNeeded();
+        }
+    }
+
+    // 更新gossipState方法，使用传输层实现真正的Gossip通信
+    private gossipState(): void {
+        // 如果配置了传输层，使用传输层gossip集群状态
+        if (this.transport && typeof this.transport.gossipClusterState === 'function') {
+            this.transport.gossipClusterState(this.getState()).catch((error: any) => {
+                log.error('Failed to gossip state via transport', { error });
+            });
+        }
+
+        this.metrics.lastGossipTimestamp = Date.now();
+    }
+
+    // 更新发送心跳，利用传输层
+    private reportLoad(): void {
+        const load = this.calculateNodeLoad();
+        this.updateNodeLoad(this.nodeId, load);
+
+        // 如果配置了传输层，使用传输层发送心跳
+        if (this.transport && typeof this.transport.sendHeartbeat === 'function') {
+            this.transport.sendHeartbeat(load).catch((error: any) => {
+                log.error('Failed to send heartbeat via transport', { error });
+            });
         }
     }
 
@@ -327,7 +477,7 @@ export class ClusterManager extends EventEmitter {
         unassigned.delete(nodeId);
         partition.add(nodeId);
 
-        // In a real implementation, this would check actual network connectivity
+        // 如果配置了传输层，可以使用它来检查实际连接性
         for (const id of unassigned) {
             if (this.areNodesConnected(nodeId, id)) {
                 this.findConnectedNodes(id, unassigned, partition);
@@ -336,8 +486,7 @@ export class ClusterManager extends EventEmitter {
     }
 
     private areNodesConnected(node1: string, node2: string): boolean {
-        // Simplified connectivity check
-        // In a real implementation, this would check actual network connectivity
+        // 简化的连接性检查，使用传输层可以实现真实检查
         return true;
     }
 
@@ -400,19 +549,9 @@ export class ClusterManager extends EventEmitter {
         });
     }
 
-    private gossipState(): void {
-        // Implement gossip protocol
-        this.metrics.lastGossipTimestamp = Date.now();
-    }
-
-    private reportLoad(): void {
-        // Implement load reporting
-        const load = this.calculateNodeLoad();
-        this.updateNodeLoad(this.nodeId, load);
-    }
-
     private calculateNodeLoad(): NodeLoad {
-        // Implement actual load calculation
+        // 实际实现应该使用系统监控来获取真实数据
+        // 这里仍使用模拟数据，后续可改进
         return {
             cpu: Math.random() * 100,
             memory: Math.random() * 100,
@@ -443,7 +582,9 @@ export class ClusterManager extends EventEmitter {
             partitions: [...this.state.partitions],
             leader: this.state.leader,
             term: this.state.term,
-            version: this.state.version
+            version: this.state.version,
+            actors: new Map(this.state.actors),
+            load: new Map(this.state.load)
         };
     }
 
@@ -658,5 +799,82 @@ export class ClusterManager extends EventEmitter {
 
     public getBackpressureState(): BackpressureState {
         return { ...this.backpressureState };
+    }
+
+    getNode(nodeId: string): NodeInfo | undefined {
+        return this.state.nodes.get(nodeId);
+    }
+
+    getSelfNodeId(): string {
+        return this.nodeId;
+    }
+
+    getActorPlacement(): ConsistentHashActorPlacement {
+        return this.actorPlacement;
+    }
+
+    async sendMessage(message: {
+        to: PID;
+        from: string;
+        payload: any;
+        targetNode: NodeInfo;
+    }): Promise<void> {
+        const transport = this.getTransport();
+        if (!transport) {
+            throw new Error('No transport available for cluster communication');
+        }
+
+        await transport.sendToNode(message.targetNode.id, {
+            type: 'ACTOR_MESSAGE',
+            targetPid: message.to,
+            senderPid: message.from,
+            payload: message.payload,
+            timestamp: Date.now()
+        });
+    }
+
+    private clearTimers(): void {
+        if (this.timers.heartbeat) {
+            clearInterval(this.timers.heartbeat);
+            this.timers.heartbeat = null;
+        }
+        if (this.timers.failureDetection) {
+            clearInterval(this.timers.failureDetection);
+            this.timers.failureDetection = null;
+        }
+        if (this.timers.stateSync) {
+            clearInterval(this.timers.stateSync);
+            this.timers.stateSync = null;
+        }
+    }
+
+    getTransport(): LibP2pClusterTransport | null {
+        return this.transport;
+    }
+
+    async registerActor(actorId: string, pid: PID): Promise<void> {
+        const nodeId = this.actorPlacement.determineNodeForActor(actorId);
+        this.state.actors.set(actorId, { pid, nodeId });
+    }
+
+    async unregisterActor(actorId: string): Promise<void> {
+        this.state.actors.delete(actorId);
+    }
+
+    async getActorLocation(actorId: string): Promise<string | null> {
+        const actorInfo = this.state.actors.get(actorId);
+        return actorInfo?.nodeId || null;
+    }
+
+    async updateNodeLoad(load: NodeLoad): Promise<void> {
+        const node = this.state.nodes.get(this.nodeId);
+        if (node) {
+            node.load = load;
+            this.state.load.set(this.nodeId, load);
+        }
+    }
+
+    getNodeLoad(nodeId: string): NodeLoad | null {
+        return this.state.load.get(nodeId) || null;
     }
 } 

@@ -4,3 +4,6 @@
 
 
 @agent.md 按照整个文档 @mastra 构建bactor agent，实现相关功能，实现后增加验证，验证通过 更新 @agent.md 标记完的功能
+
+
+@cluster.md 按照这个计划实现cluster功能，写入对应的代码都对应的文件，完成验证后  更新 @cluster.md 标记实现的功能

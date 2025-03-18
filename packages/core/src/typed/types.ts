@@ -342,11 +342,7 @@ export interface EnhancedActorProxy<M extends MessageMap = any> {
     withOptions(options: EnhancedActorProxyOptions): EnhancedActorProxy<M>;
 
     // 添加拦截器
-    withInterceptor(
-        interceptor: {
-            beforeSend?: MessageInterceptor;
-        }
-    ): EnhancedActorProxy<M>;
+    withInterceptor(interceptor: MessageInterceptor | { beforeSend: MessageInterceptor }): EnhancedActorProxy<M>;
 
     // 获取原始PID
     getPID(): CorePID;
@@ -494,13 +490,12 @@ export function createEnhancedActorProxy<TMessages extends MessageMap = MessageM
         },
 
         // 添加拦截器
-        withInterceptor(interceptor: { beforeSend?: MessageInterceptor }) {
-            currentInterceptor = async (type: string, payload: any, isRequest: boolean) => {
-                if (interceptor.beforeSend && !await interceptor.beforeSend(type, payload, isRequest)) {
-                    return false;
-                }
-                return true;
-            };
+        withInterceptor(interceptor: MessageInterceptor | { beforeSend: MessageInterceptor }) {
+            if (typeof interceptor === 'function') {
+                currentInterceptor = interceptor;
+            } else {
+                currentInterceptor = interceptor.beforeSend;
+            }
             return this;
         },
 
@@ -564,9 +559,8 @@ export function createEnhancedActorProxy<TMessages extends MessageMap = MessageM
 }
 
 // 创建拦截器
-export function createInterceptor(handlers: {
-    beforeSend?: (message: any) => boolean | Promise<boolean>;
-    afterSend?: (result: any) => any | Promise<any>;
-}) {
-    return handlers;
+export function createInterceptor(handler: MessageInterceptor): { beforeSend: MessageInterceptor } {
+    return {
+        beforeSend: handler
+    };
 } 

@@ -3,6 +3,8 @@ import { ActorSystem } from "../core/system";
 import { Actor } from "../core/actor";
 import { Message, PID } from "../core/types";
 import { DefaultMailbox, PriorityMailbox } from "../core/mailbox";
+import { toTypedMessage, toBaseMessage } from "../typed/types";
+import { Message as CoreMessage } from "../core/types";
 
 // 说明：所有性能测试都被标记为跳过，以避免CI/CD流程中的超时问题
 // 性能测试应当在专门的性能测试环境中单独运行
@@ -200,4 +202,65 @@ test.skip("Original Benchmark PriorityMailbox with mixed priorities", async () =
 // @ts-ignore
 test.skip("Original Benchmark concurrent message sending", async () => {
   // 跳过执行
+});
+
+test("类型擦除和性能测试 > 消息类型转换不应显著影响性能", async () => {
+  const iterations = 10000;
+  const testMessage = {
+    type: "test",
+    payload: { data: "test data" },
+    messageId: "test-id",
+    metadata: {
+      timestamp: Date.now(),
+      correlationId: "test-correlation"
+    }
+  };
+
+  // 测试 toBaseMessage 性能
+  const startBase = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    toBaseMessage(testMessage as CoreMessage);
+  }
+  const endBase = performance.now();
+  const baseTime = endBase - startBase;
+
+  // 测试 toTypedMessage 性能
+  const startTyped = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    toTypedMessage("test", { data: "test data" }, {
+      messageId: "test-id",
+      metadata: {
+        timestamp: Date.now(),
+        correlationId: "test-correlation"
+      }
+    });
+  }
+  const endTyped = performance.now();
+  const typedTime = endTyped - startTyped;
+
+  // 验证性能
+  // 转换时间不应超过1ms/次
+  expect(baseTime / iterations).toBeLessThan(1);
+  expect(typedTime / iterations).toBeLessThan(1);
+
+  // 验证消息格式
+  const baseMessage = toBaseMessage(testMessage as CoreMessage);
+  expect(baseMessage.type).toBe("test");
+  expect(baseMessage.payload).toEqual({ data: "test data" });
+  expect(baseMessage.messageId).toBe("test-id");
+  expect(baseMessage.metadata).toBeDefined();
+  expect(baseMessage.metadata?.correlationId).toBe("test-correlation");
+
+  const typedMessage = toTypedMessage("test", { data: "test data" }, {
+    messageId: "test-id",
+    metadata: {
+      correlationId: "test-correlation"
+    }
+  });
+  expect(typedMessage.type).toBe("test");
+  expect(typedMessage.payload).toEqual({ data: "test data" });
+  expect(typedMessage.messageId).toBe("test-id");
+  expect(typedMessage.metadata).toBeDefined();
+  expect(typedMessage.metadata?.correlationId).toBe("test-correlation");
+  expect(typedMessage.metadata?.timestamp).toBeDefined();
 }); 

@@ -1,7 +1,6 @@
-import { PID } from '@bactor/core';
-import { ClusterManager } from '../cluster_manager';
 import { log } from '@bactor/core';
-import { NodeStatus, NodeInfo } from '../types';
+import { ClusterManager } from '../cluster_manager';
+import { NodeInfo, NodeStatus } from '../types';
 import { createHash } from 'crypto';
 
 /**
@@ -10,136 +9,145 @@ import { createHash } from 'crypto';
 const VIRTUAL_NODE_COUNT = 200;
 
 /**
- * 使用一致性哈希实现的Actor放置策略
- * 使用虚拟节点确保更均匀的分布
+ * 一致性哈希的Actor放置策略
+ * 负责确定Actor应该放置在哪个节点上
  */
 export class ConsistentHashActorPlacement {
-    // 哈希环: 排序后的虚拟节点哈希值 -> 实际节点ID
-    private hashRing: Map<number, string> = new Map();
-    // 排序后的哈希值数组，用于二分查找
-    private sortedHashes: number[] = [];
-    // 节点ID到其虚拟节点哈希值的映射
-    private nodeToHashes: Map<string, number[]> = new Map();
-    private virtualNodesPerNode: number = 100;
+    private clusterManager: ClusterManager;
+    private virtualNodes: number = 100; // 每个节点的虚拟节点数量
+    private hashRing: string[] = []; // 排序后的哈希值
+    private nodeToHashes: Map<string, string[]> = new Map(); // 节点ID到哈希值的映射
+    private hashToNode: Map<string, string> = new Map(); // 哈希值到节点ID的映射
 
-    constructor(private clusterManager: ClusterManager) {
-        // 初始化哈希环
-        this.updateHashRing();
+    constructor(clusterManager: ClusterManager) {
+        this.clusterManager = clusterManager;
+        this.initializeHashRing();
 
-        // 监听集群事件
-        clusterManager.on('clusterEvent', (event) => {
-            if (
-                event.type === 'NODE_JOINED' ||
-                event.type === 'NODE_LEFT' ||
-                event.type === 'NODE_SUSPECTED' ||
-                event.type === 'NODE_RECOVERED'
-            ) {
-                this.updateHashRing();
+        log.info('ConsistentHashActorPlacement initialized');
+    }
+
+    /**
+     * 初始化哈希环
+     */
+    private initializeHashRing(): void {
+        this.hashRing = [];
+        this.nodeToHashes.clear();
+        this.hashToNode.clear();
+
+        // 获取所有活跃节点
+        const activeNodes = this.getActiveNodes();
+
+        // 为每个节点创建虚拟节点并计算哈希值
+        for (const node of activeNodes) {
+            const hashes: string[] = [];
+
+            for (let i = 0; i < this.virtualNodes; i++) {
+                const key = `${node.id}:${i}`;
+                const hash = this.hash(key);
+
+                hashes.push(hash);
+                this.hashToNode.set(hash, node.id);
             }
+
+            this.nodeToHashes.set(node.id, hashes);
+            this.hashRing.push(...hashes);
+        }
+
+        // 对哈希环进行排序
+        this.hashRing.sort();
+
+        log.debug('Hash ring initialized', {
+            activeNodes: activeNodes.length,
+            ringSize: this.hashRing.length
         });
     }
 
     /**
-     * 更新哈希环 - 当集群成员变化时调用
+     * 计算哈希值
+     * @param key 要哈希的键
+     * @returns 哈希值
      */
-    public updateHashRing(): void {
-        log.debug('Updating consistent hash ring');
-
-        // 清理现有哈希环
-        this.hashRing.clear();
-        this.nodeToHashes.clear();
-
-        // 获取活跃节点
-        const nodes = this.clusterManager.getAllNodes().filter(
-            node => node.status === NodeStatus.ACTIVE
-        );
-
-        // 为每个节点创建虚拟节点
-        for (const node of nodes) {
-            const hashes: number[] = [];
-
-            // 为每个节点创建多个虚拟节点
-            for (let i = 0; i < VIRTUAL_NODE_COUNT; i++) {
-                const virtualNodeKey = `${node.id}:${i}`;
-                const hash = this.hashKey(virtualNodeKey);
-
-                this.hashRing.set(hash, node.id);
-                hashes.push(hash);
-            }
-
-            this.nodeToHashes.set(node.id, hashes);
-        }
-
-        // 更新排序后的哈希值数组
-        this.sortedHashes = Array.from(this.hashRing.keys()).sort((a, b) => a - b);
-
-        log.debug('Hash ring updated', {
-            nodeCount: nodes.length,
-            virtualNodeCount: this.hashRing.size
-        });
+    private hash(key: string): string {
+        return createHash('md5').update(key).digest('hex');
     }
 
     /**
      * 确定Actor应该放置在哪个节点上
-     * @param actorId Actor标识符
-     * @returns 节点ID，如果没有可用节点则返回undefined
+     * @param actorId Actor ID
+     * @returns 节点ID，如果没有活跃节点则返回null
      */
-    public determineNodeForActor(actorId: string): string | undefined {
-        if (this.sortedHashes.length === 0) {
-            log.warn('No nodes available in hash ring');
-            return undefined;
+    public determineNodeForActor(actorId: string): string | null {
+        if (this.hashRing.length === 0) {
+            // 如果哈希环为空，重新初始化
+            this.initializeHashRing();
         }
 
-        // 计算Actor ID的哈希值
-        const hash = this.hashKey(actorId);
-
-        // 二分查找找到第一个大于等于hash的索引
-        let index = this.findNextIndex(hash);
-
-        // 如果没有找到（hash大于所有值），则回绕到第一个虚拟节点
-        if (index === -1) {
-            index = 0;
+        if (this.hashRing.length === 0) {
+            // 如果仍然为空，表示没有活跃节点
+            log.warn('No active nodes available for actor placement');
+            return null;
         }
 
-        // 获取虚拟节点对应的实际节点
-        const nodeId = this.hashRing.get(this.sortedHashes[index]);
+        // 计算Actor的哈希值
+        const hash = this.hash(actorId);
 
-        log.debug('Actor placement determined', { actorId, nodeId });
-        return nodeId;
+        // 在哈希环上查找第一个大于等于该哈希值的位置
+        const index = this.findNextIndex(hash);
+
+        // 获取对应的节点ID
+        const nodeId = this.hashToNode.get(this.hashRing[index]);
+
+        log.debug('Actor placement determined', {
+            actorId,
+            nodeId
+        });
+
+        return nodeId || null;
     }
 
     /**
-     * 计算键的哈希值
-     * @param key 要哈希的键
-     * @returns 32位整数哈希值
+     * 在有序哈希环上寻找下一个索引
+     * @param hash 哈希值
+     * @returns 哈希环上的索引
      */
-    private hashKey(key: string): number {
-        const hash = createHash('md5').update(key).digest();
-        // 使用前4个字节作为32位整数
-        return (hash[0] << 24) | (hash[1] << 16) | (hash[2] << 8) | hash[3];
-    }
-
-    /**
-     * 二分查找找到第一个大于等于target的元素索引
-     * @param target 目标值
-     * @returns 索引，如果所有元素都小于target则返回-1
-     */
-    private findNextIndex(target: number): number {
+    private findNextIndex(hash: string): number {
+        // 二分查找
         let left = 0;
-        let right = this.sortedHashes.length - 1;
-        let result = -1;
+        let right = this.hashRing.length - 1;
 
         while (left <= right) {
             const mid = Math.floor((left + right) / 2);
-            if (this.sortedHashes[mid] >= target) {
-                result = mid;
-                right = mid - 1;
-            } else {
+
+            if (this.hashRing[mid] === hash) {
+                return mid;
+            }
+
+            if (this.hashRing[mid] < hash) {
                 left = mid + 1;
+            } else {
+                right = mid - 1;
             }
         }
 
-        return result;
+        // 如果没有找到，返回下一个位置，可能需要环绕
+        return left % this.hashRing.length;
+    }
+
+    /**
+     * 获取活跃节点
+     * @returns 活跃节点列表
+     */
+    public getActiveNodes(): NodeInfo[] {
+        return this.clusterManager.getActiveNodes();
+    }
+
+    /**
+     * 更新哈希环
+     * 当集群成员变化时调用此方法
+     */
+    public updateHashRing(): void {
+        log.debug('Updating hash ring');
+        this.initializeHashRing();
     }
 
     /**
@@ -166,22 +174,22 @@ export class ConsistentHashActorPlacement {
         }
 
         // 在哈希环上顺时针查找下一个节点作为副本
-        const hash = this.hashKey(actorId);
+        const hash = this.hash(actorId);
         const startIndex = this.findNextIndex(hash);
         if (startIndex === -1) return replicas;
 
-        let currentIndex = (startIndex + 1) % this.sortedHashes.length;
+        let currentIndex = (startIndex + 1) % this.hashRing.length;
 
         // 继续查找直到找到足够的不同节点或遍历完哈希环
         while (replicas.length < replicaCount + 1 && currentIndex !== startIndex) {
-            const nodeId = this.hashRing.get(this.sortedHashes[currentIndex]);
+            const nodeId = this.hashRing[currentIndex];
 
             // 确保不重复添加同一个节点
             if (nodeId && !replicas.includes(nodeId)) {
                 replicas.push(nodeId);
             }
 
-            currentIndex = (currentIndex + 1) % this.sortedHashes.length;
+            currentIndex = (currentIndex + 1) % this.hashRing.length;
         }
 
         return replicas;
@@ -192,7 +200,7 @@ export class ConsistentHashActorPlacement {
      */
     public getHashRingInfo(): any {
         return {
-            totalVirtualNodes: this.sortedHashes.length,
+            totalVirtualNodes: this.hashRing.length,
             physicalNodes: Array.from(this.nodeToHashes.keys()),
             distribution: Array.from(this.nodeToHashes.entries()).map(([nodeId, hashes]) => ({
                 nodeId,

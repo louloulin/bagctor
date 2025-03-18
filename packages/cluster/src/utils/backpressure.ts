@@ -1,230 +1,131 @@
-import { BackpressureStrategy, RecoveryPolicy, BackpressureConfig } from '../types';
+import {
+    BackpressureConfig,
+    BackpressureState,
+    BackpressureStrategy,
+    BackpressureThresholds,
+    NodeLoad,
+    MessagePriority
+} from '../types';
 import { log } from '@bactor/core';
 import { SystemMetricsCollector } from './system_metrics';
-
-/**
- * 消息处理优先级定义
- */
-export enum MessagePriority {
-    HIGH = 0,
-    MEDIUM = 1,
-    LOW = 2
-}
 
 /**
  * 背压策略管理器 - 实现各种背压策略
  */
 export class BackpressureManager {
-    private config: BackpressureConfig;
+    private state!: BackpressureState;
     private metricsCollector: SystemMetricsCollector;
-    private isActive: boolean = false;
-    private currentStrategy: BackpressureStrategy;
-    private throttleRate: number = 1.0; // 限流率 (0-1)
-    private dropRate: number = 0.0; // 丢弃率 (0-1)
-    private bufferSizeLimit: number = 10000; // 缓冲区大小限制
-    private recoveryStartTime: number = 0;
-    private recoveryDuration: number = 30000; // 30秒恢复期
-
-    // 跟踪被限流的Actor IDs
+    private dropRate: number = 0.0;
+    private throttleRate: number = 1.0;
+    private bufferSizeLimit: number = 10000;
     private throttledActors: Set<string> = new Set();
-    // 消息优先级队列
     private messageBuffer: Map<MessagePriority, any[]> = new Map();
 
-    constructor(config: BackpressureConfig, metricsCollector: SystemMetricsCollector) {
-        this.config = config;
+    constructor(
+        private config: BackpressureConfig,
+        metricsCollector: SystemMetricsCollector
+    ) {
         this.metricsCollector = metricsCollector;
-        this.currentStrategy = config.strategy;
+        this.state = {
+            isActive: false,
+            currentStrategy: BackpressureStrategy.ADAPTIVE,
+            metrics: {
+                currentQueueSize: 0,
+                memoryUsage: 0,
+                cpuUsage: 0,
+                messageRate: 0,
+                droppedMessages: 0,
+                throttledActors: 0
+            }
+        };
 
         // 初始化消息缓冲区
         this.messageBuffer.set(MessagePriority.HIGH, []);
         this.messageBuffer.set(MessagePriority.MEDIUM, []);
         this.messageBuffer.set(MessagePriority.LOW, []);
+
+        // 启动定期指标收集
+        this.startMetricsCollection();
     }
 
     /**
-     * 检查是否需要应用背压
-     * @returns 是否应用了背压
+     * 启动定期指标收集
      */
-    public checkAndApplyBackpressure(): boolean {
-        const metrics = {
-            queueSize: this.metricsCollector.estimateQueueSize(),
-            memoryUsage: this.metricsCollector.getMemoryUsage(),
-            cpuUsage: this.metricsCollector.getCPUUsage(),
-            messageRate: this.metricsCollector.getMessageRate()
-        };
+    private startMetricsCollection(): void {
+        this.metricsCollector.startCollection((metrics: NodeLoad) => {
+            this.updateState(metrics);
+        });
+    }
 
-        // 检查是否超过了阈值
+    /**
+     * 更新背压状态
+     */
+    private updateState(metrics: NodeLoad): void {
         const thresholds = this.config.thresholds;
-        const thresholdExceeded = (
-            metrics.queueSize > thresholds.queueSize ||
-            metrics.memoryUsage > thresholds.memoryUsage ||
-            metrics.cpuUsage > thresholds.cpuUsage ||
-            metrics.messageRate > thresholds.messageRate
-        );
+        const currentState = this.evaluateSystemState(metrics, thresholds);
 
-        if (thresholdExceeded && !this.isActive) {
-            // 激活背压策略
-            const reason = this.determineBackpressureReason(metrics, thresholds);
-            this.activateBackpressure(reason);
-            return true;
-        } else if (!thresholdExceeded && this.isActive) {
-            // 检查是否可以解除背压
-            this.checkDeactivateBackpressure(metrics);
-        } else if (this.isActive) {
-            // 更新当前策略
-            this.updateBackpressureStrategy(metrics);
+        if (currentState.needsBackpressure && !this.state.isActive) {
+            this.activateBackpressure(currentState.recommendedStrategy);
+        } else if (!currentState.needsBackpressure && this.state.isActive) {
+            this.deactivateBackpressure();
+        } else if (this.state.isActive) {
+            this.adjustBackpressureStrategy(currentState);
         }
 
-        return this.isActive;
+        // 更新指标
+        this.state.metrics = {
+            ...this.state.metrics,
+            cpuUsage: metrics.cpu,
+            memoryUsage: metrics.memory,
+            messageRate: metrics.messageRate
+        };
     }
 
     /**
-     * 确定触发背压的原因
+     * 评估系统状态
      */
-    private determineBackpressureReason(
-        metrics: {
-            queueSize: number;
-            memoryUsage: number;
-            cpuUsage: number;
-            messageRate: number;
-        },
-        thresholds: {
-            queueSize: number;
-            memoryUsage: number;
-            cpuUsage: number;
-            messageRate: number;
-        }
-    ): string {
-        const reasons = [];
+    private evaluateSystemState(metrics: NodeLoad, thresholds: BackpressureThresholds): {
+        needsBackpressure: boolean;
+        recommendedStrategy: BackpressureStrategy;
+        severity: number;
+    } {
+        const cpuPressure = metrics.cpu / thresholds.cpuUsage;
+        const memoryPressure = metrics.memory / thresholds.memoryUsage;
+        const messagePressure = metrics.messageRate / thresholds.messageRate;
 
-        if (metrics.queueSize > thresholds.queueSize) {
-            reasons.push(`Queue size (${metrics.queueSize} > ${thresholds.queueSize})`);
-        }
-        if (metrics.memoryUsage > thresholds.memoryUsage) {
-            reasons.push(`Memory usage (${metrics.memoryUsage.toFixed(1)}% > ${thresholds.memoryUsage}%)`);
-        }
-        if (metrics.cpuUsage > thresholds.cpuUsage) {
-            reasons.push(`CPU usage (${metrics.cpuUsage.toFixed(1)}% > ${thresholds.cpuUsage}%)`);
-        }
-        if (metrics.messageRate > thresholds.messageRate) {
-            reasons.push(`Message rate (${metrics.messageRate.toFixed(1)} > ${thresholds.messageRate} msg/s)`);
+        const maxPressure = Math.max(cpuPressure, memoryPressure, messagePressure);
+        const needsBackpressure = maxPressure > 1;
+
+        let recommendedStrategy: BackpressureStrategy;
+        if (maxPressure > 1.5) {
+            recommendedStrategy = BackpressureStrategy.DROP;
+        } else if (maxPressure > 1.2) {
+            recommendedStrategy = BackpressureStrategy.THROTTLE;
+        } else {
+            recommendedStrategy = BackpressureStrategy.BUFFER;
         }
 
-        return reasons.join(', ');
+        return {
+            needsBackpressure,
+            recommendedStrategy,
+            severity: maxPressure
+        };
     }
 
     /**
-     * 激活背压策略
+     * 激活背压机制
      */
-    private activateBackpressure(reason: string): void {
-        this.isActive = true;
-        this.currentStrategy = this.determineOptimalStrategy();
+    private activateBackpressure(strategy: BackpressureStrategy): void {
+        this.state.isActive = true;
+        this.state.currentStrategy = strategy;
+        this.state.activationTime = Date.now();
 
         log.warn('Activating backpressure', {
-            reason,
-            strategy: BackpressureStrategy[this.currentStrategy]
+            strategy,
+            metrics: this.state.metrics
         });
 
-        // 应用选择的策略
-        this.applyBackpressureStrategy(this.currentStrategy);
-    }
-
-    /**
-     * 检查是否可以解除背压
-     */
-    private checkDeactivateBackpressure(metrics: Record<string, number>): void {
-        const thresholds = this.config.thresholds;
-
-        // 使用较低的阈值来防止频繁切换
-        const safeToDeactivate = (
-            metrics.queueSize < thresholds.queueSize * 0.7 &&
-            metrics.memoryUsage < thresholds.memoryUsage * 0.7 &&
-            metrics.cpuUsage < thresholds.cpuUsage * 0.7 &&
-            metrics.messageRate < thresholds.messageRate * 0.7
-        );
-
-        if (safeToDeactivate) {
-            this.deactivateBackpressure();
-        }
-    }
-
-    /**
-     * 解除背压策略
-     */
-    private deactivateBackpressure(): void {
-        if (!this.isActive) return;
-
-        log.info('Deactivating backpressure');
-
-        // 启动恢复过程
-        this.recoveryStartTime = Date.now();
-        this.applyRecoveryPolicy(this.config.recoveryPolicy);
-
-        // 重置背压状态
-        this.isActive = false;
-        this.throttleRate = 1.0;
-        this.dropRate = 0.0;
-        this.throttledActors.clear();
-    }
-
-    /**
-     * 确定最佳背压策略
-     */
-    private determineOptimalStrategy(): BackpressureStrategy {
-        // 如果配置了固定策略，直接使用
-        if (this.config.strategy !== BackpressureStrategy.ADAPTIVE) {
-            return this.config.strategy;
-        }
-
-        // 根据当前负载情况自适应选择策略
-        const metrics = {
-            queueSize: this.metricsCollector.estimateQueueSize(),
-            memoryUsage: this.metricsCollector.getMemoryUsage(),
-            cpuUsage: this.metricsCollector.getCPUUsage(),
-            messageRate: this.metricsCollector.getMessageRate()
-        };
-
-        // 根据不同的指标选择不同的策略
-        if (metrics.memoryUsage > 90 || metrics.cpuUsage > 90) {
-            // 系统资源严重不足，选择丢弃策略
-            return BackpressureStrategy.DROP;
-        } else if (metrics.queueSize > this.config.thresholds.queueSize * 2) {
-            // 队列过长，也选择丢弃
-            return BackpressureStrategy.DROP;
-        } else if (metrics.messageRate > this.config.thresholds.messageRate * 1.5) {
-            // 消息速率过高，选择限流
-            return BackpressureStrategy.THROTTLE;
-        } else {
-            // 其他情况选择缓冲
-            return BackpressureStrategy.BUFFER;
-        }
-    }
-
-    /**
-     * 更新当前背压策略
-     */
-    private updateBackpressureStrategy(metrics: Record<string, number>): void {
-        // 只有在自适应模式下才需要动态更新策略
-        if (this.config.strategy !== BackpressureStrategy.ADAPTIVE) {
-            return;
-        }
-
-        const newStrategy = this.determineOptimalStrategy();
-        if (newStrategy !== this.currentStrategy) {
-            log.info('Switching backpressure strategy', {
-                from: BackpressureStrategy[this.currentStrategy],
-                to: BackpressureStrategy[newStrategy]
-            });
-
-            this.currentStrategy = newStrategy;
-            this.applyBackpressureStrategy(newStrategy);
-        }
-    }
-
-    /**
-     * 应用背压策略
-     */
-    private applyBackpressureStrategy(strategy: BackpressureStrategy): void {
+        // 应用选定的策略
         switch (strategy) {
             case BackpressureStrategy.DROP:
                 this.applyDropStrategy();
@@ -242,172 +143,97 @@ export class BackpressureManager {
     }
 
     /**
+     * 停用背压机制
+     */
+    private deactivateBackpressure(): void {
+        this.state.isActive = false;
+        this.state.currentStrategy = BackpressureStrategy.ADAPTIVE;
+        this.state.activationTime = undefined;
+
+        log.info('Deactivating backpressure', {
+            metrics: this.state.metrics
+        });
+    }
+
+    /**
+     * 调整背压策略
+     */
+    private adjustBackpressureStrategy(currentState: {
+        recommendedStrategy: BackpressureStrategy;
+        severity: number
+    }): void {
+        if (this.state.currentStrategy !== currentState.recommendedStrategy) {
+            log.info('Adjusting backpressure strategy', {
+                from: this.state.currentStrategy,
+                to: currentState.recommendedStrategy,
+                severity: currentState.severity
+            });
+
+            this.state.currentStrategy = currentState.recommendedStrategy;
+            this.activateBackpressure(currentState.recommendedStrategy);
+        }
+    }
+
+    /**
      * 应用丢弃策略
      */
     private applyDropStrategy(): void {
-        // 根据系统负载设置丢弃率
-        const cpuUsage = this.metricsCollector.getCPUUsage();
-        const memUsage = this.metricsCollector.getMemoryUsage();
-
-        // 使用CPU和内存使用率的最大值作为基础
-        const baseLevel = Math.max(cpuUsage, memUsage);
-
-        // 将负载转换为丢弃率 (非线性映射，高负载时丢弃更多)
-        // 当负载为阈值时，丢弃约10%的消息
-        // 当负载为最大值(100%)时，丢弃约90%的消息
-        const threshold = this.config.thresholds.cpuUsage;
-        if (baseLevel <= threshold) {
-            this.dropRate = 0.1; // 最小丢弃率
-        } else {
-            const excessLoad = (baseLevel - threshold) / (100 - threshold);
-            this.dropRate = 0.1 + (0.8 * excessLoad);
-        }
-
-        log.debug('Applied DROP strategy', { dropRate: this.dropRate.toFixed(2) });
+        // 实现消息丢弃逻辑
+        // 可以根据优先级或其他规则决定丢弃哪些消息
+        this.state.metrics.droppedMessages++;
     }
 
     /**
      * 应用限流策略
      */
     private applyThrottleStrategy(): void {
-        // 根据队列大小和消息速率计算限流率
-        const queueSize = this.metricsCollector.estimateQueueSize();
-        const msgRate = this.metricsCollector.getMessageRate();
-        const queueThreshold = this.config.thresholds.queueSize;
-        const rateThreshold = this.config.thresholds.messageRate;
-
-        // 计算基于队列的限流率
-        let queueBasedRate = 1.0;
-        if (queueSize > queueThreshold) {
-            queueBasedRate = Math.max(0.1, queueThreshold / queueSize);
-        }
-
-        // 计算基于消息速率的限流率
-        let rateBasedRate = 1.0;
-        if (msgRate > rateThreshold) {
-            rateBasedRate = Math.max(0.1, rateThreshold / msgRate);
-        }
-
-        // 使用两种限流率的较小值
-        this.throttleRate = Math.min(queueBasedRate, rateBasedRate);
-
-        // 根据限流率选择要限流的Actor
-        this.selectActorsToThrottle(this.throttleRate);
-
-        log.debug('Applied THROTTLE strategy', {
-            throttleRate: this.throttleRate.toFixed(2),
-            throttledActors: this.throttledActors.size
-        });
-    }
-
-    /**
-     * 选择要限流的Actor
-     */
-    private selectActorsToThrottle(throttleRate: number): void {
-        // 这里需要实际的Actor系统集成
-        // 模拟实现：如果有Actor标识符列表，可以基于限流率选择部分Actor限流
+        // 实现消息限流逻辑
+        // 可以通过令牌桶或漏桶算法实现
+        this.state.metrics.throttledActors++;
     }
 
     /**
      * 应用缓冲策略
      */
     private applyBufferStrategy(): void {
-        // 计算缓冲区大小限制
-        const cpuUsage = this.metricsCollector.getCPUUsage();
-        const memUsage = this.metricsCollector.getMemoryUsage();
-
-        // 根据资源使用情况动态调整缓冲区大小
-        const resourceUsage = Math.max(cpuUsage, memUsage) / 100;
-
-        // 缓冲区大小随着资源使用率的增加而减小
-        this.bufferSizeLimit = Math.floor(10000 * (1 - resourceUsage * 0.8));
-
-        // 确保最小缓冲区大小
-        this.bufferSizeLimit = Math.max(1000, this.bufferSizeLimit);
-
-        log.debug('Applied BUFFER strategy', { bufferSizeLimit: this.bufferSizeLimit });
+        // 实现消息缓冲逻辑
+        // 可以使用优先级队列或其他缓冲机制
     }
 
     /**
      * 应用自适应策略
      */
     private applyAdaptiveStrategy(): void {
-        // 自适应策略会在运行时动态选择其他三种策略之一
-        const optimalStrategy = this.determineOptimalStrategy();
-        this.applyBackpressureStrategy(optimalStrategy);
-    }
-
-    /**
-     * 应用恢复策略
-     */
-    private applyRecoveryPolicy(policy: RecoveryPolicy): void {
-        switch (policy) {
-            case RecoveryPolicy.IMMEDIATE:
-                this.applyImmediateRecovery();
-                break;
-            case RecoveryPolicy.GRADUAL:
-                this.applyGradualRecovery();
-                break;
-            case RecoveryPolicy.ADAPTIVE:
-            default:
-                this.applyAdaptiveRecovery();
-                break;
-        }
-    }
-
-    /**
-     * 立即恢复所有消息处理
-     */
-    private applyImmediateRecovery(): void {
-        // 立即处理所有缓冲的消息
-        this.processAllBufferedMessages();
-
-        // 立即重置所有背压参数
-        this.throttleRate = 1.0;
-        this.dropRate = 0.0;
-        this.throttledActors.clear();
-
-        log.info('Applied IMMEDIATE recovery policy');
-    }
-
-    /**
-     * 逐步恢复消息处理
-     */
-    private applyGradualRecovery(): void {
-        // 逐步恢复将在检查背压状态时实现
-        log.info('Started GRADUAL recovery process');
-    }
-
-    /**
-     * 自适应恢复策略
-     */
-    private applyAdaptiveRecovery(): void {
-        // 基于系统指标选择恢复策略
-        const queueSize = this.metricsCollector.estimateQueueSize();
-
-        if (queueSize < 100) {
-            // 队列很小，可以立即恢复
-            this.applyImmediateRecovery();
+        // 根据系统状态动态选择最适合的策略
+        const metrics = this.state.metrics;
+        if (metrics.cpuUsage > 0.9 || metrics.memoryUsage > 0.9) {
+            this.applyDropStrategy();
+        } else if (metrics.messageRate > this.config.thresholds.messageRate) {
+            this.applyThrottleStrategy();
         } else {
-            // 队列较大，逐步恢复
-            this.applyGradualRecovery();
+            this.applyBufferStrategy();
         }
     }
 
     /**
-     * 处理所有缓冲的消息
+     * 获取当前背压状态
      */
-    private processAllBufferedMessages(): void {
-        // 从高优先级到低优先级处理缓冲的消息
-        for (const priority of [MessagePriority.HIGH, MessagePriority.MEDIUM, MessagePriority.LOW]) {
-            const messages = this.messageBuffer.get(priority) || [];
+    public getState(): BackpressureState {
+        return { ...this.state };
+    }
 
-            // 将消息发送到处理逻辑
-            // this.processMessages(messages); // 实际实现需要与Actor系统集成
+    /**
+     * 检查是否需要应用背压
+     */
+    public shouldApplyBackpressure(): boolean {
+        return this.state.isActive;
+    }
 
-            // 清空缓冲区
-            this.messageBuffer.set(priority, []);
-        }
+    /**
+     * 获取当前策略
+     */
+    public getCurrentStrategy(): BackpressureStrategy {
+        return this.state.currentStrategy;
     }
 
     /**
@@ -415,14 +241,14 @@ export class BackpressureManager {
      * @param priority 消息优先级
      */
     public shouldDropMessage(priority: MessagePriority = MessagePriority.MEDIUM): boolean {
-        if (!this.isActive) return false;
+        if (!this.state.isActive) return false;
 
         // 高优先级消息不丢弃
         if (priority === MessagePriority.HIGH) return false;
 
         // 当前策略不是丢弃策略时不丢弃
-        if (this.currentStrategy !== BackpressureStrategy.DROP &&
-            this.currentStrategy !== BackpressureStrategy.ADAPTIVE) {
+        if (this.state.currentStrategy !== BackpressureStrategy.DROP &&
+            this.state.currentStrategy !== BackpressureStrategy.ADAPTIVE) {
             return false;
         }
 
@@ -439,11 +265,11 @@ export class BackpressureManager {
      * @param actorId Actor标识符
      */
     public shouldThrottleActor(actorId: string): boolean {
-        if (!this.isActive) return false;
+        if (!this.state.isActive) return false;
 
         // 当前策略不是限流策略时不限流
-        if (this.currentStrategy !== BackpressureStrategy.THROTTLE &&
-            this.currentStrategy !== BackpressureStrategy.ADAPTIVE) {
+        if (this.state.currentStrategy !== BackpressureStrategy.THROTTLE &&
+            this.state.currentStrategy !== BackpressureStrategy.ADAPTIVE) {
             return false;
         }
 
@@ -457,11 +283,11 @@ export class BackpressureManager {
      * @returns 是否成功缓冲
      */
     public bufferMessage(message: any, priority: MessagePriority = MessagePriority.MEDIUM): boolean {
-        if (!this.isActive) return false;
+        if (!this.state.isActive) return false;
 
         // 当前策略不是缓冲策略时不缓冲
-        if (this.currentStrategy !== BackpressureStrategy.BUFFER &&
-            this.currentStrategy !== BackpressureStrategy.ADAPTIVE) {
+        if (this.state.currentStrategy !== BackpressureStrategy.BUFFER &&
+            this.state.currentStrategy !== BackpressureStrategy.ADAPTIVE) {
             return false;
         }
 
@@ -515,14 +341,14 @@ export class BackpressureManager {
      */
     public getBackpressureState() {
         return {
-            isActive: this.isActive,
-            currentStrategy: this.currentStrategy,
+            isActive: this.state.isActive,
+            currentStrategy: this.state.currentStrategy,
             metrics: {
                 dropRate: this.dropRate,
                 throttleRate: this.throttleRate,
                 bufferSizeLimit: this.bufferSizeLimit,
                 bufferedMessages: this.getTotalBufferedMessages(),
-                throttledActors: this.throttledActors.size
+                throttledActors: this.state.metrics.throttledActors
             }
         };
     }

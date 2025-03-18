@@ -1,3 +1,5 @@
+import { EventEmitter } from 'events';
+import { ClusterManager } from './cluster_manager';
 import { PID } from '@bactor/core';
 
 export interface NodeInfo {
@@ -5,9 +7,9 @@ export interface NodeInfo {
     address: string;
     status: NodeStatus;
     lastHeartbeat: number;
-    load: NodeLoad;
-    metadata?: Record<string, any>;
-    capabilities?: string[];
+    metadata: Record<string, any>;
+    capabilities: string[];
+    load?: NodeLoad;
 }
 
 export interface NodeLoad {
@@ -26,39 +28,37 @@ export interface ClusterState {
     nodes: Map<string, NodeInfo>;
     actors: Map<string, ActorInfo>;
     load: Map<string, NodeLoad>;
-    leader: string | null;
-    term: number;
-    version: number;
     partitions: string[][];
+    version: number;
+    leader: string | null;
 }
 
 export interface Message {
     type: string;
     nodeId: string;
     timestamp: number;
-    state?: ClusterState;
-    targetPid?: PID;
-    senderPid?: string;
-    payload?: any;
+    payload: any;
 }
 
 export enum NodeStatus {
+    JOINING = 'JOINING',
     ACTIVE = 'ACTIVE',
     SUSPECTED = 'SUSPECTED',
     DEAD = 'DEAD',
-    JOINING = 'JOINING',
-    LEAVING = 'LEAVING',
-    MAINTENANCE = 'MAINTENANCE'
+    LEAVING = 'LEAVING'
 }
 
 export interface ClusterConfig {
-    localAddress: string;
-    seedNodes: string[];
-    heartbeatInterval?: number;
-    failureDetectionTimeout?: number;
-    partitionDetectionTimeout?: number;
-    loadReportInterval?: number;
-    failureDetectionThreshold?: number;
+    nodeId: string;
+    heartbeatInterval: number;
+    failureDetectionTimeout: number;
+    partitionDetectionTimeout: number;
+    bootstrapList?: string[];
+    listenAddresses?: string[];
+    enableDHT?: boolean;
+    enablePubSub?: boolean;
+    enableGossip?: boolean;
+    backpressureConfig?: BackpressureConfig;
 }
 
 export enum ReconnectionStrategy {
@@ -91,11 +91,10 @@ export enum ClusterEventType {
     NODE_LEFT = 'NODE_LEFT',
     NODE_SUSPECTED = 'NODE_SUSPECTED',
     NODE_RECOVERED = 'NODE_RECOVERED',
-    STATE_CHANGED = 'STATE_CHANGED',
-    LEADER_ELECTED = 'LEADER_ELECTED',
-    LOAD_CHANGED = 'LOAD_CHANGED',
     PARTITION_DETECTED = 'PARTITION_DETECTED',
-    PARTITION_HEALED = 'PARTITION_HEALED'
+    PARTITION_HEALED = 'PARTITION_HEALED',
+    STATE_CHANGED = 'STATE_CHANGED',
+    LOAD_CHANGED = 'LOAD_CHANGED'
 }
 
 export interface ClusterMetrics {
@@ -148,45 +147,115 @@ export interface LoadThresholds {
     actorCount: number;
 }
 
+/**
+ * 背压策略枚举
+ */
+export enum BackpressureStrategy {
+    DROP = 'DROP',           // 丢弃消息
+    THROTTLE = 'THROTTLE',   // 限流
+    BUFFER = 'BUFFER',       // 缓冲
+    ADAPTIVE = 'ADAPTIVE'    // 自适应
+}
+
+/**
+ * 背压配置
+ */
 export interface BackpressureConfig {
     enabled: boolean;
     strategy: BackpressureStrategy;
     thresholds: BackpressureThresholds;
-    samplingInterval: number;
     recoveryPolicy: RecoveryPolicy;
+    samplingInterval: number;
 }
 
+/**
+ * 背压阈值配置
+ */
 export interface BackpressureThresholds {
+    messageRate: number;
     queueSize: number;
+    processingTime: number;
+    errorRate: number;
+    cpuUsage: number;
+    memoryUsage: number;
+}
+
+/**
+ * 背压状态
+ */
+export interface BackpressureState {
+    isActive: boolean;
+    currentStrategy: BackpressureStrategy;
+    activationTime?: number;
+    triggerReason?: string;
+    metrics: BackpressureMetrics;
+}
+
+/**
+ * 背压指标
+ */
+export interface BackpressureMetrics {
+    currentQueueSize: number;
     memoryUsage: number;
     cpuUsage: number;
     messageRate: number;
+    droppedMessages: number;
+    throttledActors: number;
 }
 
-export enum BackpressureStrategy {
-    DROP = 'DROP',
-    THROTTLE = 'THROTTLE',
-    BUFFER = 'BUFFER',
-    ADAPTIVE = 'ADAPTIVE'
+/**
+ * 消息优先级
+ */
+export enum MessagePriority {
+    HIGH = 'HIGH',
+    MEDIUM = 'MEDIUM',
+    LOW = 'LOW'
+}
+
+/**
+ * 共识消息类型
+ */
+export interface ConsensusMessage {
+    type: 'VOTE';
+    voterId: string;
+    vote: {
+        nodeId: string;
+        state: NodeState;
+        timestamp: number;
+    };
+}
+
+/**
+ * 共识状态
+ */
+export interface ConsensusState {
+    round: number;
+    votes: Map<string, ConsensusMessage>;
+    confirmedFailures: Set<string>;
+    partitions: Set<string>[];
+}
+
+/**
+ * 节点状态
+ */
+export enum NodeState {
+    ALIVE = 'ALIVE',
+    SUSPECTED = 'SUSPECTED',
+    DEAD = 'DEAD'
 }
 
 export enum RecoveryPolicy {
     IMMEDIATE = 'IMMEDIATE',
     GRADUAL = 'GRADUAL',
-    ADAPTIVE = 'ADAPTIVE'
+    EXPONENTIAL = 'EXPONENTIAL'
 }
 
-export interface BackpressureState {
-    isActive: boolean;
-    currentStrategy: BackpressureStrategy;
-    triggerReason?: string;
-    activationTime?: number;
-    metrics: {
-        currentQueueSize: number;
-        memoryUsage: number;
-        cpuUsage: number;
-        messageRate: number;
-        droppedMessages: number;
-        throttledActors: number;
-    };
+export interface LibP2pClusterOptions {
+    clusterManager: ClusterManager;
+    nodeId: string;
+    bootstrapList?: string[];
+    listenAddresses?: string[];
+    enableDHT?: boolean;
+    enablePubSub?: boolean;
+    enableGossip?: boolean;
 } 

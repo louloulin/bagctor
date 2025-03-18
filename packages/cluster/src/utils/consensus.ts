@@ -1,129 +1,148 @@
-import { NodeInfo, NodeStatus } from '../types';
+import { ClusterManager } from '../cluster_manager';
+import { NodeStatus, ClusterEvent, ClusterEventType } from '../types';
 import { log } from '@bactor/core';
 
 /**
  * 实现简化版的分布式共识用于节点故障检测
  */
 export class FailureDetectionConsensus {
-    private votingTimeout: number;
-    private suspectThreshold: number;
-    private deadThreshold: number;
-    private suspectVotes: Map<string, Set<string>>;
-    private deadVotes: Map<string, Set<string>>;
+    private suspectedNodes: Map<string, Set<string>> = new Map();
+    private suspicionTimeout: number;
+    private quorumSize: number;
 
-    /**
-     * 创建故障检测共识实例
-     * @param votingTimeout 投票超时时间(ms)
-     * @param suspectThreshold 判定为可疑节点的投票比例 (0-1)
-     * @param deadThreshold 判定为死亡节点的投票比例 (0-1)
-     */
     constructor(
-        votingTimeout: number = 10000,
-        suspectThreshold: number = 0.5,
-        deadThreshold: number = 0.7
+        private clusterManager: ClusterManager,
+        options: {
+            suspicionTimeout?: number;
+            quorumSize?: number;
+        } = {}
     ) {
-        this.votingTimeout = votingTimeout;
-        this.suspectThreshold = suspectThreshold;
-        this.deadThreshold = deadThreshold;
-        this.suspectVotes = new Map();
-        this.deadVotes = new Map();
+        this.suspicionTimeout = options.suspicionTimeout || 5000;
+        this.quorumSize = options.quorumSize || 3;
     }
 
     /**
-     * 添加一个节点对另一个节点的可疑投票
-     * @param suspectedNodeId 被怀疑的节点ID
-     * @param voterNodeId 投票节点ID
+     * 处理节点怀疑事件
      */
-    public voteSuspect(suspectedNodeId: string, voterNodeId: string): void {
-        if (!this.suspectVotes.has(suspectedNodeId)) {
-            this.suspectVotes.set(suspectedNodeId, new Set());
-        }
-        this.suspectVotes.get(suspectedNodeId)!.add(voterNodeId);
-
-        log.debug('Node voted suspect', { suspectedNodeId, voterNodeId });
-    }
-
-    /**
-     * 添加一个节点对另一个节点的死亡投票
-     * @param deadNodeId 被认为死亡的节点ID
-     * @param voterNodeId 投票节点ID
-     */
-    public voteDead(deadNodeId: string, voterNodeId: string): void {
-        if (!this.deadVotes.has(deadNodeId)) {
-            this.deadVotes.set(deadNodeId, new Set());
-        }
-        this.deadVotes.get(deadNodeId)!.add(voterNodeId);
-
-        log.debug('Node voted dead', { deadNodeId, voterNodeId });
-    }
-
-    /**
-     * 检查是否有足够的投票将节点标记为可疑
-     * @param nodeId 被检查的节点ID
-     * @param totalNodes 当前集群中的总节点数
-     */
-    public hasSuspectConsensus(nodeId: string, totalNodes: number): boolean {
-        const votes = this.suspectVotes.get(nodeId)?.size || 0;
-        const requiredVotes = Math.ceil(totalNodes * this.suspectThreshold);
-
-        return votes >= requiredVotes;
-    }
-
-    /**
-     * 检查是否有足够的投票将节点标记为死亡
-     * @param nodeId 被检查的节点ID
-     * @param totalNodes 当前集群中的总节点数
-     */
-    public hasDeadConsensus(nodeId: string, totalNodes: number): boolean {
-        const votes = this.deadVotes.get(nodeId)?.size || 0;
-        const requiredVotes = Math.ceil(totalNodes * this.deadThreshold);
-
-        return votes >= requiredVotes;
-    }
-
-    /**
-     * 清理指定节点的所有投票
-     * @param nodeId 需要清理投票的节点ID
-     */
-    public clearVotes(nodeId: string): void {
-        this.suspectVotes.delete(nodeId);
-        this.deadVotes.delete(nodeId);
-    }
-
-    /**
-     * 判断节点的健康状态
-     * @param nodeId 节点ID
-     * @param totalNodes 集群总节点数
-     * @returns 建议的节点状态
-     */
-    public determineNodeStatus(nodeId: string, totalNodes: number): NodeStatus {
-        if (this.hasDeadConsensus(nodeId, totalNodes)) {
-            return NodeStatus.DEAD;
-        } else if (this.hasSuspectConsensus(nodeId, totalNodes)) {
-            return NodeStatus.SUSPECTED;
+    public async handleNodeSuspicion(suspectedNodeId: string, reporterNodeId: string): Promise<void> {
+        // 初始化怀疑集合
+        if (!this.suspectedNodes.has(suspectedNodeId)) {
+            this.suspectedNodes.set(suspectedNodeId, new Set());
         }
 
-        return NodeStatus.ACTIVE;
+        const reporters = this.suspectedNodes.get(suspectedNodeId)!;
+        reporters.add(reporterNodeId);
+
+        // 检查是否达到法定人数
+        if (this.hasQuorum(reporters.size)) {
+            await this.markNodeAsDead(suspectedNodeId);
+        } else {
+            // 设置超时，如果在超时时间内没有达到法定人数，重置怀疑状态
+            setTimeout(() => {
+                if (this.suspectedNodes.has(suspectedNodeId)) {
+                    const currentReporters = this.suspectedNodes.get(suspectedNodeId)!;
+                    if (!this.hasQuorum(currentReporters.size)) {
+                        this.suspectedNodes.delete(suspectedNodeId);
+                        log.info(`Suspicion for node ${suspectedNodeId} timed out without quorum`);
+                    }
+                }
+            }, this.suspicionTimeout);
+        }
     }
 
     /**
-     * 定期清理过期的投票
-     * @param nodes 当前集群中的所有节点
+     * 检查是否达到法定人数
      */
-    public cleanupExpiredVotes(nodes: Map<string, NodeInfo>): void {
-        // 获取所有节点ID
-        const allNodeIds = new Set(Array.from(nodes.keys()));
+    private hasQuorum(reporterCount: number): boolean {
+        const activeNodes = this.clusterManager.getAllNodes()
+            .filter(node => node.status === NodeStatus.ACTIVE);
+        const quorumSize = Math.floor(activeNodes.length / 2) + 1;
+        return reporterCount >= quorumSize;
+    }
 
-        // 清理已不在集群中的节点的投票
-        for (const nodeId of this.suspectVotes.keys()) {
-            if (!allNodeIds.has(nodeId)) {
-                this.suspectVotes.delete(nodeId);
+    /**
+     * 将节点标记为死亡
+     */
+    private async markNodeAsDead(nodeId: string): Promise<void> {
+        const event: ClusterEvent = {
+            type: ClusterEventType.NODE_SUSPECTED,
+            nodeId: nodeId,
+            timestamp: Date.now(),
+            data: {
+                reporters: Array.from(this.suspectedNodes.get(nodeId)!)
             }
+        };
+
+        // 通知集群管理器
+        await this.clusterManager.handleNodeStatus(nodeId, NodeStatus.DEAD);
+
+        // 清理怀疑记录
+        this.suspectedNodes.delete(nodeId);
+
+        log.info(`Node ${nodeId} marked as dead by consensus`, {
+            reporters: event.data.reporters
+        });
+    }
+
+    /**
+     * 处理节点恢复
+     */
+    public async handleNodeRecovery(nodeId: string): Promise<void> {
+        // 如果节点被怀疑，清除怀疑状态
+        if (this.suspectedNodes.has(nodeId)) {
+            this.suspectedNodes.delete(nodeId);
         }
 
-        for (const nodeId of this.deadVotes.keys()) {
-            if (!allNodeIds.has(nodeId)) {
-                this.deadVotes.delete(nodeId);
+        const event: ClusterEvent = {
+            type: ClusterEventType.NODE_RECOVERED,
+            nodeId: nodeId,
+            timestamp: Date.now()
+        };
+
+        // 通知集群管理器
+        await this.clusterManager.handleNodeStatus(nodeId, NodeStatus.ACTIVE);
+
+        log.info(`Node ${nodeId} recovered`);
+    }
+
+    /**
+     * 检测网络分区
+     */
+    public detectPartitions(): string[][] {
+        const nodes = this.clusterManager.getAllNodes();
+        const partitions: Set<string>[] = [];
+        const visited = new Set<string>();
+
+        for (const node of nodes) {
+            if (visited.has(node.id)) continue;
+
+            const partition = new Set<string>();
+            this.explorePartition(node.id, partition, visited);
+            partitions.push(partition);
+        }
+
+        return partitions.map(partition => Array.from(partition));
+    }
+
+    /**
+     * 探索网络分区（使用DFS）
+     */
+    private explorePartition(nodeId: string, partition: Set<string>, visited: Set<string>): void {
+        visited.add(nodeId);
+        partition.add(nodeId);
+
+        const node = this.clusterManager.getAllNodes().find(n => n.id === nodeId);
+        if (!node) return;
+
+        // 在实际实现中，这里应该检查节点之间的连接性
+        // 这里简化为检查节点状态
+        const connectedNodes = this.clusterManager.getAllNodes()
+            .filter(n => n.status === NodeStatus.ACTIVE)
+            .map(n => n.id);
+
+        for (const connectedNodeId of connectedNodes) {
+            if (!visited.has(connectedNodeId)) {
+                this.explorePartition(connectedNodeId, partition, visited);
             }
         }
     }

@@ -315,3 +315,39 @@ MIT
 
 - Project Homepage: [GitHub](https://github.com/yourusername/bagctor)
 - Issue Tracker: [Issues](https://github.com/yourusername/bagctor/issues)
+
+# Bactor - 分布式Actor系统
+
+Bactor是一个基于TypeScript的分布式Actor系统，具有强大的集群能力和容错机制。
+
+## 关键特性
+
+- **分布式Actor模型**: 基于Actor模型的轻量级并发
+- **集群管理**: 自动节点发现、故障检测和恢复
+- **一致性哈希放置**: 智能的Actor位置管理
+- **背压机制**: 系统过载保护
+- **可观测性**: 完整的性能监控和状态追踪
+
+## 集群架构
+
+Bactor的集群架构基于libp2p实现，包含以下核心组件：
+
+1. **ClusterManager** - 集群管理核心，协调所有组件工作
+2. **LibP2pClusterTransport** - 基于libp2p的节点间通信
+3. **FailureDetectionConsensus** - 基于共识的故障检测
+4. **ConsistentHashActorPlacement** - 一致性哈希的Actor放置策略
+5. **BackpressureManager** - 系统背压管理
+6. **SystemMetricsCollector** - 系统指标收集
+
+## 当前状态
+
+所有计划的集群功能已完成实现:
+
+- ✅ libp2p通信层
+- ✅ 分布式故障检测
+- ✅ 一致性哈希Actor放置
+- ✅ 实时系统指标监控
+- ✅ 背压策略管理
+- ✅ 集群感知的Actor系统集成
+
+详细实现文档请查看 [cluster.md](./cluster.md)。

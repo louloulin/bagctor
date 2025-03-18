@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
 import { SharedAgentMemory } from './distributed-interaction';
-import { NodeIdentifier } from './types';
+import { NodeIdentifier, WorkflowStep } from './types';
 
 /**
  * Mastra兼容的工作流上下文
@@ -138,9 +138,9 @@ export class Step {
 }
 
 /**
- * 工作流配置
+ * Mastra兼容工作流配置
  */
-interface WorkflowConfig {
+export interface MastraWorkflowConfig {
     name: string;
     triggerSchema?: z.ZodTypeAny;
     nodeAssignment?: Record<string, NodeIdentifier>;
@@ -165,11 +165,13 @@ export class Workflow {
     private nodeAssignment: Record<string, NodeIdentifier> = {};
     private isCommitted: boolean = false;
     private workflowContextId?: string;
+    private agents: Record<string, Agent>;
 
-    constructor(config: WorkflowConfig) {
+    constructor(config: MastraWorkflowConfig, agents: Record<string, Agent>) {
         this.name = config.name;
         this.triggerSchema = config.triggerSchema;
         this.nodeAssignment = config.nodeAssignment || {};
+        this.agents = agents;
     }
 
     /**
@@ -256,12 +258,15 @@ export class Workflow {
             }
 
             try {
-                // 执行步骤
-                const result = await step.execute({
+                // 创建步骤执行上下文
+                const stepContext: StepExecutionContext = {
                     machineContext,
-                    agentsMap: {}, // 这里需要传入实际的agentsMap
+                    agentsMap: this.agents,
                     stepId
-                });
+                };
+
+                // 执行步骤
+                const result = await step.execute(stepContext);
 
                 // 存储结果
                 results[stepId] = result;
@@ -276,5 +281,40 @@ export class Workflow {
             runId,
             results
         };
+    }
+
+    /**
+     * 执行工作流
+     */
+    async execute(context: any = {}): Promise<any> {
+        const results = {};
+
+        for (const step of this.steps) {
+            try {
+                // 执行步骤
+                const agent = this.agents[step.getId()];
+                if (!agent) {
+                    throw new Error(`Agent ${step.getId()} not found`);
+                }
+
+                // 创建步骤执行上下文
+                const stepContext: StepExecutionContext = {
+                    machineContext: new MachineContext(this.workflowContextId || 'workflow', context),
+                    agentsMap: this.agents,
+                    stepId: step.getId()
+                };
+
+                // 执行步骤
+                const result = await step.execute(stepContext);
+
+                // 存储结果
+                results[step.getId()] = result;
+                context[step.getId()] = result;
+            } catch (error) {
+                throw new Error(`Step ${step.getId()} failed: ${error.message}`);
+            }
+        }
+
+        return results;
     }
 } 

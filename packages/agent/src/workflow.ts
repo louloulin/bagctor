@@ -1,170 +1,97 @@
 import { Agent } from '@mastra/core/agent';
-import { z } from 'zod';
-
-export interface WorkflowStep {
-    id: string;
-    agent: string;
-    prompt: string;
-    outputSchema: z.ZodType<any>;
-    retry?: {
-        maxAttempts: number;
-        backoff: 'linear' | 'exponential';
-    };
-}
-
-export interface WorkflowConfig {
-    name: string;
-    triggerSchema: z.ZodType<any>;
-    steps: WorkflowStep[];
-    parallel?: string[];
-    retry?: {
-        maxAttempts: number;
-        backoff: 'linear' | 'exponential';
-    };
-}
+import { WorkflowConfig, WorkflowStep } from './types';
 
 /**
- * 工作流执行结果
- */
-interface WorkflowResult {
-    [key: string]: any;
-}
-
-/**
- * 工作流执行上下文
- */
-interface WorkflowContext {
-    [key: string]: any;
-}
-
-/**
- * 工作流
- * 用于编排多个智能体协同工作
+ * 工作流执行器
+ * 负责编排和执行多个智能体的工作流
  */
 export class Workflow {
     private config: WorkflowConfig;
-    private agentsMap: Map<string, Agent>;
-    private state: Map<string, any> = new Map();
+    private agents: Record<string, Agent>;
 
-    /**
-     * 创建一个新的工作流
-     * @param config 工作流配置
-     * @param agentsMap 智能体映射
-     */
-    constructor(config: WorkflowConfig, agentsMap: Map<string, Agent>) {
+    constructor(config: WorkflowConfig, agents: Record<string, Agent>) {
         this.config = config;
-        this.agentsMap = agentsMap;
+        this.agents = agents;
     }
 
     /**
      * 执行工作流
-     * @param triggerData 触发数据
-     * @returns 工作流执行结果
+     * @param context 执行上下文
+     * @returns 执行结果
      */
-    async execute(triggerData: any): Promise<any> {
-        // Validate trigger data
-        const validatedTrigger = this.config.triggerSchema.parse(triggerData);
+    async execute(context: any = {}): Promise<any> {
+        const results = {};
 
-        // Initialize state with trigger data
-        this.state.set('trigger', validatedTrigger);
-
-        // Execute steps
-        const results: Record<string, any> = {};
-
-        // Handle parallel steps
-        if (this.config.parallel && this.config.parallel.length > 0) {
-            const parallelSteps = this.config.steps.filter(step =>
-                this.config.parallel!.includes(step.id)
-            );
-
-            const parallelResults = await Promise.all(
-                parallelSteps.map(step => this.executeStep(step))
-            );
-
-            parallelSteps.forEach((step, index) => {
-                results[step.id] = parallelResults[index];
-            });
-        }
-
-        // Execute sequential steps
         for (const step of this.config.steps) {
-            if (!this.config.parallel?.includes(step.id)) {
-                results[step.id] = await this.executeStep(step);
-            }
-        }
-
-        return {
-            trigger: validatedTrigger,
-            steps: results
-        };
-    }
-
-    private async executeStep(step: WorkflowStep): Promise<any> {
-        const agent = this.agentsMap.get(step.agent);
-        if (!agent) {
-            throw new Error(`Agent ${step.agent} not found`);
-        }
-
-        // Replace placeholders in prompt with state values
-        const prompt = this.replacePlaceholders(step.prompt);
-
-        // Execute step with retry logic if configured
-        if (step.retry || this.config.retry) {
-            return this.executeWithRetry(step, prompt, agent);
-        }
-
-        // Execute step without retry
-        const result = await agent.generate(prompt);
-        const parsedResult = JSON.parse(result.text);
-        const validatedResult = step.outputSchema.parse(parsedResult);
-        this.state.set(step.id, validatedResult);
-        return validatedResult;
-    }
-
-    private async executeWithRetry(
-        step: WorkflowStep,
-        prompt: string,
-        agent: Agent
-    ): Promise<any> {
-        const retryConfig = step.retry || this.config.retry;
-        if (!retryConfig) {
-            throw new Error('Retry configuration not found');
-        }
-
-        let lastError: Error | undefined;
-        let delay = 1000; // Initial delay in milliseconds
-
-        for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt++) {
             try {
-                const result = await agent.generate(prompt);
-                const parsedResult = JSON.parse(result.text);
-                const validatedResult = step.outputSchema.parse(parsedResult);
-                this.state.set(step.id, validatedResult);
-                return validatedResult;
-            } catch (error) {
-                lastError = error as Error;
-                if (attempt === retryConfig.maxAttempts) {
-                    break;
+                // 准备输入
+                const input = typeof step.input === 'function'
+                    ? step.input(context)
+                    : step.input;
+
+                // 执行步骤
+                const agent = this.agents[step.agent];
+                if (!agent) {
+                    throw new Error(`Agent ${step.agent} not found`);
                 }
 
-                // Wait before retrying
-                await new Promise(resolve => setTimeout(resolve, delay));
+                const result = await agent.generate(input);
 
-                // Update delay based on backoff strategy
-                if (retryConfig.backoff === 'exponential') {
-                    delay *= 2;
+                // 存储结果
+                if (step.output) {
+                    results[step.output] = result.text;
+                    context[step.output] = result.text;
+                }
+            } catch (error) {
+                // 如果有重试配置，尝试重试
+                if (step.retryConfig || this.config.retry) {
+                    const retryResult = await this.retryStep(step, context, error);
+                    if (step.output) {
+                        results[step.output] = retryResult.text;
+                        context[step.output] = retryResult.text;
+                    }
+                } else {
+                    throw new Error(`Step ${step.agent} failed: ${error.message}`);
                 }
             }
         }
 
-        throw lastError;
+        return results;
     }
 
-    private replacePlaceholders(prompt: string): string {
-        return prompt.replace(/\{([^}]+)\}/g, (match, key) => {
-            const value = this.state.get(key);
-            return value !== undefined ? value : match;
-        });
+    /**
+     * 重试执行步骤
+     */
+    private async retryStep(step: WorkflowStep, context: any, originalError: Error) {
+        const retryConfig = step.retryConfig || this.config.retry;
+        if (!retryConfig) {
+            throw originalError;
+        }
+
+        let lastError = originalError;
+        let attempts = 1;
+
+        while (attempts < retryConfig.maxAttempts) {
+            try {
+                // 等待指定延迟
+                await new Promise(resolve => setTimeout(resolve, retryConfig.delay));
+
+                // 重试执行
+                const input = typeof step.input === 'function'
+                    ? step.input(context)
+                    : step.input;
+
+                const agent = this.agents[step.agent];
+                return await agent.generate(input);
+            } catch (error) {
+                lastError = error;
+                attempts++;
+            }
+        }
+
+        throw new Error(
+            `Step ${step.agent} failed after ${attempts} attempts: ${lastError.message}`
+        );
     }
 
     /**
@@ -174,11 +101,10 @@ export class Workflow {
         return JSON.stringify({
             name: this.config.name,
             steps: this.config.steps.map(step => ({
-                id: step.id,
                 agent: step.agent,
-                prompt: step.prompt,
-                outputSchema: step.outputSchema.toString(),
-                retry: step.retry
+                input: typeof step.input === 'function' ? 'function' : step.input,
+                output: step.output,
+                retryConfig: step.retryConfig
             }))
         }, null, 2);
     }

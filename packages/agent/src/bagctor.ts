@@ -268,17 +268,17 @@ export class Bagctor extends EventEmitter {
      * @param config 工作流配置
      */
     async createWorkflow(config: WorkflowConfig): Promise<Workflow> {
-        // Validate agents exist
+        // 验证智能体存在
         for (const step of config.steps) {
             if (!this.agentsMap.has(step.agent)) {
                 throw new Error(`Agent ${step.agent} not found`);
             }
         }
 
-        // Create workflow instance
-        const workflow = new Workflow(config, this.agentsMap);
+        // 创建工作流实例
+        const workflow = new Workflow(config, Object.fromEntries(this.agentsMap));
 
-        // If memory system is enabled, create shared memory context
+        // 如果启用了记忆系统，创建共享记忆上下文
         if (this.memoryManager) {
             await this.createSharedMemory(config.name);
         }

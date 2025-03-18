@@ -257,11 +257,11 @@ const result = await orchestrator.execute(
 );
 ```
 
-### 3.4 分布式工作流
+### 3.4 分布式工作流 ✅
 
 Bagctor提供了强大的分布式工作流功能，完全兼容Mastra的工作流API，同时扩展了分布式执行能力。
 
-#### 3.4.1 创建分布式工作流
+#### 3.4.1 创建分布式工作流 ✅
 
 ```typescript
 import { Step, MastraWorkflow } from "@bagctor/agent";
@@ -318,7 +318,7 @@ const writingStep = workflowAdapter.createStep({
 contentWorkflow.step(researchStep).then(writingStep).commit();
 ```
 
-#### 3.4.2 执行分布式工作流
+#### 3.4.2 执行分布式工作流 ✅
 
 ```typescript
 // 创建运行实例
@@ -332,7 +332,7 @@ const results = await start({
 console.log('工作流执行结果:', results.results);
 ```
 
-#### 3.4.3 工作流容错与恢复
+#### 3.4.3 工作流容错与恢复 ✅
 
 Bagctor的分布式工作流提供了自动容错和恢复能力：
 
@@ -391,7 +391,7 @@ const response = await bagctor.sendMessage(
 const memoryId = await bagctor.createSharedMemory('project-xyz');
 ```
 
-### 3.6 Bagctor的Agent传递扩展
+### 3.6 Bagctor的Agent传递扩展 ✅
 
 Bagctor通过Actor模型增强了Mastra的Agent传递能力，支持分布式环境下的高效Agent协作。
 
@@ -426,7 +426,7 @@ const result = await workflow.execute();
 console.log(result.article); // 最终文章输出
 ```
 
-### 跨节点Agent通信
+### 跨节点Agent通信 ✅
 
 ```typescript
 // 部署在不同节点的Agent之间通信
@@ -461,7 +461,7 @@ const distributedWorkflow = await bagctor.createWorkflow({
 const distributedResult = await distributedWorkflow.execute();
 ```
 
-### 3.7 分布式调度系统
+### 3.7 分布式调度系统 ✅
 
 Bagctor实现了强大的分布式调度系统，用于在集群中高效分配和执行任务：
 
@@ -1394,6 +1394,60 @@ const result = await memoryEnhancedAgent.generate({
     memoryResults: 3
   }
 });
+```
+
+### 3.17 工作流图可视化系统 ✅
+
+Bagctor提供了强大的工作流图可视化系统，支持不同格式的输出和分析。
+
+```typescript
+import { createWorkflowGraph, exportGraphAsDOT, exportGraphAsJSON, analyzeGraph } from "@bagctor/agent";
+
+// 创建工作流
+const workflow = await bagctor.createWorkflow({
+  name: "分布式数据处理",
+  steps: [
+    {
+      agent: "dataCollector",
+      input: "收集网站用户行为数据",
+      output: "rawData"
+    },
+    {
+      agent: "dataProcessor",
+      input: (context) => `处理原始数据: ${context.rawData}`,
+      output: "processedData" 
+    },
+    {
+      agent: "dataAnalyzer",
+      input: (context) => `分析处理后的数据: ${context.processedData}`,
+      output: "analysis"
+    },
+    {
+      agent: "reportGenerator", 
+      input: (context) => `根据分析生成报告: ${context.analysis}`,
+      output: "report"
+    }
+  ]
+});
+
+// 从工作流配置生成工作流图
+const graph = createWorkflowGraph(workflow.config);
+
+// 导出为DOT格式 (用于Graphviz)
+const dotOutput = exportGraphAsDOT(graph);
+fs.writeFileSync("workflow.dot", dotOutput);
+
+// 导出为JSON格式 (用于web可视化)
+const jsonOutput = exportGraphAsJSON(graph);
+fs.writeFileSync("workflow.json", jsonOutput);
+
+// 导出为Mermaid格式 (用于Markdown文档)
+const mermaidOutput = exportGraphAsMermaid(graph);
+fs.writeFileSync("workflow.mmd", mermaidOutput);
+
+// 分析工作流图并获取优化建议
+const suggestions = analyzeGraph(graph);
+console.log("工作流优化建议:", suggestions);
 ```
 
 ## 4. 服务API层

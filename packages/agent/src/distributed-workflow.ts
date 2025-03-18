@@ -1,6 +1,6 @@
 import { Agent } from '@mastra/core/agent';
 import { Step, Workflow as MastraWorkflow, MachineContext } from './workflow-compat';
-import { NodeIdentifier, DistributedNode, AgentContext } from './types';
+import { NodeIdentifier, DistributedNode, AgentContext, WorkflowConfig, WorkflowStep, DistributedWorkflowScheduler } from './types';
 import { AgentInteractionProtocol, SharedAgentMemory, DistributedErrorHandler } from './distributed-interaction';
 import { EventEmitter } from 'events';
 
@@ -317,23 +317,108 @@ export class DistributedWorkflowExecutor {
     }
 
     /**
-     * 执行Mastra兼容工作流
+     * 执行分布式工作流
+     * @param workflow 工作流配置
+     * @param context 执行上下文
      */
-    async executeWorkflow(workflow: Workflow, runId: string, triggerData?: any): Promise<any> {
-        // 注册工作流到调度器
-        await this.scheduler.scheduleWorkflow(workflow, runId);
+    async executeWorkflow(workflow: WorkflowConfig, context: any = {}) {
+        // 验证工作流配置
+        this.validateWorkflow(workflow);
 
-        // 创建工作流上下文
-        const sharedContextId = await SharedAgentMemory.createWorkflowContext(runId);
-        const machineContext = new MachineContext(runId, triggerData);
+        // 获取工作流调度计划
+        const executionPlan = await this.scheduler.createExecutionPlan(workflow);
 
-        // 储存触发数据到共享内存
-        if (triggerData) {
-            await SharedAgentMemory.updateWorkflowContext(sharedContextId, 'triggerData', triggerData);
+        // 执行工作流步骤
+        const results = {};
+        for (const step of executionPlan.steps) {
+            try {
+                // 获取执行节点
+                const executionNode = await this.scheduler.getExecutionNode(step);
+
+                // 准备步骤输入
+                const input = typeof step.input === 'function'
+                    ? step.input(context)
+                    : step.input;
+
+                // 在目标节点执行步骤
+                const result = await this.executeStepOnNode(executionNode, step, input);
+
+                // 存储结果
+                if (step.output) {
+                    results[step.output] = result;
+                    context[step.output] = result;
+                }
+            } catch (error) {
+                // 处理错误并尝试恢复
+                await this.handleStepError(step, error, workflow);
+            }
         }
 
-        // 执行工作流并返回结果
-        return { runId, results: {} };
+        return results;
+    }
+
+    /**
+     * 在指定节点上执行工作流步骤
+     */
+    private async executeStepOnNode(node: NodeIdentifier, step: WorkflowStep, input: any) {
+        const agent = this.agentsMap[step.agent];
+        if (!agent) {
+            throw new Error(`Agent ${step.agent} not found`);
+        }
+
+        // 如果是本地节点，直接执行
+        if (node === 'local') {
+            return await agent.generate(input);
+        }
+
+        // 否则，通过远程调用执行
+        return await this.scheduler.executeRemoteStep(node, step, input);
+    }
+
+    /**
+     * 验证工作流配置
+     */
+    private validateWorkflow(workflow: WorkflowConfig) {
+        if (!workflow.steps || !Array.isArray(workflow.steps)) {
+            throw new Error('Invalid workflow: steps must be an array');
+        }
+
+        for (const step of workflow.steps) {
+            if (!step.agent || !this.agentsMap[step.agent]) {
+                throw new Error(`Invalid workflow: agent ${step.agent} not found`);
+            }
+        }
+    }
+
+    /**
+     * 处理步骤执行错误
+     */
+    private async handleStepError(step: WorkflowStep, error: Error, workflow: WorkflowConfig) {
+        // 检查是否有重试配置
+        const retryConfig = workflow.retry || {
+            maxAttempts: 3,
+            delay: 1000
+        };
+
+        // 尝试重试执行
+        let attempts = 1;
+        while (attempts < retryConfig.maxAttempts) {
+            try {
+                // 等待指定延迟
+                await new Promise(resolve => setTimeout(resolve, retryConfig.delay));
+
+                // 重新调度到不同节点
+                const newNode = await this.scheduler.getAlternativeNode(step);
+                return await this.executeStepOnNode(newNode, step, step.input);
+            } catch (retryError) {
+                attempts++;
+                if (attempts >= retryConfig.maxAttempts) {
+                    throw new Error(`Step ${step.agent} failed after ${attempts} attempts: ${error.message}`);
+                }
+            }
+        }
+
+        throw error;
     }
 
     /**

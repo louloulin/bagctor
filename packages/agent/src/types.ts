@@ -34,28 +34,22 @@ export interface BagctorConfig {
 
 export interface WorkflowStep {
     agent: string;
-    input: string | ((context: Record<string, any>) => string);
-    output: string;
+    input: string | ((context: any) => string);
+    output?: string;
+    retryConfig?: {
+        maxAttempts: number;
+        delay: number;
+    };
 }
 
 export interface WorkflowConfig {
     name: string;
-    triggerSchema: z.ZodType<any>;
-    steps: Array<{
-        id: string;
-        agent: string;
-        prompt: string;
-        outputSchema: z.ZodType<any>;
-        retry?: {
-            maxAttempts: number;
-            backoff: 'linear' | 'exponential';
-        };
-    }>;
-    parallel?: string[];
+    steps: WorkflowStep[];
     retry?: {
         maxAttempts: number;
-        backoff: 'linear' | 'exponential';
+        delay: number;
     };
+    nodeAssignment?: Record<string, string>;
 }
 
 export interface TeamConfig {
@@ -144,4 +138,15 @@ export interface DistributedNode {
         memory: number;          // 内存使用率
         load: number;            // 负载
     };
+}
+
+export interface DistributedWorkflowScheduler {
+    createExecutionPlan(workflow: WorkflowConfig): Promise<{ steps: WorkflowStep[] }>;
+    getExecutionNode(step: WorkflowStep): Promise<NodeIdentifier>;
+    executeRemoteStep(node: NodeIdentifier, step: WorkflowStep, input: any): Promise<any>;
+    getAlternativeNode(step: WorkflowStep): Promise<NodeIdentifier>;
+    getWorkflow(workflowId: string): Promise<WorkflowConfig>;
+    getWorkflowState(workflowId: string): Promise<any>;
+    scheduleWorkflow(workflow: WorkflowConfig, workflowId: string): Promise<void>;
+    executeStep(step: WorkflowStep, context: any): Promise<any>;
 } 

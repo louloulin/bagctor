@@ -4,191 +4,191 @@
     "messageCount": 100,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 0.33208299999751034,
-    "throughput": 301129
+    "duration": 0.39175000000250293,
+    "throughput": 255264
   },
   {
     "actorCount": 10,
     "messageCount": 100,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 0.48312499999883585,
-    "throughput": 206985
+    "duration": 1.8133749999979045,
+    "throughput": 55145
   },
   {
     "actorCount": 10,
     "messageCount": 100,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 0.5715000000018335,
-    "throughput": 174978
+    "duration": 0.6071250000022701,
+    "throughput": 164710
   },
   {
     "actorCount": 10,
     "messageCount": 100,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.24691700000039418,
-    "throughput": 404994
+    "duration": 0.26512499999807915,
+    "throughput": 377180
   },
   {
     "actorCount": 10,
     "messageCount": 100,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 0.4934580000008282,
-    "throughput": 202651
+    "duration": 0.4931670000005397,
+    "throughput": 202771
   },
   {
     "actorCount": 10,
     "messageCount": 100,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 0.5726670000003651,
-    "throughput": 174621
+    "duration": 0.6792910000003758,
+    "throughput": 147212
   },
   {
     "actorCount": 10,
     "messageCount": 200,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 0.4741250000006403,
-    "throughput": 421829
+    "duration": 0.33475000000180444,
+    "throughput": 597460
   },
   {
     "actorCount": 10,
     "messageCount": 200,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 0.7322500000009313,
-    "throughput": 273130
+    "duration": 0.7105420000007143,
+    "throughput": 281475
   },
   {
     "actorCount": 10,
     "messageCount": 200,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 0.915832999999111,
-    "throughput": 218380
+    "duration": 1.1777920000022277,
+    "throughput": 169809
   },
   {
     "actorCount": 10,
     "messageCount": 200,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.6613749999996799,
-    "throughput": 302400
+    "duration": 0.7937500000043656,
+    "throughput": 251968
   },
   {
     "actorCount": 10,
     "messageCount": 200,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 3.273624999997992,
-    "throughput": 61094
+    "duration": 2.2927920000001905,
+    "throughput": 87229
   },
   {
     "actorCount": 10,
     "messageCount": 200,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 1.0826670000024023,
-    "throughput": 184729
+    "duration": 2.621917000004032,
+    "throughput": 76280
   },
   {
     "actorCount": 20,
     "messageCount": 100,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 0.16525000000183354,
-    "throughput": 605143
+    "duration": 0.14829099999769824,
+    "throughput": 674349
   },
   {
     "actorCount": 20,
     "messageCount": 100,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 0.3756250000005821,
-    "throughput": 266222
+    "duration": 0.3929580000040005,
+    "throughput": 254480
   },
   {
     "actorCount": 20,
     "messageCount": 100,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 0.43624999999883585,
-    "throughput": 229226
+    "duration": 0.47091699999873526,
+    "throughput": 212351
   },
   {
     "actorCount": 20,
     "messageCount": 100,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.2552079999986745,
-    "throughput": 391837
+    "duration": 0.3793749999967986,
+    "throughput": 263591
   },
   {
     "actorCount": 20,
     "messageCount": 100,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 0.5182500000009895,
-    "throughput": 192957
+    "duration": 0.6188330000004498,
+    "throughput": 161594
   },
   {
     "actorCount": 20,
     "messageCount": 100,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 0.6147080000009737,
-    "throughput": 162678
+    "duration": 0.6303339999940363,
+    "throughput": 158646
   },
   {
     "actorCount": 20,
     "messageCount": 200,
     "mailboxType": "default",
     "dispatcherType": "default",
-    "duration": 0.29487499999959255,
-    "throughput": 678253
+    "duration": 0.3139999999984866,
+    "throughput": 636942
   },
   {
     "actorCount": 20,
     "messageCount": 200,
     "mailboxType": "default",
     "dispatcherType": "layered",
-    "duration": 0.8332919999993464,
-    "throughput": 240011
+    "duration": 0.8316669999985606,
+    "throughput": 240480
   },
   {
     "actorCount": 20,
     "messageCount": 200,
     "mailboxType": "default",
     "dispatcherType": "adaptive",
-    "duration": 1.415832999999111,
-    "throughput": 141259
+    "duration": 2.004666000000725,
+    "throughput": 99767
   },
   {
     "actorCount": 20,
     "messageCount": 200,
     "mailboxType": "lockfree",
     "dispatcherType": "default",
-    "duration": 0.8067499999997381,
-    "throughput": 247908
+    "duration": 1.2130829999950947,
+    "throughput": 164869
   },
   {
     "actorCount": 20,
     "messageCount": 200,
     "mailboxType": "lockfree",
     "dispatcherType": "layered",
-    "duration": 3.739291999998386,
-    "throughput": 53486
+    "duration": 2.282874999997148,
+    "throughput": 87608
   },
   {
     "actorCount": 20,
     "messageCount": 200,
     "mailboxType": "lockfree",
     "dispatcherType": "adaptive",
-    "duration": 1.061416000000463,
-    "throughput": 188427
+    "duration": 7.315540999996301,
+    "throughput": 27339
   }
 ]

@@ -94,7 +94,7 @@ await myAgent.stream("请详细解释分布式系统的特点", {
 });
 ```
 
-### 2.4 内存配置
+### 2.4 内存配置 ✅
 
 ```typescript
 // 使用内存选项
@@ -109,6 +109,45 @@ await myAgent.stream("这个问题的后续是什么？", {
   resourceId: "user_123",
   threadId: "thread_456",
 });
+
+// 高级内存配置示例
+import { createMemoryManager } from "@bagctor/agent";
+import { createEnhancedAgent } from "@bagctor/agent";
+import { ImportanceLevel } from "@bagctor/agent";
+
+// 创建内存管理器
+const memoryManager = createMemoryManager();
+
+// 创建增强的Agent，添加内存功能
+const enhancedAgent = createEnhancedAgent(myAgent, memoryManager);
+
+// 向会话添加记忆
+await enhancedAgent.addToMemory(
+  "用户喜欢研究分布式系统和Actor模型",
+  {
+    type: "fact",
+    importance: ImportanceLevel.High,
+    resourceId: "user_123",
+    threadId: "conversation_456",
+    metadata: { category: "interest" }
+  }
+);
+
+// 使用增强的generate方法，自动应用内存上下文
+const response = await enhancedAgent.generate(
+  "我应该研究哪些技术？",
+  {
+    resourceId: "user_123",
+    threadId: "conversation_456",
+    memoryOptions: {
+      lastMessages: 10,
+      semanticRecall: {
+        topK: 5,
+        threshold: 0.7
+      }
+    }
+  }
+);
 ```
 
 ### 2.5 工具定义
@@ -657,7 +696,7 @@ const articleResult = await contentCreationChain.execute({
 console.log("最终文章:", articleResult.editing.editedCopy);
 ```
 
-### 3.9 智能体团队构建
+### 3.9 智能体团队构建 ✅
 
 Bagctor提供了创建智能体团队的高级API，支持复杂协作场景。
 
@@ -853,3 +892,57 @@ fs.writeFileSync("workflow.mmd", mermaidOutput);
 // 分析工作流图并获取优化建议
 const suggestions = analyzeGraph(graph);
 console.log("工作流优化建议:", suggestions);
+```
+
+### 3.12 Mastra兼容的智能体网络 ✅
+
+Bagctor实现了与Mastra完全兼容的AgentNetwork API，提供多智能体协作网络功能，同时充分利用Bagctor的分布式能力。
+
+```typescript
+import { AgentNetwork } from "@bagctor/agent";
+import { Agent } from "@mastra/core/agent";
+import { openai } from "@ai-sdk/openai";
+
+// 创建专业智能体
+const researchAgent = new Agent({
+  name: "Research",
+  instructions: "You search for and gather information on topics",
+  model: openai("gpt-4o"),
+});
+
+const summaryAgent = new Agent({
+  name: "Summary",
+  instructions: "You summarize information into concise points",
+  model: openai("gpt-4o"),
+});
+
+// 创建智能体网络
+export const researchNetwork = new AgentNetwork({
+  name: "Research Assistant",
+  instructions:
+    "This network researches topics and provides summarized information.",
+  agents: [researchAgent, summaryAgent],
+  routingModel: openai("gpt-4o"),
+});
+
+// 处理任务
+const result = await researchNetwork.process("Tell me about quantum computing");
+console.log(result.result);
+
+// 监听网络事件
+researchNetwork.on('taskStarted', (data) => {
+  console.log(`任务开始: ${data.taskId}`);
+});
+
+researchNetwork.on('taskCompleted', (data) => {
+  console.log(`任务完成: ${data.taskId}`);
+});
+
+// 添加新的智能体到网络
+const analysisAgent = new Agent({
+  name: "Analysis",
+  instructions: "You analyze information and identify patterns",
+  model: openai("gpt-4o"),
+});
+
+researchNetwork.addAgent(analysisAgent);

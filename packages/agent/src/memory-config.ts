@@ -247,23 +247,30 @@ export class MemoryConfigManager {
     ): Promise<void> {
         if (!threadId || !resourceId) return;
 
-        // 记录用户输入
-        await this.addMemoryToThread(
-            threadId,
-            resourceId,
-            userInput,
-            'interaction',
-            { role: 'user' }
-        );
+        try {
+            // 确保线程上下文存在
+            await this.getOrCreateThreadContext(threadId, resourceId);
 
-        // 记录代理响应
-        await this.addMemoryToThread(
-            threadId,
-            resourceId,
-            agentResponse,
-            'interaction',
-            { role: 'assistant' }
-        );
+            // 记录用户输入
+            await this.addMemoryToThread(
+                threadId,
+                resourceId,
+                userInput,
+                'interaction',
+                { role: 'user' }
+            );
+
+            // 记录代理响应
+            await this.addMemoryToThread(
+                threadId,
+                resourceId,
+                agentResponse,
+                'interaction',
+                { role: 'assistant' }
+            );
+        } catch (error) {
+            console.error('记录交互失败:', error);
+        }
     }
 }
 

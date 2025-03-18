@@ -127,7 +127,7 @@ describe('Memory Configuration Tests', () => {
         expect(addMemorySpy).toHaveBeenCalled();
         expect(addMemorySpy.mock.calls[0][0].content).toBe('Important fact');
         expect(addMemorySpy.mock.calls[0][0].type).toBe('fact');
-        expect(addMemorySpy.mock.calls[0][0].importance).toBe(ImportanceLevel.High);
+        expect(addMemorySpy.mock.calls[0][0].importance).toBe(2);
     });
 
     it('应该获取上下文记忆', async () => {

@@ -183,18 +183,22 @@ export class EnhancedAgentAdapter {
             metadata?: Record<string, any>;
         } = {}
     ): Promise<string> {
-        const { resourceId, threadId, type = 'fact', metadata = {} } = options;
+        const { resourceId, threadId, type = 'fact', importance = 2, metadata = {} } = options;
 
         if (!resourceId || !threadId) {
             throw new Error('添加到记忆需要resourceId和threadId');
         }
 
+        // 使用正确的ImportanceLevel传递importance参数
         return this.memoryConfigManager.addMemoryToThread(
             threadId,
             resourceId,
             content,
             type as any,
-            metadata
+            {
+                ...metadata,
+                importance: importance // 确保importance值被正确传递
+            }
         );
     }
 

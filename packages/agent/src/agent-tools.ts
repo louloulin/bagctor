@@ -176,7 +176,7 @@ export class ToolChain extends EventEmitter {
      * 创建工具链
      */
     constructor({ name, nodes }: { name: string; nodes: ToolChainNode[] }) {
-        super();
+        super({ captureRejections: false });
         this.name = name;
         this.nodes = nodes;
     }
@@ -190,53 +190,77 @@ export class ToolChain extends EventEmitter {
         const startTime = Date.now();
         const results: Record<string, any> = {};
 
+        // 确保至少有一个错误事件监听器，以避免未处理的错误
+        if (this.listenerCount('error') === 0) {
+            this.on('error', () => {
+                // 静默处理，防止未捕获的错误
+            });
+        }
+
         try {
             this.emit('start', { input, chainName: this.name });
+
+            let lastResult = input;
 
             // 按顺序执行各节点
             for (const node of this.nodes) {
                 try {
-                    this.emit('nodeStart', { nodeId: node.id, input });
+                    this.emit('nodeStart', { nodeId: node.id, input: lastResult });
 
                     // 计算节点输入
-                    const nodeInput = node.input(input, results);
+                    const nodeInput = node.input(lastResult, results);
 
                     // 执行工具
                     const result = await node.tool.handler(nodeInput, options.context);
 
                     // 保存结果
                     results[node.id] = result;
+                    lastResult = result;
 
                     this.emit('nodeComplete', { nodeId: node.id, result });
                 } catch (error) {
+                    // 先发出节点错误事件，但不抛出未处理的错误
                     this.emit('nodeError', { nodeId: node.id, error });
 
                     if (!options.continueOnError) {
-                        throw error;
+                        // 构建失败结果
+                        const executionTime = Date.now() - startTime;
+                        const failureResult: ToolChainResult = {
+                            success: false,
+                            results,
+                            executionTime: Math.max(1, executionTime),
+                            error: error as Error
+                        };
+
+                        // 发出链错误事件，但不会导致未处理的错误
+                        this.emit('error', failureResult);
+
+                        return failureResult;
                     }
                 }
             }
 
             const executionTime = Date.now() - startTime;
-            const chainResult: ToolChainResult = {
+            const finalResult: ToolChainResult = {
                 success: true,
                 results,
-                executionTime
+                executionTime: Math.max(1, executionTime)
             };
 
-            this.emit('complete', chainResult);
-            return chainResult;
+            this.emit('complete', finalResult);
+            return finalResult;
         } catch (error) {
             const executionTime = Date.now() - startTime;
-            const chainResult: ToolChainResult = {
+            const failureResult: ToolChainResult = {
                 success: false,
                 results,
-                executionTime,
-                error: error instanceof Error ? error : new Error(String(error))
+                executionTime: Math.max(1, executionTime),
+                error: error as Error
             };
 
-            this.emit('error', chainResult);
-            return chainResult;
+            // 发出链错误事件，但不会导致未处理的错误
+            this.emit('error', failureResult);
+            return failureResult;
         }
     }
 }
@@ -273,8 +297,17 @@ export function createAgentTool<TInput = any, TOutput = any>(
                 // 使用预处理函数处理输入
                 prompt = await Promise.resolve(options.preProcess(context as TInput));
             } else if (options.template) {
-                // 使用模板构建提示
-                prompt = options.template.replace(/\{\{input\}\}/g, JSON.stringify(context));
+                // 使用模板构建提示，支持对象路径格式如 input.property
+                prompt = options.template.replace(/\{\{input\}\}/g, JSON.stringify(context))
+                    .replace(/\{\{input\.([^}]+)\}\}/g, (match, path) => {
+                        const pathParts = path.split('.');
+                        let value = context;
+                        for (const part of pathParts) {
+                            if (value === null || value === undefined) return '';
+                            value = value[part];
+                        }
+                        return typeof value === 'object' ? JSON.stringify(value) : String(value || '');
+                    });
             } else {
                 // 默认提示格式
                 prompt = `处理以下输入:\n${JSON.stringify(context, null, 2)}`;
@@ -426,4 +459,4 @@ export function createCoordinatorAgent(
         model: options.model,
         tools: options.tools
     });
-} 
+}

@@ -94,6 +94,24 @@ export class SharedAgentMemory {
      * @param key 唯一键
      */
     static async get(key: string): Promise<any> {
+        // 检查键是否存在，如果不存在创建默认值
+        if (!this.memoryStore.has(key)) {
+            // 如果是工作流上下文，创建默认结构
+            if (key.startsWith('workflow_context_')) {
+                const workflowId = key.replace('workflow_context_', '');
+                await this.set(key, {
+                    workflowId,
+                    created: Date.now(),
+                    steps: [],
+                    data: {}
+                });
+                console.log(`创建默认工作流上下文: ${key}`);
+            } else {
+                // 其他类型的键设置空对象
+                await this.set(key, {});
+            }
+        }
+
         return this.memoryStore.get(key);
     }
 

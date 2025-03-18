@@ -342,16 +342,27 @@ async function example4_sharedMemoryContext() {
     (bagctor as any).agentsMap.set('dev', developer);
     (bagctor as any).agentsMap.set('designer', designer);
 
-    // 初始化记忆管理器（简化示例，实际使用需要更复杂的设置）
-    (bagctor as any).memoryManager = {
-        addMemory: async (item: any) => {
+    // 初始化记忆管理器（使用enableMemorySystem方法而不是直接赋值）
+    console.log('初始化记忆管理器...');
+
+    // 创建一个模拟的存储适配器
+    const mockStorage = {
+        addItem: async (item: any) => {
             console.log(`添加记忆: ${item.content} (来源: ${item.source})`);
             return 'memory_id_' + Math.random().toString(36).substring(2);
         },
-        storage: {
-            queryItems: async () => []
-        }
+        getItem: async (id: string) => null,
+        updateItem: async (id: string, updates: any) => true,
+        deleteItem: async (id: string) => true,
+        queryItems: async (options?: any) => [],
+        clear: async () => { }
     };
+
+    // 使用正确的API初始化记忆系统
+    bagctor.enableMemorySystem({
+        cacheSize: 100,
+        customStorage: mockStorage
+    });
 
     // 初始化知识共享
     const sharingManager = bagctor.initKnowledgeSharing();

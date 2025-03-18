@@ -14,7 +14,7 @@ import { MCPIntegrationManager, MCPIntegrationOptions } from './mcp';
 import { MemoryManager, createMemoryManager, SharedMemoryContext } from './memory';
 import { WorkflowGraph, createWorkflowGraph } from './workflow-state';
 import { AgentNetworkManager, AgentTeam, AgentTeamConfig } from './agent-network';
-import type { Tool, ToolSet } from './tools';
+import { Tool, ToolSet } from './tools';
 import {
     ToolChain,
     ToolChainBuilder,
@@ -497,23 +497,20 @@ export class Bagctor extends EventEmitter {
     }
 
     /**
-     * 初始化工具集合
+     * 初始化工具集
      */
-    initToolSet(): ToolSet {
+    private initToolSet(): ToolSet {
         if (!this.toolSet) {
-            // 动态导入ToolSet以避免循环依赖
-            const { ToolSet } = require('./tools');
             this.toolSet = new ToolSet();
         }
-        // 确保返回非空对象
-        return this.toolSet as ToolSet;
+        return this.toolSet;
     }
 
     /**
      * 注册工具
      * @param tool 要注册的工具
      */
-    registerTool(tool: Tool): void {
+    registerTool(tool: any): void {
         const toolSet = this.initToolSet();
         toolSet.add(tool);
     }
@@ -522,7 +519,7 @@ export class Bagctor extends EventEmitter {
      * 注册多个工具
      * @param tools 要注册的工具数组
      */
-    registerTools(tools: Tool[]): void {
+    registerTools(tools: any[]): void {
         const toolSet = this.initToolSet();
         for (const tool of tools) {
             toolSet.add(tool);
@@ -530,10 +527,10 @@ export class Bagctor extends EventEmitter {
     }
 
     /**
-     * 获取工具
+     * 获取特定工具
      * @param name 工具名称
      */
-    getTool(name: string): Tool | undefined {
+    getTool(name: string): any {
         const toolSet = this.initToolSet();
         return toolSet.get(name);
     }
@@ -541,7 +538,7 @@ export class Bagctor extends EventEmitter {
     /**
      * 获取所有工具
      */
-    getAllTools(): Record<string, Tool> {
+    getAllTools(): Record<string, any> {
         const toolSet = this.initToolSet();
         return toolSet.getAll();
     }
@@ -550,18 +547,10 @@ export class Bagctor extends EventEmitter {
      * 执行工具
      * @param name 工具名称
      * @param params 工具参数
-     * @param context 执行上下文
      */
-    async executeTool<TInput, TOutput>(
-        name: string,
-        params: TInput,
-        context?: any
-    ): Promise<TOutput> {
+    async executeTool(name: string, params: any): Promise<any> {
         const toolSet = this.initToolSet();
-        if (!toolSet) {
-            throw new Error("Tool set not initialized");
-        }
-        return toolSet.execute(name, params, context);
+        return await toolSet.execute(name, params);
     }
 
     /**
@@ -632,8 +621,7 @@ export class Bagctor extends EventEmitter {
     }
 
     /**
-     * 创建协作者智能体
-     * 使用其他智能体作为工具
+     * 创建协作智能体，用于协调其他智能体工作
      */
     createCoordinatorAgent(options: {
         name: string;
@@ -641,7 +629,17 @@ export class Bagctor extends EventEmitter {
         model: any;
         agentTools: string[];
     }): Agent {
-        // 创建智能体工具
+        // 初始化智能体工具组
+        if (!this.agentToolGroup) {
+            this.agentToolGroup = new AgentToolGroup();
+
+            // 将所有智能体添加到工具组
+            for (const [id, agent] of this.agentsMap.entries()) {
+                this.agentToolGroup.addAgent(id, agent);
+            }
+        }
+
+        // 将智能体转换为工具
         const tools: Record<string, Tool> = {};
 
         for (const agentId of options.agentTools) {

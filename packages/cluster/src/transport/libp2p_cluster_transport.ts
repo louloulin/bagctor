@@ -330,9 +330,24 @@ export class LibP2pClusterTransport extends EventEmitter {
     private async registerWithCluster(): Promise<void> {
         if (!this.node) return;
 
+        let address = '';
+        // 安全检查：确保getMultiaddrs()返回非空数组
+        if (process.env.MULTI_PROCESS_TEST === 'true') {
+            // 在多进程测试模式下，使用配置中的地址
+            address = this.options.localAddress || `/ip4/127.0.0.1/tcp/${10000 + Math.floor(Math.random() * 1000)}`;
+        } else {
+            const multiaddrs = this.node.getMultiaddrs();
+            if (!multiaddrs || multiaddrs.length === 0) {
+                // 如果节点尚未绑定地址，使用配置中的备用地址
+                address = this.options.localAddress || `/ip4/127.0.0.1/tcp/${10000 + Math.floor(Math.random() * 1000)}`;
+            } else {
+                address = multiaddrs[0].toString();
+            }
+        }
+
         const nodeInfo: NodeInfo = {
             id: this.nodeId,
-            address: this.node.getMultiaddrs()[0].toString(),
+            address: address,
             status: NodeStatus.ACTIVE,
             lastHeartbeat: Date.now(),
             metadata: {},
@@ -395,97 +410,106 @@ export class LibP2pClusterTransport extends EventEmitter {
     }
 
     private async initLibp2p(): Promise<void> {
-        const bootstrapList = this.options.bootstrapList || [];
-        const listenAddresses = this.options.listenAddresses || ['/ip4/0.0.0.0/tcp/0'];
-        const enableDHT = this.options.enableDHT || false;
-        const enablePubSub = this.options.enablePubSub || true;
-        const enableGossip = this.options.enableGossip || true;
+        // 使用配置中的地址作为监听地址
+        const listenAddress = this.options.localAddress || '/ip4/0.0.0.0/tcp/0';
 
-        // Provide simple configuration for tests
-        const isTestEnv = process.env.NODE_ENV === 'test' ||
-            (typeof process.env.BUN_ENV !== 'undefined') ||
-            process.argv.includes('--test');
-
-        if (isTestEnv) {
-            // For tests, create a minimal mock node
-            this.node = {
-                // Minimal required implementation for tests
-                start: async () => { },
-                stop: async () => { },
-                getMultiaddrs: () => [],
-                addEventListener: () => { },
-                handle: async () => { },
-            } as any; // Use 'as any' for simplicity in test environment
-            return;
-        }
-
-        // Real implementation for non-test environments
+        // 基本配置
         const transportConfig: any = {
             addresses: {
-                listen: listenAddresses
+                listen: [listenAddress]
             },
             transports: [tcp()],
-            connectionEncryption: [plaintext() as any],
+            connectionEncryption: [plaintext()],
             streamMuxers: [],
             connectionManager: {
                 autoDial: true,
-                minConnections: 0
+                minConnections: 0,
+                maxConnections: 50,
+                maxParallelDials: 25,
+                dialTimeout: 10000
+            },
+            metrics: {
+                enabled: true,
+                computeThrottleMaxQueueSize: 1000,
+                movingAverageIntervals: [
+                    60 * 1000, // 1 minute
+                    5 * 60 * 1000, // 5 minutes
+                    15 * 60 * 1000 // 15 minutes
+                ]
             }
         };
 
-        // Configure peer discovery mechanisms
+        // 配置对等节点发现机制
         const peerDiscovery = [];
 
-        if (bootstrapList.length > 0) {
+        // 如果有引导节点，添加引导节点发现
+        if (this.options.bootstrapList && this.options.bootstrapList.length > 0) {
             peerDiscovery.push(bootstrap({
-                list: bootstrapList
+                list: this.options.bootstrapList,
+                timeout: 5000
             }));
         }
 
-        if (enablePubSub) {
+        // 添加pubsub对等节点发现
+        if (this.options.enablePubSub !== false) {
             peerDiscovery.push(pubsubPeerDiscovery({
-                interval: 10000
+                interval: 10000,
+                topics: Object.values(TOPICS)
             }));
         }
 
         transportConfig.peerDiscovery = peerDiscovery;
 
-        // Initialize node
-        this.node = await libp2p.createLibp2p(transportConfig);
+        try {
+            // 创建libp2p节点
+            this.node = await libp2p.createLibp2p(transportConfig);
 
-        // Set up event handlers
-        this.node.addEventListener('peer:discovery', (evt) => {
-            const remotePeerId = evt.detail.toString();
-            log.debug('Discovered peer', { peerId: remotePeerId });
-            this.handlePeerDiscovery(remotePeerId);
-        });
-
-        this.node.addEventListener('peer:connect', (evt) => {
-            const remotePeerId = evt.detail.toString();
-            log.debug('Connected to peer', { peerId: remotePeerId });
-            this.handlePeerConnect(remotePeerId);
-        });
-
-        this.node.addEventListener('peer:disconnect', (evt) => {
-            const remotePeerId = evt.detail.toString();
-            log.debug('Disconnected from peer', { remotePeerId });
-            this.handlePeerDisconnect(remotePeerId);
-        });
-
-        // Handle messages - 简化处理方式避免类型错误
-        await this.node.handle('/bactor/cluster/1.0.0', ({ stream, connection }) => {
-            // 使用 any 类型规避具体的类型问题
-            pipe(stream.source, async (source: any) => {
-                try {
-                    for await (const data of source) {
-                        const message = JSON.parse(toString(data));
-                        const remotePeerId = connection.remotePeer.toString();
-                        this.handleMessage(message, remotePeerId);
-                    }
-                } catch (error) {
-                    log.error('Error handling stream data', { error });
-                }
+            // 设置事件处理器
+            this.node.addEventListener('peer:discovery', (evt: any) => {
+                const remotePeerId = evt.detail.toString();
+                log.debug('Discovered peer', { peerId: remotePeerId });
+                this.handlePeerDiscovery(remotePeerId).catch(err => {
+                    log.error('Error handling peer discovery', { error: err });
+                });
             });
-        });
+
+            this.node.addEventListener('peer:connect', (evt: any) => {
+                const remotePeerId = evt.detail.toString();
+                log.debug('Connected to peer', { peerId: remotePeerId });
+                this.handlePeerConnect(remotePeerId).catch(err => {
+                    log.error('Error handling peer connection', { error: err });
+                });
+            });
+
+            this.node.addEventListener('peer:disconnect', (evt: any) => {
+                const remotePeerId = evt.detail.toString();
+                log.debug('Disconnected from peer', { peerId: remotePeerId });
+                this.handlePeerDisconnect(remotePeerId);
+            });
+
+            // 处理集群消息
+            await this.node.handle('/bactor/cluster/1.0.0', ({ stream, connection }: any) => {
+                pipe(stream.source, async (source: any) => {
+                    try {
+                        for await (const data of source) {
+                            const message = JSON.parse(toString(data.subarray()));
+                            const remotePeerId = connection.remotePeer.toString();
+                            this.handleMessage(message, remotePeerId);
+                        }
+                    } catch (error) {
+                        log.error('Error handling stream data', { error });
+                    }
+                });
+            });
+
+            this.started = true;
+            log.info('LibP2P node initialized successfully', {
+                nodeId: this.nodeId,
+                address: listenAddress
+            });
+        } catch (error) {
+            log.error('Failed to initialize LibP2P node', { error });
+            throw error;
+        }
     }
 } 

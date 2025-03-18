@@ -13,7 +13,7 @@
     "scripts": {
         "dev": "tsc -p tsconfig.json --watch",
         "build:full": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
-        "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig-build.json",
+        "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
         "build:tests": "tsc -p tsconfig-test.json --noEmit",
         "test": "NODE_ENV=test bun test --preload ../../scripts/registerPathAlias.js --preload ./scripts/test-setup.ts test/**/*.test.ts"
     },

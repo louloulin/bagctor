@@ -33,8 +33,9 @@
       ]
     },
     "allowSyntheticDefaultImports": true,
-    "types": [
-      "bun-types"
+    "typeRoots": [
+      "./node_modules/@types",
+      "./node_modules/bun-types"
     ]
   },
   "references": [

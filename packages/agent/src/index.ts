@@ -9,4 +9,8 @@ export {
 } from './workflow-compat';
 export * from './distributed-workflow';
 export * from './distributed-interaction';
-export * from './mastra-adapters'; 
+export * from './mastra-adapters';
+export {
+    AgentTeam, AgentNetworkManager, AgentTeamConfig, TeamTask, TeamExecutionResult,
+    AgentTaskParameters, TeamMemberConfig, AgentRole, CollaborationModel, CommunicationProtocol
+} from './agent-network'; 

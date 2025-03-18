@@ -13,6 +13,7 @@ import { EventEmitter } from 'events';
 import { MCPIntegrationManager, MCPIntegrationOptions } from './mcp';
 import { MemoryManager, createMemoryManager, SharedMemoryContext } from './memory';
 import { WorkflowGraph, createWorkflowGraph } from './workflow-state';
+import { AgentNetworkManager, AgentTeamConfig } from './agent-network';
 
 /**
  * Bagctor是一个分布式智能体系统，通过Actor模型扩展了Mastra的能力
@@ -25,6 +26,7 @@ export class Bagctor extends EventEmitter {
     private mcpManager?: MCPIntegrationManager;
     private _memoryManager?: MemoryManager;
     private useWorkflowGraph: boolean = false;
+    private agentNetworkManager?: AgentNetworkManager;
 
     /**
      * 创建一个新的Bagctor实例
@@ -414,5 +416,63 @@ export class Bagctor extends EventEmitter {
                 // 实现服务停止逻辑
             }
         };
+    }
+
+    /**
+     * 初始化智能体网络管理器
+     */
+    initAgentNetwork(): AgentNetworkManager {
+        if (!this.agentNetworkManager) {
+            const agentRegistry: Record<string, any> = {};
+
+            // 将所有已注册的智能体添加到网络管理器的注册表中
+            if (this.agents instanceof Map) {
+                // 如果是Map类型
+                for (const [name, agent] of this.agents.entries()) {
+                    agentRegistry[name] = agent;
+                }
+            } else if (typeof this.agents === 'object') {
+                // 如果是普通对象
+                for (const [name, agent] of Object.entries(this.agents)) {
+                    agentRegistry[name] = agent;
+                }
+            }
+
+            this.agentNetworkManager = new AgentNetworkManager(agentRegistry);
+
+            // 监听智能体网络事件
+            this.agentNetworkManager.on('teamCreated', (data) => {
+                this.emit('networkTeamCreated', data);
+            });
+            this.agentNetworkManager.on('teamRemoved', (data) => {
+                this.emit('networkTeamRemoved', data);
+            });
+            this.agentNetworkManager.on('teamTaskStarted', (data) => {
+                this.emit('networkTeamTaskStarted', data);
+            });
+            this.agentNetworkManager.on('teamTaskCompleted', (data) => {
+                this.emit('networkTeamTaskCompleted', data);
+            });
+        }
+
+        return this.agentNetworkManager;
+    }
+
+    /**
+     * 创建智能体团队网络
+     */
+    async createNetwork(teams: AgentTeamConfig[]): Promise<AgentNetworkManager> {
+        const network = this.initAgentNetwork();
+
+        // 创建所有团队
+        for (const teamConfig of teams) {
+            await network.createTeam(teamConfig);
+        }
+
+        this.emit('networkInitialized', {
+            teamCount: teams.length
+        });
+
+        return network;
     }
 } 

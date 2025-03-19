@@ -78,7 +78,8 @@ async function startClusterNode(
         dhtRandomWalk: true,
         loadBalancingConfig,
         partitionConfig,
-        backpressureConfig
+        backpressureConfig,
+        nodeId: clusterConfig.nodeId
     });
 
     // 注册事件监听器

@@ -254,6 +254,8 @@ export enum RecoveryPolicy {
 }
 
 export interface LibP2pClusterOptions {
+    localAddress: string;
+    seedNodes?: string[];
     clusterManager: ClusterManager;
     nodeId: string;
     bootstrapList?: string[];
@@ -261,8 +263,33 @@ export interface LibP2pClusterOptions {
     enableDHT?: boolean;
     enablePubSub?: boolean;
     enableGossip?: boolean;
-    localAddress?: string;
-    seedNodes?: string[];
     dhtEnabled?: boolean;
     dhtRandomWalk?: boolean;
+    privateKey?: any; // libp2p PeerId，设为可选字段
+}
+
+/**
+ * LibP2P集群配置
+ */
+export interface LibP2pClusterSystemConfig {
+    // 集群配置
+    clusterConfig: ClusterConfig;
+    // 本地地址
+    localAddress: string;
+    // 种子节点
+    seedNodes: string[];
+    // DHT是否启用
+    dhtEnabled?: boolean;
+    // DHT随机游走是否启用
+    dhtRandomWalk?: boolean;
+    // 负载均衡配置
+    loadBalancingConfig?: LoadBalancingConfig;
+    // 分区配置
+    partitionConfig?: PartitionConfig;
+    // 背压配置
+    backpressureConfig?: BackpressureConfig;
+    // 节点ID
+    nodeId: string;
+    // 私钥
+    privateKey?: any;
 } 

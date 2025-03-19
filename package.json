@@ -44,6 +44,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "@libp2p/peer-id-factory": "4.2.4",
     "@libp2p/plaintext": "^2.0.13",
     "colorette": "2.0.20",
     "cors": "2.8.5",

@@ -112,7 +112,8 @@ export class ClusterManager extends EventEmitter {
                     listenAddresses: config.listenAddresses,
                     enableDHT: config.enableDHT,
                     enablePubSub: config.enablePubSub,
-                    enableGossip: config.enableGossip
+                    enableGossip: config.enableGossip,
+                    localAddress: config.listenAddresses?.[0] || '/ip4/127.0.0.1/tcp/0'
                 });
                 this.setupTransportEvents();
             } catch (error) {

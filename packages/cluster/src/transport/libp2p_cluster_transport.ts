@@ -1,14 +1,21 @@
 import { EventEmitter } from 'events';
 import { pipe } from 'it-pipe';
 import { fromString, toString } from 'uint8arrays';
-import * as libp2p from 'libp2p';
+import { createLibp2p } from 'libp2p';
+import type { Libp2p } from 'libp2p';
 import { tcp } from '@libp2p/tcp';
 import { pubsubPeerDiscovery } from '@libp2p/pubsub-peer-discovery';
 import { bootstrap } from '@libp2p/bootstrap';
 import { plaintext } from '@libp2p/plaintext';
+import { noise } from '@chainsafe/libp2p-noise';
+import { createEd25519PeerId } from '@libp2p/peer-id-factory';
 import { log } from '@bactor/core';
 import { ClusterManager, NodeInfo, Message, NodeStatus, LibP2pClusterOptions } from '../index';
 import { v4 as uuidv4 } from 'uuid';
+import * as crypto from 'crypto';
+import { mplex } from '@libp2p/mplex';
+import { gossipsub } from '@chainsafe/libp2p-gossipsub';
+import { identify } from '@libp2p/identify';
 
 // 定义集群相关的主题
 const TOPICS = {
@@ -21,16 +28,29 @@ const TOPICS = {
 export class LibP2pClusterTransport extends EventEmitter {
     private clusterManager: ClusterManager;
     private nodeId: string;
-    private node: libp2p.Libp2p | null = null;
+    private node: Libp2p | null = null;
     private peerIdMap: Map<string, string> = new Map();
     private options: LibP2pClusterOptions;
     private started: boolean = false;
+    private listenAddress: string;
 
     constructor(options: LibP2pClusterOptions) {
         super();
         this.options = options;
         this.clusterManager = options.clusterManager;
         this.nodeId = options.nodeId || uuidv4();
+        this.listenAddress = options.localAddress || '/ip4/0.0.0.0/tcp/0';
+
+        const seedNodes = options.seedNodes || [];
+        const bootstrapList = options.bootstrapList || [];
+
+        log.info('Initializing LibP2pClusterTransport', {
+            nodeId: this.nodeId,
+            hasPrivateKey: !!options.privateKey,
+            localAddress: this.listenAddress,
+            hasSeedNodes: seedNodes.length > 0,
+            hasBootstrapList: bootstrapList.length > 0
+        });
     }
 
     async start(): Promise<void> {
@@ -410,106 +430,303 @@ export class LibP2pClusterTransport extends EventEmitter {
     }
 
     private async initLibp2p(): Promise<void> {
-        // 使用配置中的地址作为监听地址
-        const listenAddress = this.options.localAddress || '/ip4/0.0.0.0/tcp/0';
-
-        // 基本配置
-        const transportConfig: any = {
-            addresses: {
-                listen: [listenAddress]
-            },
-            transports: [tcp()],
-            connectionEncryption: [plaintext()],
-            streamMuxers: [],
-            connectionManager: {
-                autoDial: true,
-                minConnections: 0,
-                maxConnections: 50,
-                maxParallelDials: 25,
-                dialTimeout: 10000
-            },
-            metrics: {
-                enabled: true,
-                computeThrottleMaxQueueSize: 1000,
-                movingAverageIntervals: [
-                    60 * 1000, // 1 minute
-                    5 * 60 * 1000, // 5 minutes
-                    15 * 60 * 1000 // 15 minutes
-                ]
-            }
-        };
-
-        // 配置对等节点发现机制
-        const peerDiscovery = [];
-
-        // 如果有引导节点，添加引导节点发现
-        if (this.options.bootstrapList && this.options.bootstrapList.length > 0) {
-            peerDiscovery.push(bootstrap({
-                list: this.options.bootstrapList,
-                timeout: 5000
-            }));
-        }
-
-        // 添加pubsub对等节点发现
-        if (this.options.enablePubSub !== false) {
-            peerDiscovery.push(pubsubPeerDiscovery({
-                interval: 10000,
-                topics: Object.values(TOPICS)
-            }));
-        }
-
-        transportConfig.peerDiscovery = peerDiscovery;
-
         try {
-            // 创建libp2p节点
-            this.node = await libp2p.createLibp2p(transportConfig);
+            console.log(`[INIT_LIBP2P] 开始初始化LibP2P节点, nodeId=${this.nodeId}, hasPrivateKey=${!!this.options.privateKey}`);
 
-            // 设置事件处理器
-            this.node.addEventListener('peer:discovery', (evt: any) => {
-                const remotePeerId = evt.detail.toString();
-                log.debug('Discovered peer', { peerId: remotePeerId });
-                this.handlePeerDiscovery(remotePeerId).catch(err => {
-                    log.error('Error handling peer discovery', { error: err });
+            if (this.options.privateKey) {
+                // 打印更详细的私钥信息
+                console.log(`[INIT_LIBP2P] 提供的privateKey对象详情:`, {
+                    type: typeof this.options.privateKey,
+                    isNull: this.options.privateKey === null,
+                    isUndefined: this.options.privateKey === undefined,
+                    constructor: this.options.privateKey ? this.options.privateKey.constructor?.name : 'N/A',
+                    keys: this.options.privateKey ? Object.keys(this.options.privateKey) : [],
+                    hasPrivateKey: this.options.privateKey && 'privateKey' in this.options.privateKey,
+                    hasId: this.options.privateKey && 'id' in this.options.privateKey,
+                    privateKeyType: this.options.privateKey && 'privateKey' in this.options.privateKey ?
+                        typeof this.options.privateKey.privateKey : 'N/A',
+                    idType: this.options.privateKey && 'id' in this.options.privateKey ?
+                        typeof this.options.privateKey.id : 'N/A'
                 });
-            });
+            }
 
-            this.node.addEventListener('peer:connect', (evt: any) => {
-                const remotePeerId = evt.detail.toString();
-                log.debug('Connected to peer', { peerId: remotePeerId });
-                this.handlePeerConnect(remotePeerId).catch(err => {
-                    log.error('Error handling peer connection', { error: err });
+            // 检查是否有私钥
+            if (!this.options.privateKey) {
+                console.log(`[INIT_LIBP2P] ${this.nodeId}: 未提供私钥，生成新私钥`);
+                log.info('No private key provided, generating new one', {
+                    nodeId: this.nodeId
                 });
-            });
 
-            this.node.addEventListener('peer:disconnect', (evt: any) => {
-                const remotePeerId = evt.detail.toString();
-                log.debug('Disconnected from peer', { peerId: remotePeerId });
-                this.handlePeerDisconnect(remotePeerId);
-            });
+                try {
+                    console.log(`[INIT_LIBP2P] ${this.nodeId}: 调用createEd25519PeerId生成私钥`);
+                    this.options.privateKey = await createEd25519PeerId();
+                    console.log(`[INIT_LIBP2P] ${this.nodeId}: 私钥生成结果:`, {
+                        success: !!this.options.privateKey,
+                        type: typeof this.options.privateKey,
+                        keys: this.options.privateKey ? Object.keys(this.options.privateKey) : []
+                    });
 
-            // 处理集群消息
-            await this.node.handle('/bactor/cluster/1.0.0', ({ stream, connection }: any) => {
-                pipe(stream.source, async (source: any) => {
-                    try {
-                        for await (const data of source) {
-                            const message = JSON.parse(toString(data.subarray()));
-                            const remotePeerId = connection.remotePeer.toString();
-                            this.handleMessage(message, remotePeerId);
-                        }
-                    } catch (error) {
-                        log.error('Error handling stream data', { error });
+                    // 验证生成的PeerId
+                    if (!this.options.privateKey || typeof this.options.privateKey !== 'object' || !('privateKey' in this.options.privateKey)) {
+                        console.error(`[INIT_LIBP2P] ${this.nodeId}: 生成的PeerId无效或缺少privateKey属性`);
+                        throw new Error('Generated PeerId is invalid or missing privateKey property');
                     }
+
+                    console.log(`[INIT_LIBP2P] ${this.nodeId}: 私钥生成成功，详细属性:`,
+                        Object.keys(this.options.privateKey).join(', '));
+
+                    log.info('Private key generated successfully', {
+                        nodeId: this.nodeId,
+                        hasPrivateKey: !!this.options.privateKey,
+                        peerIdType: typeof this.options.privateKey,
+                        peerIdProps: this.options.privateKey ? Object.keys(this.options.privateKey) : []
+                    });
+                } catch (keyGenError) {
+                    console.error(`[INIT_LIBP2P] ${this.nodeId}: 生成Ed25519密钥对失败:`, keyGenError);
+                    log.error('Failed to generate Ed25519 PeerId', {
+                        error: keyGenError instanceof Error ? keyGenError.message : String(keyGenError)
+                    });
+                    throw keyGenError;
+                }
+            }
+
+            // 再次检查私钥是否有效
+            console.log(`[INIT_LIBP2P] ${this.nodeId}: 验证私钥有效性`);
+            if (!this.options.privateKey || typeof this.options.privateKey !== 'object') {
+                console.error(`[INIT_LIBP2P] ${this.nodeId}: 私钥无效 - 不是对象或为null`);
+                log.error('privateKey is invalid - not an object or null', {
+                    peerIdType: typeof this.options.privateKey
                 });
+                throw new Error("privateKey not set");
+            }
+
+            if (!('privateKey' in this.options.privateKey)) {
+                console.error(`[INIT_LIBP2P] ${this.nodeId}: 私钥对象缺少privateKey属性，实际属性:`,
+                    Object.keys(this.options.privateKey).join(', '));
+                log.error('privateKey object is missing privateKey property', {
+                    peerIdProps: this.options.privateKey ? Object.keys(this.options.privateKey) : []
+                });
+                throw new Error("privateKey object is missing privateKey property");
+            }
+
+            if (!this.options.privateKey.privateKey) {
+                console.error(`[INIT_LIBP2P] ${this.nodeId}: privateKey.privateKey为空`);
+                log.error('privateKey.privateKey is empty');
+                throw new Error("privateKey.privateKey is empty");
+            }
+
+            // 注意：在最新的js-libp2p中，peerId应直接传递给配置对象
+            const peerId = this.options.privateKey;
+            console.log(`[INIT_LIBP2P] ${this.nodeId}: peerId对象准备完成，检查:`, {
+                有效: !!peerId,
+                类型: typeof peerId,
+                属性: peerId ? Object.keys(peerId).join(',') : '无'
             });
 
-            this.started = true;
-            log.info('LibP2P node initialized successfully', {
+            // 记录peerId详情，帮助调试
+            log.info('Using peerId for libp2p initialization', {
                 nodeId: this.nodeId,
-                address: listenAddress
+                hasPeerId: !!peerId,
+                peerIdType: typeof peerId,
+                isPeerIdObject: typeof peerId === 'object',
+                peerIdProperties: peerId ? Object.keys(peerId) : [],
+                hasPrivateKeyProp: peerId && typeof peerId === 'object' && 'privateKey' in peerId,
+                hasPublicKeyProp: peerId && typeof peerId === 'object' && 'publicKey' in peerId,
+                hasIdProp: peerId && typeof peerId === 'object' && 'id' in peerId,
+                idType: peerId && typeof peerId === 'object' && 'id' in peerId ? typeof peerId.id : 'undefined',
+                privateKeyType: peerId && typeof peerId === 'object' && 'privateKey' in peerId ? typeof peerId.privateKey : 'undefined'
+            });
+
+            console.log(`[INIT_LIBP2P] ${this.nodeId}: 创建libp2p配置, peerId有效=${!!peerId}, peerId对象属性=${peerId ? Object.keys(peerId).join(',') : 'null'}`);
+
+            // 标准配置方式：只提供peerId对象
+            const config: any = {
+                peerId, // 只传递peerId对象，不单独传递privateKey
+                addresses: {
+                    listen: [this.listenAddress]
+                },
+                transports: [tcp()],
+                streamMuxers: [mplex()],
+                connectionEncryption: [noise()],
+                services: {
+                    identify: identify(),
+                    pubsub: gossipsub()
+                }
+            };
+
+            console.log(`[INIT_LIBP2P] ${this.nodeId}: 配置对象创建完成, config.peerId有效=${!!config.peerId}, peerId类型=${typeof config.peerId}, pubsub已配置=${!!config.services?.pubsub}, identify已配置=${!!config.services?.identify}`);
+
+            // 检查配置有效性
+            if (!config.peerId) {
+                console.error(`[INIT_LIBP2P] ${this.nodeId}: 错误: config.peerId未设置或无效`);
+                log.error('PeerId not set in config object', {
+                    configPeerIdType: typeof config.peerId
+                });
+                throw new Error('PeerId not set in config object');
+            }
+
+            log.info('libp2p config prepared', {
+                nodeId: this.nodeId,
+                configHasPeerId: !!config.peerId,
+                listenAddresses: config.addresses.listen
+            });
+
+            // 配置对等节点发现机制
+            const peerDiscovery = [];
+
+            // 如果有引导节点，添加引导节点发现
+            const bootstrapList = this.options.bootstrapList || [];
+            if (bootstrapList.length > 0) {
+                peerDiscovery.push(bootstrap({
+                    list: bootstrapList
+                }));
+                log.info('Added bootstrap peer discovery', {
+                    nodeId: this.nodeId,
+                    bootstrapNodes: bootstrapList
+                });
+            }
+
+            // 如果启用了 PubSub，添加 PubSub 发现
+            if (this.options.enablePubSub !== false) {
+                peerDiscovery.push(pubsubPeerDiscovery());
+                log.info('Added PubSub peer discovery', {
+                    nodeId: this.nodeId
+                });
+            }
+
+            // 如果有发现机制，添加到配置中
+            if (peerDiscovery.length > 0) {
+                config.peerDiscovery = peerDiscovery;
+            }
+
+            // 如果启用了 DHT
+            if (this.options.dhtEnabled) {
+                config.dht = {
+                    enabled: true,
+                    randomWalk: this.options.dhtRandomWalk
+                };
+                log.info('DHT enabled', {
+                    nodeId: this.nodeId,
+                    randomWalk: this.options.dhtRandomWalk
+                });
+            }
+
+            // 创建 libp2p 节点
+            log.info('Creating libp2p node', {
+                nodeId: this.nodeId,
+                configReady: true,
+                configDump: JSON.stringify({
+                    ...config,
+                    peerId: 'PeerId Object Present'
+                })
+            });
+
+            try {
+                console.log(`[INIT_LIBP2P] ${this.nodeId}: 开始调用createLibp2p API创建节点`);
+                this.node = await createLibp2p(config);
+
+                console.log(`[INIT_LIBP2P] ${this.nodeId}: libp2p节点创建成功: ${!!this.node}`);
+                log.info('LibP2P node created successfully', {
+                    nodeId: this.nodeId,
+                    hasNode: !!this.node,
+                    multiaddrs: this.node?.getMultiaddrs().map((m: any) => m.toString()) || []
+                });
+            } catch (createError) {
+                const errorMsg = createError instanceof Error ? createError.message : String(createError);
+                const errorStack = createError instanceof Error ? createError.stack : undefined;
+
+                console.error(`[INIT_LIBP2P] ${this.nodeId}: 创建libp2p节点失败: ${errorMsg}`);
+                log.error('Failed to create LibP2P node', {
+                    error: errorMsg,
+                    stack: errorStack,
+                    nodeId: this.nodeId,
+                    peerIdType: typeof config.peerId
+                });
+
+                if (errorMsg.includes('privateKey')) {
+                    console.error(`[INIT_LIBP2P] ${this.nodeId}: 检测到privateKey相关错误，详细检查peerId对象`);
+                    if (peerId) {
+                        console.error(`[INIT_LIBP2P] ${this.nodeId}: peerId属性: ${Object.keys(peerId).join(',')}`);
+                        if ('privateKey' in peerId) {
+                            console.error(`[INIT_LIBP2P] ${this.nodeId}: privateKey属性类型: ${typeof peerId.privateKey}, 是否为空: ${!peerId.privateKey}`);
+                        } else {
+                            console.error(`[INIT_LIBP2P] ${this.nodeId}: peerId中不存在privateKey属性!`);
+                        }
+                    } else {
+                        console.error(`[INIT_LIBP2P] ${this.nodeId}: peerId对象为null或undefined!`);
+                    }
+
+                    log.error('Private key error detected. PeerId details:', {
+                        peerIdJSON: peerId ? JSON.stringify(peerId).substring(0, 200) : 'null'
+                    });
+                }
+
+                throw createError;
+            }
+
+            // 注册消息处理器
+            await this.registerMessageHandlers();
+
+            const finalAddress = this.node?.getMultiaddrs()[0]?.toString() || this.listenAddress;
+            log.info('LibP2P node initialization completed', {
+                nodeId: this.nodeId,
+                address: finalAddress
             });
         } catch (error) {
-            log.error('Failed to initialize LibP2P node', { error });
+            log.error('Failed to initialize LibP2P node', {
+                nodeId: this.nodeId,
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
+            });
             throw error;
         }
+    }
+
+    private async registerMessageHandlers(): Promise<void> {
+        if (!this.node) return;
+
+        // 设置事件处理器
+        this.node.addEventListener('peer:discovery', (evt: any) => {
+            const remotePeerId = evt.detail.toString();
+            log.debug('Discovered peer', { peerId: remotePeerId });
+            this.handlePeerDiscovery(remotePeerId).catch(err => {
+                log.error('Error handling peer discovery', { error: err });
+            });
+        });
+
+        this.node.addEventListener('peer:connect', (evt: any) => {
+            const remotePeerId = evt.detail.toString();
+            log.debug('Connected to peer', { peerId: remotePeerId });
+            this.handlePeerConnect(remotePeerId).catch(err => {
+                log.error('Error handling peer connection', { error: err });
+            });
+        });
+
+        this.node.addEventListener('peer:disconnect', (evt: any) => {
+            const remotePeerId = evt.detail.toString();
+            log.debug('Disconnected from peer', { peerId: remotePeerId });
+            this.handlePeerDisconnect(remotePeerId);
+        });
+
+        // 处理集群消息
+        await this.node.handle('/bactor/cluster/1.0.0', ({ stream, connection }: any) => {
+            pipe(stream.source, async (source: any) => {
+                try {
+                    for await (const data of source) {
+                        const message = JSON.parse(toString(data.subarray()));
+                        const remotePeerId = connection.remotePeer.toString();
+                        this.handleMessage(message, remotePeerId);
+                    }
+                } catch (error) {
+                    log.error('Error handling stream data', { error });
+                }
+            });
+        });
+
+        this.started = true;
+        log.info('LibP2P node initialized successfully', {
+            nodeId: this.nodeId,
+            address: this.listenAddress
+        });
     }
 } 

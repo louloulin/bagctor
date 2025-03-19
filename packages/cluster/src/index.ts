@@ -56,5 +56,6 @@ export {
     ConsensusState,
     NodeState,
     RecoveryPolicy,
-    LibP2pClusterOptions
+    LibP2pClusterOptions,
+    LibP2pClusterSystemConfig
 } from './types'; 

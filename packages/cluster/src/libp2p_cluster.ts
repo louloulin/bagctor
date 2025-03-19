@@ -11,35 +11,12 @@ import {
     ClusterMetrics,
     ClusterEventType,
     ClusterEvent,
-    LibP2pClusterOptions
+    LibP2pClusterOptions,
+    LibP2pClusterSystemConfig
 } from './types';
 import { log } from '@bactor/core';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-
-/**
- * LibP2P集群配置
- */
-export interface LibP2pClusterSystemConfig {
-    // 集群配置
-    clusterConfig: ClusterConfig;
-    // 本地地址
-    localAddress: string;
-    // 种子节点
-    seedNodes: string[];
-    // DHT是否启用
-    dhtEnabled?: boolean;
-    // DHT随机游走是否启用
-    dhtRandomWalk?: boolean;
-    // 负载均衡配置
-    loadBalancingConfig?: LoadBalancingConfig;
-    // 分区配置
-    partitionConfig?: PartitionConfig;
-    // 背压配置
-    backpressureConfig?: BackpressureConfig;
-    // 节点ID，如未提供则自动生成
-    nodeId?: string;
-}
 
 /**
  * 基于LibP2P的集群系统，整合ClusterManager和LibP2pClusterTransport
@@ -58,28 +35,57 @@ export class LibP2pClusterSystem extends EventEmitter {
         super();
         this.nodeId = config.nodeId || uuidv4();
 
+        // 检查privateKey是否存在
+        if (!config.privateKey) {
+            log.warn('No privateKey provided in LibP2pClusterSystem config. Transport will generate one.', {
+                nodeId: this.nodeId
+            });
+        } else {
+            log.info('PrivateKey provided in LibP2pClusterSystem config', {
+                nodeId: this.nodeId,
+                hasPrivateKey: true,
+                peerIdType: typeof config.privateKey,
+                peerIdKeys: config.privateKey ? Object.keys(config.privateKey) : []
+            });
+        }
+
+        log.info('Creating LibP2pClusterSystem', {
+            nodeId: this.nodeId,
+            hasPrivateKey: !!config.privateKey,
+            localAddress: config.localAddress
+        });
+
         // 创建集群管理器
-        this.clusterManager = new ClusterManager(
-            config.clusterConfig,
-            config.loadBalancingConfig,
-            config.partitionConfig,
-            config.backpressureConfig
-        );
+        this.clusterManager = new ClusterManager({
+            ...config.clusterConfig,
+            nodeId: this.nodeId
+        });
 
         // 将事件从集群管理器转发到此类
         this.clusterManager.on('clusterEvent', (event: ClusterEvent) => {
             this.emit('clusterEvent', event);
         });
 
-        // 创建传输层
-        this.transport = new LibP2pClusterTransport({
-            localAddress: config.localAddress,
-            seedNodes: config.seedNodes,
-            dhtEnabled: config.dhtEnabled,
-            dhtRandomWalk: config.dhtRandomWalk,
+        // 创建传输层，确保privateKey正确传递
+        const transportConfig: LibP2pClusterOptions = {
+            nodeId: this.nodeId,
             clusterManager: this.clusterManager,
-            nodeId: this.nodeId
+            localAddress: config.localAddress,
+            bootstrapList: config.clusterConfig.bootstrapList,
+            privateKey: config.privateKey, // 传递privateKey
+            seedNodes: config.seedNodes || []
+        };
+
+        log.info('Creating LibP2pClusterTransport with config', {
+            nodeId: this.nodeId,
+            hasPrivateKey: !!transportConfig.privateKey,
+            peerIdType: transportConfig.privateKey ? typeof transportConfig.privateKey : 'undefined',
+            peerIdKeys: transportConfig.privateKey ? Object.keys(transportConfig.privateKey) : [],
+            localAddress: transportConfig.localAddress,
+            hasSeedNodes: transportConfig.seedNodes && transportConfig.seedNodes.length > 0
         });
+
+        this.transport = new LibP2pClusterTransport(transportConfig);
 
         // 设置传输层到集群管理器
         this.clusterManager.setTransport(this.transport);

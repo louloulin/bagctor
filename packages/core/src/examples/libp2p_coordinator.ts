@@ -12,8 +12,9 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import * as path from 'path';
 import * as fs from 'fs';
 
-// 配置参数
-const TOTAL_NODES = 50;           // 总节点数
+// 修改配置，仅使用2个节点进行验证
+const TOTAL_NODES = 2; // 降低为2个节点
+const WORKERS = 1;     // 仅使用1个worker
 const NODES_PER_PROCESS = 3;      // 每个进程的节点数
 const PROCESS_COUNT = Math.ceil(TOTAL_NODES / NODES_PER_PROCESS);
 const BASE_PORT = 40000;          // 基础端口号
